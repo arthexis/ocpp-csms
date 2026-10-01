@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from typing import Any
 
 from ocpp_csms.time import utc_now_iso
 
+LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -62,7 +64,6 @@ class TransactionArchive:
         async with self._lock:
             transaction_id = self._next_transaction_id
             self._next_transaction_id += 1
-            path = self._path_for(transaction_id, charge_point_id, payload)
             record = {
                 "transaction_id": transaction_id,
                 "charge_point_id": charge_point_id,
@@ -74,8 +75,16 @@ class TransactionArchive:
                 "meter_values": [],
                 "stop": None,
             }
-            self._paths[transaction_id] = path
-            self._write(path, record)
+            try:
+                path = self._path_for(transaction_id, charge_point_id, payload)
+                self._paths[transaction_id] = path
+                self._write(path, record)
+            except Exception:
+                LOGGER.exception(
+                    "Could not write transaction JSON for %s transaction %s",
+                    charge_point_id,
+                    transaction_id,
+                )
             return transaction_id
 
     async def meter_values(
