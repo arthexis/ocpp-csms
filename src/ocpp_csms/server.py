@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import websockets
 from websockets.server import WebSocketServerProtocol
 
-from ocpp_csms.routing import HandlerRegistry
 from ocpp_csms.session import ChargePointSession
 
 LOGGER = logging.getLogger(__name__)
@@ -18,7 +17,6 @@ OCPP_16_SUBPROTOCOL = "ocpp1.6"
 class CSMSServer:
     host: str
     port: int
-    registry: HandlerRegistry
 
     async def serve_forever(self) -> None:
         async with websockets.serve(
@@ -43,6 +41,9 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
-        session = ChargePointSession(charge_point_id, websocket, self.registry)
+        session = ChargePointSession(charge_point_id, websocket)
         LOGGER.info("Charge point connected: %s", charge_point_id)
-        await session.start()
+        try:
+            await session.start()
+        finally:
+            LOGGER.info("Charge point disconnected: %s", charge_point_id)

@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import logging
 
-from ocpp_csms.composition import build_server
+from ocpp_csms.server import CSMSServer
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
 async def run() -> None:
     args = parse_args()
     logging.basicConfig(level=args.log_level.upper())
-    server = build_server(host=args.host, port=args.port)
+    server = CSMSServer(host=args.host, port=args.port)
     await server.serve_forever()
 
 
