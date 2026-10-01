@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if [ "$(id -u)" -eq 0 ]; then
+    printf 'Do not run this installer as root or with sudo. Run: sh install.sh\n' >&2
+    exit 1
+fi
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
@@ -67,12 +72,35 @@ sed \
     -e "s|@DATA_DIR@|$DATA_ESC|g" \
     "$SERVICE_TEMPLATE" > "$TMP_SERVICE"
 
+if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify "$TMP_SERVICE" >/dev/null
+fi
+
 sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"
 sudo systemctl daemon-reload
 sudo systemctl enable --now "$SERVICE_NAME"
 
 if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
     printf 'Service failed to start. Recent logs:\n' >&2
+    sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager >&2 || true
+    exit 1
+fi
+
+# Verify the process actually accepts TCP connections on the default OCPP port.
+if ! "$VENV/bin/python" - <<'PY'
+import socket
+import time
+
+for _ in range(20):
+    try:
+        with socket.create_connection(("127.0.0.1", 9000), timeout=0.5):
+            raise SystemExit(0)
+    except OSError:
+        time.sleep(0.25)
+raise SystemExit(1)
+PY
+then
+    printf 'Service is active but port 9000 is not accepting connections. Recent logs:\n' >&2
     sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager >&2 || true
     exit 1
 fi
@@ -88,7 +116,7 @@ fi
 printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
 printf 'Command: %s\n' "$COMMAND"
 printf 'Data:    %s\n' "$DATA_DIR"
-printf 'Service: %s (active, enabled)\n' "$SERVICE_NAME"
+printf 'Service: %s (active, enabled, listening on port 9000)\n' "$SERVICE_NAME"
 printf '\nUseful commands:\n'
 printf '  %s status\n' "$COMMAND"
 printf '  sudo systemctl status %s\n' "$SERVICE_NAME"
