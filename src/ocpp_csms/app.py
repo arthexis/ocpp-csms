@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 
+from ocpp_csms.events import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
@@ -25,7 +26,13 @@ async def run() -> None:
     args = parse_args()
     logging.basicConfig(level=args.log_level.upper())
     transactions = TransactionArchive(args.data_dir)
-    server = CSMSServer(host=args.host, port=args.port, transactions=transactions)
+    events = EventStore(args.data_dir)
+    server = CSMSServer(
+        host=args.host,
+        port=args.port,
+        transactions=transactions,
+        events=events,
+    )
     await server.serve_forever()
 
 
