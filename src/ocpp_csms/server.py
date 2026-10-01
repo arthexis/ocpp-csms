@@ -8,6 +8,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 
 from ocpp_csms.session import ChargePointSession
+from ocpp_csms.transactions import TransactionArchive
 
 LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
@@ -17,6 +18,7 @@ OCPP_16_SUBPROTOCOL = "ocpp1.6"
 class CSMSServer:
     host: str
     port: int
+    transactions: TransactionArchive
 
     async def serve_forever(self) -> None:
         async with websockets.serve(
@@ -41,7 +43,7 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
-        session = ChargePointSession(charge_point_id, websocket)
+        session = ChargePointSession(charge_point_id, websocket, self.transactions)
         LOGGER.info("Charge point connected: %s", charge_point_id)
         try:
             await session.start()

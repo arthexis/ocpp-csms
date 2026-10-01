@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from ocpp_csms.server import CSMSServer
+from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -12,13 +13,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=9000)
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument(
+        "--data-dir",
+        default=str(default_data_dir()),
+        help="Writable data directory (default: %(default)s)",
+    )
     return parser.parse_args()
 
 
 async def run() -> None:
     args = parse_args()
     logging.basicConfig(level=args.log_level.upper())
-    server = CSMSServer(host=args.host, port=args.port)
+    transactions = TransactionArchive(args.data_dir)
+    server = CSMSServer(host=args.host, port=args.port, transactions=transactions)
     await server.serve_forever()
 
 
