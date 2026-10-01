@@ -10,7 +10,7 @@ from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(
         prog="ocpp-csms",
         description="Small OCPP 1.6J CSMS appliance.",
@@ -35,8 +35,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show only chargers that appear to be charging",
     )
 
-    subcommands.add_parser("help", help="Show available commands")
-    return parser
+    help_parser = subcommands.add_parser("help", help="Show commands and parameters")
+    help_parser.add_argument("topic", nargs="?", choices=("serve", "status"))
+    return parser, {"serve": serve, "status": status}
+
+
+def print_help(
+    parser: argparse.ArgumentParser,
+    commands: dict[str, argparse.ArgumentParser],
+    topic: str | None = None,
+) -> None:
+    if topic is not None:
+        commands[topic].print_help()
+        return
+    parser.print_help()
+    for command in commands.values():
+        print()
+        command.print_help()
 
 
 async def run_server(args: argparse.Namespace) -> None:
@@ -65,11 +80,14 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = build_parser()
+    parser, commands = build_parser()
     args = parser.parse_args()
 
-    if args.command in (None, "help"):
-        parser.print_help()
+    if args.command is None:
+        print_help(parser, commands)
+        return 0
+    if args.command == "help":
+        print_help(parser, commands, args.topic)
         return 0
     if args.command == "status":
         return run_status(args)
