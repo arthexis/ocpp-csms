@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.events import EventStore
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
@@ -19,16 +20,27 @@ class CSMSServer:
     host: str
     port: int
     transactions: TransactionArchive
+    events: EventStore
+
+    def _record_runtime(self, event: str, *, charger_id: str | None = None) -> None:
+        try:
+            self.events.record_runtime(event, charger_id=charger_id)
+        except Exception:
+            LOGGER.exception("Could not persist runtime event %s", event)
 
     async def serve_forever(self) -> None:
-        async with websockets.serve(
-            self.accept,
-            self.host,
-            self.port,
-            subprotocols=[OCPP_16_SUBPROTOCOL],
-        ):
-            LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
-            await asyncio.Future()
+        self._record_runtime("server_started")
+        try:
+            async with websockets.serve(
+                self.accept,
+                self.host,
+                self.port,
+                subprotocols=[OCPP_16_SUBPROTOCOL],
+            ):
+                LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
+                await asyncio.Future()
+        finally:
+            self._record_runtime("server_stopped")
 
     async def accept(self, websocket: WebSocketServerProtocol, path: str) -> None:
         charge_point_id = path.strip("/")
@@ -43,9 +55,16 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
-        session = ChargePointSession(charge_point_id, websocket, self.transactions)
+        session = ChargePointSession(
+            charge_point_id,
+            websocket,
+            self.transactions,
+            self.events,
+        )
         LOGGER.info("Charge point connected: %s", charge_point_id)
+        self._record_runtime("charger_connected", charger_id=charge_point_id)
         try:
             await session.start()
         finally:
             LOGGER.info("Charge point disconnected: %s", charge_point_id)
+            self._record_runtime("charger_disconnected", charger_id=charge_point_id)
