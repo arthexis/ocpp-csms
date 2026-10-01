@@ -1,6 +1,9 @@
+from types import SimpleNamespace
+
 import pytest
 
 from ocpp_csms.session import ChargePointSession
+from ocpp_csms.transactions import TransactionArchive
 
 
 @pytest.mark.asyncio
@@ -10,16 +13,45 @@ async def test_authorize_is_permissive():
 
 
 @pytest.mark.asyncio
-async def test_start_transaction_is_permissive():
-    response = await ChargePointSession.on_start_transaction(None, id_tag="card-a")
-    assert response["transactionId"] >= 1
+async def test_start_transaction_is_permissive_and_persisted(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    session = SimpleNamespace(id="charger-a", transactions=archive)
+
+    response = await ChargePointSession.on_start_transaction(
+        session,
+        id_tag="card-a",
+        timestamp="2026-10-01T15:00:00Z",
+        meter_start=10,
+    )
+
+    assert response["transactionId"] == 1
     assert response["idTagInfo"]["status"] == "Accepted"
+    files = list((tmp_path / "transactions" / "2026-10-01").glob("*.json"))
+    assert len(files) == 1
+    assert '"id_tag": "card-a"' in files[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
-async def test_stop_and_meter_values_do_not_require_prior_transaction_state():
-    stop = await ChargePointSession.on_stop_transaction(None, transaction_id=999)
-    meter = await ChargePointSession.on_meter_values(None, transaction_id=999, meter_value=[])
+async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    session = SimpleNamespace(id="charger-a", transactions=archive)
 
-    assert stop == {}
+    meter = await ChargePointSession.on_meter_values(
+        session,
+        transaction_id=999,
+        meter_value=[{"timestamp": "2026-10-01T15:05:00Z"}],
+    )
+    stop = await ChargePointSession.on_stop_transaction(
+        session,
+        transaction_id=999,
+        timestamp="2026-10-01T15:10:00Z",
+        meter_stop=20,
+    )
+
     assert meter == {}
+    assert stop == {}
+    files = list((tmp_path / "transactions").glob("*/*.json"))
+    assert len(files) == 1
+    text = files[0].read_text(encoding="utf-8")
+    assert '"transaction_id": 999' in text
+    assert '"status": "stopped"' in text
