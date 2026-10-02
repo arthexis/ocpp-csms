@@ -16,6 +16,11 @@ LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
 
 
+def charge_point_id_from_path(path: str) -> str:
+    clean_path = path.split("?", 1)[0].rstrip("/")
+    return clean_path.rsplit("/", 1)[-1] if clean_path else ""
+
+
 class RecordedWebSocket:
     def __init__(self, websocket: Any) -> None:
         self.websocket = websocket
@@ -57,7 +62,7 @@ class CSMSServer:
             self._record_runtime("server_stopped")
 
     async def accept(self, websocket: WebSocketServerProtocol, path: str) -> None:
-        charge_point_id = path.strip("/")
+        charge_point_id = charge_point_id_from_path(path)
         if not charge_point_id:
             await websocket.close(code=1008, reason="Missing charge point id")
             return
