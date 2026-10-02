@@ -26,10 +26,10 @@ def process_is_running(data_dir: str | Path) -> bool:
     try:
         pid = int(path.read_text(encoding="utf-8").strip())
         os.kill(pid, 0)
-    except (FileNotFoundError, ProcessLookupError, OSError, ValueError):
-        return False
     except PermissionError:
         return True
+    except (FileNotFoundError, ProcessLookupError, OSError, ValueError):
+        return False
 
     cmdline = Path(f"/proc/{pid}/cmdline")
     try:
