@@ -23,6 +23,28 @@ def make_session(tmp_path):
     return session, recorded
 
 
+def test_record_failure_dumps_recent_frames():
+    dumped = []
+
+    class FailingEvents:
+        def record_ocpp(self, *args, **kwargs):
+            raise OSError("database unavailable")
+
+    class Frames:
+        def dump(self, logger):
+            dumped.append(logger.name)
+
+    session = SimpleNamespace(
+        id="charger-a",
+        events=FailingEvents(),
+        frames=Frames(),
+    )
+
+    ChargePointSession._record(session, "Heartbeat", {})
+
+    assert dumped == ["ocpp_csms.session"]
+
+
 @pytest.mark.asyncio
 async def test_authorize_is_permissive_and_records_request_and_reply(tmp_path):
     session, recorded = make_session(tmp_path)
