@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -23,26 +24,25 @@ def make_session(tmp_path):
     return session, recorded
 
 
-def test_record_failure_dumps_recent_frames():
-    dumped = []
+def test_record_failure_logs_raw_frame(caplog):
+    raw = '[2,"abc","Heartbeat",{}]'
 
     class FailingEvents:
         def record_ocpp(self, *args, **kwargs):
             raise OSError("database unavailable")
 
-    class Frames:
-        def dump(self, logger):
-            dumped.append(logger.name)
-
     session = SimpleNamespace(
         id="charger-a",
         events=FailingEvents(),
-        frames=Frames(),
+        connection=SimpleNamespace(last_frame=raw),
     )
 
-    ChargePointSession._record(session, "Heartbeat", {})
+    with caplog.at_level(logging.ERROR, logger="ocpp_csms.session"):
+        ChargePointSession._record(session, "Heartbeat", {})
 
-    assert dumped == ["ocpp_csms.session"]
+    assert len(caplog.records) == 1
+    assert caplog.records[0].message == f"frame {raw}"
+    assert caplog.records[0].exc_info is not None
 
 
 @pytest.mark.asyncio
