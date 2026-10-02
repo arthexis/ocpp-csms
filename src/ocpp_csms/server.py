@@ -43,9 +43,15 @@ class CSMSServer:
     events: EventStore
     _active_connections: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
-    def _record_runtime(self, event: str, *, charger_id: str | None = None) -> None:
+    def _record_runtime(
+        self,
+        event: str,
+        *,
+        charger_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         try:
-            self.events.record_runtime(event, charger_id=charger_id)
+            self.events.record_runtime(event, charger_id=charger_id, details=details)
         except Exception:
             LOGGER.exception("Could not persist runtime event %s", event)
 
@@ -88,7 +94,15 @@ class CSMSServer:
             self.events,
         )
         LOGGER.info("Charge point connected: %s", charge_point_id)
-        self._record_runtime("charger_connected", charger_id=charge_point_id)
+        self._record_runtime(
+            "charger_connected",
+            charger_id=charge_point_id,
+            details={
+                "path": path,
+                "charge_point_id": charge_point_id,
+                "subprotocol": websocket.subprotocol,
+            },
+        )
         try:
             await session.start()
         finally:

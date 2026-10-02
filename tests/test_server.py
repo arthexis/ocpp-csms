@@ -12,13 +12,12 @@ class RuntimeEvents:
         self.rows = []
 
     def record_runtime(self, event, *, charger_id=None, details=None):
-        self.rows.append((event, charger_id))
+        self.rows.append((event, charger_id, details))
 
 
 class WebSocket:
-    subprotocol = OCPP_16_SUBPROTOCOL
-
-    def __init__(self):
+    def __init__(self, subprotocol=OCPP_16_SUBPROTOCOL):
+        self.subprotocol = subprotocol
         self.closed = asyncio.Event()
 
 
@@ -52,7 +51,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     await asyncio.sleep(0)
 
     assert started == ["charger-a", "charger-a"]
-    assert events.rows == [
+    assert [row[:2] for row in events.rows] == [
         ("charger_connected", "charger-a"),
         ("charger_connected", "charger-a"),
     ]
@@ -60,7 +59,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     first.closed.set()
     await first_task
 
-    assert events.rows == [
+    assert [row[:2] for row in events.rows] == [
         ("charger_connected", "charger-a"),
         ("charger_connected", "charger-a"),
     ]
@@ -69,5 +68,48 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     second.closed.set()
     await second_task
 
-    assert events.rows[-1] == ("charger_disconnected", "charger-a")
+    assert events.rows[-1][:2] == ("charger_disconnected", "charger-a")
     assert "charger-a" not in server._active_connections
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("subprotocol", "expected"),
+    [
+        (OCPP_16_SUBPROTOCOL, OCPP_16_SUBPROTOCOL),
+        (None, None),
+    ],
+)
+async def test_connection_records_path_identity_and_subprotocol(monkeypatch, subprotocol, expected):
+    class Session:
+        def __init__(self, charge_point_id, connection, transactions, events):
+            self.connection = connection
+
+        async def start(self):
+            await self.connection.websocket.closed.wait()
+
+    monkeypatch.setattr(server_module, "ChargePointSession", Session)
+    events = RuntimeEvents()
+    server = CSMSServer(
+        "127.0.0.1",
+        9000,
+        SimpleNamespace(),
+        events,
+    )
+    websocket = WebSocket(subprotocol=subprotocol)
+
+    task = asyncio.create_task(server.accept(websocket, "/ocpp/charger-a?source=test"))
+    await asyncio.sleep(0)
+
+    assert events.rows[0] == (
+        "charger_connected",
+        "charger-a",
+        {
+            "path": "/ocpp/charger-a?source=test",
+            "charge_point_id": "charger-a",
+            "subprotocol": expected,
+        },
+    )
+
+    websocket.closed.set()
+    await task
