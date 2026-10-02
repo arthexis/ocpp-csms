@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import websockets
@@ -40,6 +40,7 @@ class CSMSServer:
     port: int
     transactions: TransactionArchive
     events: EventStore
+    _active_connections: dict[str, object] = field(default_factory=dict, init=False, repr=False)
 
     def _record_runtime(self, event: str, *, charger_id: str | None = None) -> None:
         try:
@@ -74,6 +75,8 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
+        connection_id = object()
+        self._active_connections[charge_point_id] = connection_id
         connection = RecordedWebSocket(websocket)
         session = ChargePointSession(
             charge_point_id,
@@ -86,5 +89,9 @@ class CSMSServer:
         try:
             await session.start()
         finally:
-            LOGGER.info("Charge point disconnected: %s", charge_point_id)
-            self._record_runtime("charger_disconnected", charger_id=charge_point_id)
+            if self._active_connections.get(charge_point_id) is connection_id:
+                del self._active_connections[charge_point_id]
+                LOGGER.info("Charge point disconnected: %s", charge_point_id)
+                self._record_runtime("charger_disconnected", charger_id=charge_point_id)
+            else:
+                LOGGER.info("Superseded charge point connection closed: %s", charge_point_id)
