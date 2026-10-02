@@ -108,3 +108,57 @@ async def test_legacy_recovered_record_gets_inferred_origin_when_updated(tmp_pat
 
     updated = json.loads(path.read_text(encoding="utf-8"))
     assert updated["origin"] == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_recovered_id_does_not_advance_local_allocator(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    assert await archive.start("charger-a", START) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovered_ids_do_not_advance_allocator_after_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    for transaction_id in (225, 221, 218):
+        await archive.stop(
+            "charger-a",
+            {
+                "transaction_id": transaction_id,
+                "meter_stop": transaction_id,
+                "timestamp": "2026-10-02T12:10:00Z",
+            },
+        )
+
+    restarted = TransactionArchive(tmp_path)
+    assert await restarted.start("charger-a", START) == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_advances_from_highest_local_id_only(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    assert await archive.start("charger-a", START) == 1
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    restarted = TransactionArchive(tmp_path)
+    next_start = {
+        **START,
+        "meter_start": 200,
+        "timestamp": "2026-10-02T12:05:00Z",
+    }
+    assert await restarted.start("charger-a", next_start) == 2
