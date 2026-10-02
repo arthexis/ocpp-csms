@@ -13,33 +13,34 @@ from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(prog="ocpp-csms", description="Small OCPP 1.6J CSMS appliance.")
-    parser.add_argument("--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s)")
+    add = argparse.ArgumentParser.add_argument
+    add(parser, "--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s)")
     subcommands = parser.add_subparsers(dest="command")
 
     serve = subcommands.add_parser("serve", help="Run the OCPP server")
-    serve.add_argument("--host", default="0.0.0.0")
-    serve.add_argument("--port", type=int, default=9000)
-    serve.add_argument("--log-level", default="INFO")
+    add(serve, "--host", default="0.0.0.0")
+    add(serve, "--port", type=int, default=9000)
+    add(serve, "--log-level", default="INFO")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
-    status.add_argument("charger", nargs="?", help="Charge point ID")
-    status.add_argument("--charging", action="store_true", help="Show only charging chargers")
+    add(status, "charger", nargs="?", help="Charge point ID")
+    add(status, "--charging", action="store_true", help="Show only charging chargers")
 
     events = subcommands.add_parser("events", help="Show recorded events")
-    events.add_argument("charger", nargs="?", help="Optional charge point ID")
-    events.add_argument("--since", help="ISO-8601 lower timestamp bound")
-    events.add_argument("--until", help="ISO-8601 upper timestamp bound")
-    events.add_argument("--limit", type=int, default=200, help="Maximum events to print")
+    add(events, "charger", nargs="?", help="Optional charge point ID")
+    add(events, "--since", help="ISO-8601 lower timestamp bound")
+    add(events, "--until", help="ISO-8601 upper timestamp bound")
+    add(events, "--limit", type=int, default=200, help="Maximum events to print")
 
     explain_parser = subcommands.add_parser("explain", help="Show charger evidence for a time window")
-    explain_parser.add_argument("charger", help="Charge point ID")
-    explain_parser.add_argument("--at", help="ISO-8601 center timestamp")
-    explain_parser.add_argument("--since", help="ISO-8601 lower timestamp bound")
-    explain_parser.add_argument("--until", help="ISO-8601 upper timestamp bound")
-    explain_parser.add_argument("--minutes", type=int, default=10, help="Minutes around --at")
+    add(explain_parser, "charger", help="Charge point ID")
+    add(explain_parser, "--at", help="ISO-8601 center timestamp")
+    add(explain_parser, "--since", help="ISO-8601 lower timestamp bound")
+    add(explain_parser, "--until", help="ISO-8601 upper timestamp bound")
+    add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    help_parser.add_argument("topic", nargs="?", choices=("serve", "status", "events", "explain"))
+    add(help_parser, "topic", nargs="?", choices=("serve", "status", "events", "explain"))
     return parser, {"serve": serve, "status": status, "events": events, "explain": explain_parser}
 
 
