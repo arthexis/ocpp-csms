@@ -7,6 +7,7 @@ from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OcppChargePoint
 
 from ocpp_csms.events import EventStore
+from ocpp_csms.frames import FrameBuffer
 from ocpp_csms.time import utc_now_iso
 from ocpp_csms.transactions import TransactionArchive
 
@@ -22,10 +23,12 @@ class ChargePointSession(OcppChargePoint):
         connection: Any,
         transactions: TransactionArchive,
         events: EventStore,
+        frames: FrameBuffer,
     ) -> None:
         super().__init__(charge_point_id, connection)
         self.transactions = transactions
         self.events = events
+        self.frames = frames
 
     def _record(
         self,
@@ -44,7 +47,7 @@ class ChargePointSession(OcppChargePoint):
                 transaction_id=transaction_id,
             )
         except Exception:
-            LOGGER.exception("Could not persist %s event for %s", action, self.id)
+            self.frames.dump(LOGGER)
 
     def _reply(
         self,
