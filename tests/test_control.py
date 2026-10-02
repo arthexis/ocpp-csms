@@ -34,7 +34,7 @@ class Registry:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request", "expected_call"),
+    ("control_request", "expected_call"),
     [
         (
             {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE"},
@@ -45,10 +45,10 @@ class Registry:
         ({"command": "reboot", "charger": "charger-a", "type": "Hard"}, ("reboot", "Hard")),
     ],
 )
-async def test_dispatches_supported_commands(request, expected_call):
+async def test_dispatches_supported_commands(control_request, expected_call):
     session = Session()
 
-    response = await dispatch_control(Registry(session), request)
+    response = await dispatch_control(Registry(session), control_request)
 
     assert response == {"ok": True, "response": {"status": "Accepted"}}
     assert session.calls == [expected_call]
@@ -66,7 +66,7 @@ async def test_disconnected_charger_is_not_queued():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request", "error"),
+    ("control_request", "error"),
     [
         ({"charger": "charger-a"}, "missing_command"),
         ({"command": "start"}, "missing_charger"),
@@ -80,8 +80,8 @@ async def test_disconnected_charger_is_not_queued():
         ({"command": "unknown", "charger": "charger-a"}, "unknown_command"),
     ],
 )
-async def test_rejects_invalid_requests(request, error):
-    response = await dispatch_control(Registry(Session()), request)
+async def test_rejects_invalid_requests(control_request, error):
+    response = await dispatch_control(Registry(Session()), control_request)
 
     assert response["error"] == error
 
