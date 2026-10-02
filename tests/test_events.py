@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from ocpp_csms.events import DATABASE_FILENAME, LEGACY_DATABASE_FILENAME, EventStore
+from ocpp_csms.events import DATABASE_FILENAME, EventStore
 
 
 def database(tmp_path):
@@ -38,42 +38,6 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     assert json.loads(event[4])["id_tag"] == "card-a"
     assert runtime == ("charger_connected", "charger-a")
     assert version == 2
-
-
-def test_event_store_renames_legacy_database(tmp_path):
-    legacy = tmp_path / LEGACY_DATABASE_FILENAME
-    connection = sqlite3.connect(legacy)
-    connection.execute("PRAGMA user_version = 2")
-    connection.executescript(
-        """
-        CREATE TABLE events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            received_at TEXT NOT NULL,
-            charger_id TEXT NOT NULL,
-            action TEXT NOT NULL,
-            direction TEXT NOT NULL,
-            transaction_id INTEGER,
-            id_tag TEXT,
-            charger_timestamp TEXT,
-            payload_json TEXT NOT NULL
-        );
-        CREATE TABLE runtime_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            occurred_at TEXT NOT NULL,
-            event TEXT NOT NULL,
-            charger_id TEXT,
-            details_json TEXT
-        );
-        """
-    )
-    connection.commit()
-    connection.close()
-
-    store = EventStore(tmp_path)
-
-    assert store.path == database(tmp_path)
-    assert store.path.exists()
-    assert not legacy.exists()
 
 
 def test_event_store_does_not_wait_for_locked_database(tmp_path):
