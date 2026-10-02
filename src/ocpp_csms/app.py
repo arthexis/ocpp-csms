@@ -17,6 +17,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(parser, "--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s)")
     subcommands = parser.add_subparsers(dest="command")
 
+    init = subcommands.add_parser("init", help="Initialize appliance storage")
+
     serve = subcommands.add_parser("serve", help="Run the OCPP server")
     add(serve, "--host", default="0.0.0.0")
     add(serve, "--port", type=int, default=9000)
@@ -40,8 +42,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    add(help_parser, "topic", nargs="?", choices=("serve", "status", "events", "explain"))
-    return parser, {"serve": serve, "status": status, "events": events, "explain": explain_parser}
+    add(help_parser, "topic", nargs="?", choices=("init", "serve", "status", "events", "explain"))
+    return parser, {"init": init, "serve": serve, "status": status, "events": events, "explain": explain_parser}
 
 
 def print_help(parser: argparse.ArgumentParser, commands: dict[str, argparse.ArgumentParser], topic: str | None = None) -> None:
@@ -64,12 +66,20 @@ async def run_server(args: argparse.Namespace) -> None:
     ).serve_forever()
 
 
+def initialize_storage(data_dir: str) -> None:
+    TransactionArchive(data_dir)
+    EventStore(data_dir)
+
+
 def main() -> int:
     parser, commands = build_parser()
     args = parser.parse_args()
 
     if args.command is None or args.command == "help":
         print_help(parser, commands, getattr(args, "topic", None))
+        return 0
+    if args.command == "init":
+        initialize_storage(args.data_dir)
         return 0
     if args.command == "serve":
         asyncio.run(run_server(args))
