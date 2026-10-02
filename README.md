@@ -54,6 +54,7 @@ ocpp-csms status [CHARGER]
 ocpp-csms status --charging
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
+ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
 Start the OCPP server manually with:
@@ -87,16 +88,18 @@ Read the recorded operational timeline with:
 ocpp-csms events
 ocpp-csms events charger-01
 ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z
+ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z --until 2026-10-01T21:00:00Z
 ```
 
-Correlate the evidence around a reported incident with:
+Correlate the evidence around a reported incident with either a centered time or explicit bounds:
 
 ```bash
 ocpp-csms explain charger-01 --at 2026-10-01T20:35:00Z
 ocpp-csms explain charger-01 --at 2026-10-01T20:35:00Z --minutes 20
+ocpp-csms explain charger-01 --since 2026-10-01T20:30:00Z --until 2026-10-01T20:45:00Z
 ```
 
-`explain` reports what was actually recorded: requests, CSMS replies, charger status/fault messages, transaction messages, and connection lifecycle. Its summary is evidence-oriented and does not invent a cause that was not observed.
+`explain` reports what was actually recorded: requests, CSMS replies, charger status/fault messages, transaction messages, and connection lifecycle. Its summary is evidence-oriented and does not invent a cause that was not observed. `--at` cannot be combined with `--since`/`--until`; explicit bounds for `explain` must be supplied as a pair.
 
 All commands accept `--data-dir PATH` before the command name when another writable data location is needed. Diagnostic timestamps accept ISO-8601; timestamps without an offset are treated as UTC.
 
