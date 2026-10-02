@@ -9,6 +9,16 @@ from ocpp_csms.events import DATABASE_FILENAME
 
 
 @dataclass
+class ConnectorStatus:
+    connector_id: int
+    status: str | None
+    error_code: str | None
+    transaction_id: int | None
+    id_tag: str | None
+    started_at: str | None
+
+
+@dataclass
 class ChargerStatus:
     charger_id: str
     connected: bool
@@ -19,6 +29,7 @@ class ChargerStatus:
     transaction_id: int | None
     id_tag: str | None
     started_at: str | None
+    connectors: list[ConnectorStatus]
 
 
 def _connect(database: Path) -> sqlite3.Connection:
@@ -100,33 +111,73 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
         """,
         (charger_id,),
     ).fetchone()
-    status = connection.execute(
+    status_rows = connection.execute(
         """
-        SELECT status, error_code FROM connector_status
-        WHERE charger_id = ? ORDER BY received_at DESC LIMIT 1
+        SELECT connector_id, status, error_code, received_at
+        FROM connector_status
+        WHERE charger_id = ?
+        ORDER BY connector_id
         """,
         (charger_id,),
-    ).fetchone()
-    transaction = connection.execute(
+    ).fetchall()
+    transaction_rows = connection.execute(
         """
-        SELECT transaction_id, id_tag, started_at, start_received_at
+        SELECT transaction_id, connector_id, id_tag, started_at, start_received_at
         FROM transactions
         WHERE charger_id = ? AND state = 'open'
-        ORDER BY start_received_at DESC LIMIT 1
+        ORDER BY start_received_at DESC
         """,
         (charger_id,),
-    ).fetchone()
+    ).fetchall()
+
+    statuses = {int(row["connector_id"]): row for row in status_rows}
+    transactions: dict[int, sqlite3.Row] = {}
+    for row in transaction_rows:
+        if row["connector_id"] is not None:
+            transactions.setdefault(int(row["connector_id"]), row)
+
+    connector_ids = sorted(set(statuses) | set(transactions))
+    connectors = []
+    for connector_id in connector_ids:
+        status = statuses.get(connector_id)
+        transaction = transactions.get(connector_id)
+        connectors.append(
+            ConnectorStatus(
+                connector_id=connector_id,
+                status=status["status"] if status else None,
+                error_code=status["error_code"] if status else None,
+                transaction_id=int(transaction["transaction_id"]) if transaction else None,
+                id_tag=transaction["id_tag"] if transaction else None,
+                started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
+            )
+        )
+
+    transaction = transaction_rows[0] if transaction_rows else None
+    summary_status = None
+    summary_error = None
+    if transaction and transaction["connector_id"] is not None:
+        active_connector = statuses.get(int(transaction["connector_id"]))
+        if active_connector:
+            summary_status = active_connector["status"]
+            summary_error = active_connector["error_code"]
+        else:
+            summary_status = "Charging"
+    elif status_rows:
+        latest_status = max(status_rows, key=lambda row: row["received_at"])
+        summary_status = latest_status["status"]
+        summary_error = latest_status["error_code"]
 
     return ChargerStatus(
         charger_id=charger_id,
         connected=connected,
         connected_at=runtime["occurred_at"] if connected else None,
         last_seen=latest["received_at"] if latest else None,
-        status=status["status"] if status else None,
-        error_code=status["error_code"] if status else None,
+        status=summary_status,
+        error_code=summary_error,
         transaction_id=int(transaction["transaction_id"]) if transaction else None,
         id_tag=transaction["id_tag"] if transaction else None,
         started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
+        connectors=connectors,
     )
 
 
@@ -150,14 +201,29 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         ]
         if item.error_code and item.error_code != "NoError":
             lines.append(f"Error: {item.error_code}")
-        lines.extend(
-            [
-                f"Charging: {'yes' if item.transaction_id is not None else 'no'}",
-                f"Transaction: {item.transaction_id if item.transaction_id is not None else '-'}",
-                f"RFID: {item.id_tag or '-'}",
-                f"Started: {item.started_at or '-'}",
-            ]
-        )
+        if item.connectors:
+            lines.append("Connectors:")
+            for connector in item.connectors:
+                lines.append(f"Connector {connector.connector_id}: {connector.status or 'Unknown'}")
+                if connector.error_code and connector.error_code != "NoError":
+                    lines.append(f"  Error: {connector.error_code}")
+                lines.extend(
+                    [
+                        f"  Charging: {'yes' if connector.transaction_id is not None else 'no'}",
+                        f"  Transaction: {connector.transaction_id if connector.transaction_id is not None else '-'}",
+                        f"  RFID: {connector.id_tag or '-'}",
+                        f"  Started: {connector.started_at or '-'}",
+                    ]
+                )
+        else:
+            lines.extend(
+                [
+                    f"Charging: {'yes' if item.transaction_id is not None else 'no'}",
+                    f"Transaction: {item.transaction_id if item.transaction_id is not None else '-'}",
+                    f"RFID: {item.id_tag or '-'}",
+                    f"Started: {item.started_at or '-'}",
+                ]
+            )
         return "\n".join(lines)
 
     lines = [
