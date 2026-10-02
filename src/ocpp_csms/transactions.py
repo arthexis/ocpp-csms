@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,24 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _payload_time(payload: dict[str, Any]) -> datetime | None:
+    direct = _parse_time(payload.get("timestamp"))
+    if direct is not None:
+        return direct
+
+    meter_values = payload.get("meter_value")
+    if not isinstance(meter_values, list):
+        return None
+    timestamps = [
+        parsed
+        for entry in meter_values
+        if isinstance(entry, dict)
+        for parsed in [_parse_time(entry.get("timestamp"))]
+        if parsed is not None
+    ]
+    return min(timestamps) if timestamps else None
+
+
 def _record_origin(record: dict[str, Any]) -> str:
     """Return explicit provenance, inferring it for pre-origin archives."""
     origin = record.get("origin")
@@ -74,6 +93,7 @@ class TransactionArchive:
     def __init__(self, data_dir: str | Path | None = None) -> None:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
         self.transactions_dir = self.data_dir / "transactions"
+        self.unresolved_dir = self.data_dir / "transactions-unresolved"
         self.transactions_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
         self._paths: dict[int, Path] = {}
@@ -163,7 +183,15 @@ class TransactionArchive:
             if transaction_id is None:
                 return
             transaction_id = int(transaction_id)
-            path, record = self._load_or_recover(transaction_id, charge_point_id, payload)
+            loaded = self._load_or_recover(
+                transaction_id,
+                charge_point_id,
+                payload,
+                message_type="MeterValues",
+            )
+            if loaded is None:
+                return
+            path, record = loaded
             record.setdefault("meter_values", []).append(payload)
             record["updated_at"] = utc_now_iso()
             self._write(path, record)
@@ -171,7 +199,15 @@ class TransactionArchive:
     async def stop(self, charge_point_id: str, payload: dict[str, Any]) -> None:
         async with self._lock:
             transaction_id = int(payload["transaction_id"])
-            path, record = self._load_or_recover(transaction_id, charge_point_id, payload)
+            loaded = self._load_or_recover(
+                transaction_id,
+                charge_point_id,
+                payload,
+                message_type="StopTransaction",
+            )
+            if loaded is None:
+                return
+            path, record = loaded
             record["stop"] = payload
             record["status"] = "stopped"
             record["updated_at"] = utc_now_iso()
@@ -182,7 +218,9 @@ class TransactionArchive:
         transaction_id: int,
         charge_point_id: str,
         payload: dict[str, Any],
-    ) -> tuple[Path, dict[str, Any]]:
+        *,
+        message_type: str,
+    ) -> tuple[Path, dict[str, Any]] | None:
         path = self._paths.get(transaction_id)
         if path is not None and path.exists():
             try:
@@ -190,6 +228,16 @@ class TransactionArchive:
                 origin = _record_origin(record)
                 record.setdefault("origin", origin)
                 self._origins[transaction_id] = origin
+                reason = self._conflict_reason(record, charge_point_id, payload)
+                if reason is not None:
+                    self._preserve_unresolved(
+                        transaction_id,
+                        charge_point_id,
+                        payload,
+                        message_type=message_type,
+                        reason=reason,
+                    )
+                    return None
                 return path, record
             except (OSError, json.JSONDecodeError):
                 pass
@@ -210,6 +258,62 @@ class TransactionArchive:
         self._paths[transaction_id] = path
         self._origins[transaction_id] = _ORIGIN_RECOVERED
         return path, record
+
+    def _conflict_reason(
+        self,
+        record: dict[str, Any],
+        charge_point_id: str,
+        payload: dict[str, Any],
+    ) -> str | None:
+        existing_charge_point = record.get("charge_point_id")
+        if isinstance(existing_charge_point, str) and existing_charge_point != charge_point_id:
+            return "charge_point_mismatch"
+
+        start = record.get("start")
+        if not isinstance(start, dict):
+            return None
+
+        existing_connector = start.get("connector_id")
+        incoming_connector = payload.get("connector_id")
+        if (
+            existing_connector is not None
+            and incoming_connector is not None
+            and int(existing_connector) != int(incoming_connector)
+        ):
+            return "connector_mismatch"
+
+        start_time = _parse_time(start.get("timestamp"))
+        incoming_time = _payload_time(payload)
+        if start_time is not None and incoming_time is not None and incoming_time < start_time:
+            return "message_predates_local_start"
+
+        return None
+
+    def _preserve_unresolved(
+        self,
+        transaction_id: int,
+        charge_point_id: str,
+        payload: dict[str, Any],
+        *,
+        message_type: str,
+        reason: str,
+    ) -> Path:
+        timestamp = utc_now_iso()
+        day_dir = self.unresolved_dir / timestamp[:10]
+        day_dir.mkdir(parents=True, exist_ok=True)
+        charger = _safe_charge_point_id(charge_point_id)
+        suffix = uuid.uuid4().hex[:12]
+        path = day_dir / f"{charger}-{transaction_id}-{message_type}-{suffix}.json"
+        record = {
+            "transaction_id": transaction_id,
+            "charge_point_id": charge_point_id,
+            "message_type": message_type,
+            "reason": reason,
+            "received_at": timestamp,
+            "payload": payload,
+        }
+        self._write(path, record)
+        return path
 
     def _path_for(
         self,
