@@ -10,7 +10,7 @@ def test_systemd_service_runs_as_installing_user_and_restarts():
     assert "User=@USER@" in unit
     assert "Group=@GROUP@" in unit
     assert 'Environment="HOME=@HOME@"' in unit
-    assert 'ExecStart="@COMMAND@" serve --data-dir "@DATA_DIR@"' in unit
+    assert 'ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve' in unit
     assert "Restart=always" in unit
     assert "WantedBy=multi-user.target" in unit
 

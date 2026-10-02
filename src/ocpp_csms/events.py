@@ -20,8 +20,8 @@ class EventStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=5)
-        connection.execute("PRAGMA busy_timeout = 5000")
+        connection = sqlite3.connect(self.path, timeout=0)
+        connection.execute("PRAGMA busy_timeout = 0")
         return connection
 
     def _initialize(self) -> None:

@@ -1,6 +1,8 @@
 import json
 import sqlite3
 
+import pytest
+
 from ocpp_csms.events import EventStore
 
 
@@ -32,3 +34,15 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     assert json.loads(event[4])["id_tag"] == "card-a"
     assert runtime == ("charger_connected", "charger-a")
     assert version == 1
+
+
+def test_event_store_does_not_wait_for_locked_database(tmp_path):
+    store = EventStore(tmp_path)
+    lock = sqlite3.connect(tmp_path / "events.sqlite3")
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            store.record_runtime("charger_connected", charger_id="charger-a")
+    finally:
+        lock.rollback()
+        lock.close()
