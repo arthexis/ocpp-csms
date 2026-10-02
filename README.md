@@ -52,6 +52,8 @@ Run `ocpp-csms`, `ocpp-csms help`, or `ocpp-csms --help` to show the available c
 ocpp-csms serve [--host HOST] [--port PORT] [--log-level LEVEL]
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
+ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
+ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
 Start the OCPP server manually with:
@@ -79,7 +81,24 @@ ocpp-csms status charger-01
 ocpp-csms status --charging
 ```
 
-All commands accept `--data-dir PATH` before the command name when another writable data location is needed.
+Read the recorded operational timeline with:
+
+```bash
+ocpp-csms events
+ocpp-csms events charger-01
+ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z
+```
+
+Correlate the evidence around a reported incident with:
+
+```bash
+ocpp-csms explain charger-01 --at 2026-10-01T20:35:00Z
+ocpp-csms explain charger-01 --at 2026-10-01T20:35:00Z --minutes 20
+```
+
+`explain` reports what was actually recorded: requests, CSMS replies, charger status/fault messages, transaction messages, and connection lifecycle. Its summary is evidence-oriented and does not invent a cause that was not observed.
+
+All commands accept `--data-dir PATH` before the command name when another writable data location is needed. Diagnostic timestamps accept ISO-8601; timestamps without an offset are treated as UTC.
 
 ## Data
 
@@ -95,6 +114,8 @@ Data is stored under the login user's home directory by default:
 
 The JSON transaction archive is intended to stay directly readable and copyable even if the database or application is unavailable. SQLite is an append-only operational evidence index for OCPP messages and runtime lifecycle events. It uses Python's standard-library `sqlite3` module and no ORM.
 
+OCPP requests and handled replies are both recorded in the evidence store. Runtime events such as server start/stop and charger connect/disconnect are stored separately but presented together by the diagnostic commands. Event timestamps retain subsecond precision so closely spaced protocol and connection events can be reconstructed in order.
+
 ## Layout
 
 ```text
@@ -103,6 +124,7 @@ src/ocpp_csms/
   server.py        # WebSocket accept loop and connection lifecycle
   session.py       # direct OCPP 1.6J handlers
   events.py        # small SQLite event store
+  diagnostics.py   # event timeline and evidence explanation
   status.py        # direct status queries and formatting
   transactions.py  # human-readable JSON transaction archive
   time.py          # timestamp helper
