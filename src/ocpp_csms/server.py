@@ -8,6 +8,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 
 from ocpp_csms.events import EventStore
+from ocpp_csms.frames import FrameBuffer, RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
@@ -55,11 +56,14 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
+        frames = FrameBuffer()
+        connection = RecordedWebSocket(websocket, frames)
         session = ChargePointSession(
             charge_point_id,
-            websocket,
+            connection,
             self.transactions,
             self.events,
+            frames,
         )
         LOGGER.info("Charge point connected: %s", charge_point_id)
         self._record_runtime("charger_connected", charger_id=charge_point_id)
