@@ -14,6 +14,7 @@ class DiagnosticEvent:
     kind: str
     charger_id: str | None
     action: str
+    direction: str | None = None
     transaction_id: int | None = None
     id_tag: str | None = None
     payload: dict[str, Any] | None = None
@@ -62,8 +63,20 @@ def events_between(
     if until:
         conditions.append("occurred_at <= ?")
         params.append(_iso(_parse_time(until)))
-
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    event_conditions = []
+    event_params: list[Any] = []
+    if charger_id:
+        event_conditions.append("charger_id = ?")
+        event_params.append(charger_id)
+    if since:
+        event_conditions.append("received_at >= ?")
+        event_params.append(_iso(_parse_time(since)))
+    if until:
+        event_conditions.append("received_at <= ?")
+        event_params.append(_iso(_parse_time(until)))
+    event_where = " WHERE " + " AND ".join(event_conditions) if event_conditions else ""
 
     with _connect(database) as connection:
         runtime_rows = connection.execute(
@@ -76,23 +89,9 @@ def events_between(
             """,
             (*params, limit),
         ).fetchall()
-
-        event_conditions = []
-        event_params: list[Any] = []
-        if charger_id:
-            event_conditions.append("charger_id = ?")
-            event_params.append(charger_id)
-        if since:
-            event_conditions.append("received_at >= ?")
-            event_params.append(_iso(_parse_time(since)))
-        if until:
-            event_conditions.append("received_at <= ?")
-            event_params.append(_iso(_parse_time(until)))
-        event_where = " WHERE " + " AND ".join(event_conditions) if event_conditions else ""
-
         ocpp_rows = connection.execute(
             f"""
-            SELECT received_at AS occurred_at, charger_id, action,
+            SELECT received_at AS occurred_at, charger_id, action, direction,
                    transaction_id, id_tag, payload_json
             FROM events
             {event_where}
@@ -121,6 +120,7 @@ def events_between(
                 kind="ocpp",
                 charger_id=row["charger_id"],
                 action=row["action"],
+                direction=row["direction"],
                 transaction_id=row["transaction_id"],
                 id_tag=row["id_tag"],
                 payload=json.loads(row["payload_json"]),
@@ -148,11 +148,29 @@ def events_around(
     )
 
 
+def _response_status(payload: dict[str, Any]) -> str | None:
+    direct = payload.get("status")
+    if direct is not None:
+        return str(direct)
+    info = payload.get("idTagInfo")
+    if isinstance(info, dict) and info.get("status") is not None:
+        return str(info["status"])
+    return None
+
+
 def _summary(event: DiagnosticEvent) -> str:
     if event.kind == "runtime":
         return event.action.replace("_", " ")
 
     payload = event.payload or {}
+    prefix = "→ " if event.direction == "out" else ""
+    if event.direction == "out":
+        status = _response_status(payload)
+        suffix = f" {status}" if status else " response"
+        if event.action == "StartTransaction" and event.transaction_id is not None:
+            suffix += f" tx={event.transaction_id}"
+        return f"{prefix}{event.action}{suffix}"
+
     if event.action == "Authorize":
         return f"Authorize RFID {event.id_tag or payload.get('id_tag') or '-'}"
     if event.action == "StartTransaction":
@@ -190,8 +208,11 @@ def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10
     for event in events:
         lines.append(f"{event.occurred_at}  {_summary(event)}")
 
-    actions = [event.action for event in events]
-    status_events = [event for event in events if event.action == "StatusNotification"]
+    inbound = [event for event in events if event.kind == "ocpp" and event.direction != "out"]
+    outbound = [event for event in events if event.kind == "ocpp" and event.direction == "out"]
+    inbound_actions = [event.action for event in inbound]
+    runtime_actions = [event.action for event in events if event.kind == "runtime"]
+    status_events = [event for event in inbound if event.action == "StatusNotification"]
     fault = next(
         (
             event
@@ -204,10 +225,24 @@ def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10
 
     lines.append("")
     lines.append("Evidence summary:")
-    if "Authorize" in actions:
+    if "Authorize" in inbound_actions:
         lines.append("- Authorization request was received by the CSMS.")
-    if "StartTransaction" in actions:
+        authorize_reply = next(
+            (event for event in outbound if event.action == "Authorize"),
+            None,
+        )
+        if authorize_reply is not None:
+            status = _response_status(authorize_reply.payload or {})
+            lines.append(f"- CSMS authorization reply: {status or 'recorded response'}.")
+    if "StartTransaction" in inbound_actions:
         lines.append("- A StartTransaction was received.")
+        start_reply = next(
+            (event for event in outbound if event.action == "StartTransaction"),
+            None,
+        )
+        if start_reply is not None:
+            status = _response_status(start_reply.payload or {})
+            lines.append(f"- CSMS StartTransaction reply: {status or 'recorded response'}.")
     else:
         lines.append("- No StartTransaction was recorded in this window.")
     if fault is not None:
@@ -217,9 +252,9 @@ def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10
             + (f" / {payload.get('error_code')}" if payload.get("error_code") else "")
             + "."
         )
-    if "charger_disconnected" in actions:
+    if "charger_disconnected" in runtime_actions:
         lines.append("- Charger disconnected during this window.")
-    if "StopTransaction" in actions:
+    if "StopTransaction" in inbound_actions:
         lines.append("- A StopTransaction was received.")
 
     return "\n".join(lines)
