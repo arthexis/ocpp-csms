@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import Any
 
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OcppChargePoint
+from ocpp.v16 import call_result
 
 from ocpp_csms.events import EventStore
 from ocpp_csms.time import utc_now_iso
@@ -50,42 +52,48 @@ class ChargePointSession(OcppChargePoint):
     def _reply(
         self,
         action: str,
-        response: dict[str, Any],
+        response: Any,
         *,
         transaction_id: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         self._record(
             action,
-            response,
+            asdict(response),
             direction="out",
             transaction_id=transaction_id,
         )
         return response
 
     @on("BootNotification")
-    async def on_boot_notification(self, **payload: Any) -> dict[str, Any]:
+    async def on_boot_notification(self, **payload: Any) -> call_result.BootNotificationPayload:
         self._record("BootNotification", payload)
         return self._reply(
             "BootNotification",
-            {
-                "currentTime": utc_now_iso(),
-                "interval": 60,
-                "status": "Accepted",
-            },
+            call_result.BootNotificationPayload(
+                current_time=utc_now_iso(),
+                interval=60,
+                status="Accepted",
+            ),
         )
 
     @on("Heartbeat")
-    async def on_heartbeat(self, **payload: Any) -> dict[str, Any]:
+    async def on_heartbeat(self, **payload: Any) -> call_result.HeartbeatPayload:
         self._record("Heartbeat", payload)
-        return self._reply("Heartbeat", {"currentTime": utc_now_iso()})
+        return self._reply(
+            "Heartbeat",
+            call_result.HeartbeatPayload(current_time=utc_now_iso()),
+        )
 
     @on("Authorize")
-    async def on_authorize(self, **payload: Any) -> dict[str, Any]:
+    async def on_authorize(self, **payload: Any) -> call_result.AuthorizePayload:
         self._record("Authorize", payload)
-        return self._reply("Authorize", {"idTagInfo": {"status": "Accepted"}})
+        return self._reply(
+            "Authorize",
+            call_result.AuthorizePayload(id_tag_info={"status": "Accepted"}),
+        )
 
     @on("StatusNotification")
-    async def on_status_notification(self, **payload: Any) -> dict[str, Any]:
+    async def on_status_notification(self, **payload: Any) -> call_result.StatusNotificationPayload:
         self._record("StatusNotification", payload)
         try:
             accepted = self.events.record_connector_status(self.id, payload)
@@ -97,10 +105,10 @@ class ChargePointSession(OcppChargePoint):
                 )
         except Exception:
             LOGGER.exception("frame %s", self.connection.last_frame)
-        return self._reply("StatusNotification", {})
+        return self._reply("StatusNotification", call_result.StatusNotificationPayload())
 
     @on("StartTransaction")
-    async def on_start_transaction(self, **payload: Any) -> dict[str, Any]:
+    async def on_start_transaction(self, **payload: Any) -> call_result.StartTransactionPayload:
         transaction_id = None
         try:
             transaction_id = self.events.find_recent_start(self.id, payload)
@@ -119,15 +127,15 @@ class ChargePointSession(OcppChargePoint):
         self._record("StartTransaction", payload, transaction_id=transaction_id)
         return self._reply(
             "StartTransaction",
-            {
-                "transactionId": transaction_id,
-                "idTagInfo": {"status": "Accepted"},
-            },
+            call_result.StartTransactionPayload(
+                transaction_id=transaction_id,
+                id_tag_info={"status": "Accepted"},
+            ),
             transaction_id=transaction_id,
         )
 
     @on("StopTransaction")
-    async def on_stop_transaction(self, **payload: Any) -> dict[str, Any]:
+    async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
         self._record("StopTransaction", payload)
         try:
             self.events.record_transaction_stop(self.id, payload)
@@ -137,10 +145,10 @@ class ChargePointSession(OcppChargePoint):
             await self.transactions.stop(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        return self._reply("StopTransaction", {})
+        return self._reply("StopTransaction", call_result.StopTransactionPayload())
 
     @on("MeterValues")
-    async def on_meter_values(self, **payload: Any) -> dict[str, Any]:
+    async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
         self._record("MeterValues", payload)
         transaction_id = payload.get("transaction_id")
         if transaction_id is not None:
@@ -152,4 +160,4 @@ class ChargePointSession(OcppChargePoint):
             await self.transactions.meter_values(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        return self._reply("MeterValues", {})
+        return self._reply("MeterValues", call_result.MeterValuesPayload())
