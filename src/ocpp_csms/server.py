@@ -8,6 +8,7 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
@@ -61,15 +62,18 @@ class CSMSServer:
     async def serve_forever(self) -> None:
         write_pid(self.events.data_dir)
         self._record_runtime("server_started")
+        socket_path = control_socket_path(self.events.data_dir)
         try:
-            async with websockets.serve(
-                self.accept,
-                self.host,
-                self.port,
-                subprotocols=[OCPP_16_SUBPROTOCOL],
-            ):
-                LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
-                await asyncio.Future()
+            async with ControlServer(self, socket_path):
+                async with websockets.serve(
+                    self.accept,
+                    self.host,
+                    self.port,
+                    subprotocols=[OCPP_16_SUBPROTOCOL],
+                ):
+                    LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
+                    LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
+                    await asyncio.Future()
         finally:
             self._record_runtime("server_stopped")
             remove_pid(self.events.data_dir)
