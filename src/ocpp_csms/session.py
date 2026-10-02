@@ -87,11 +87,35 @@ class ChargePointSession(OcppChargePoint):
     @on("StatusNotification")
     async def on_status_notification(self, **payload: Any) -> dict[str, Any]:
         self._record("StatusNotification", payload)
+        try:
+            accepted = self.events.record_connector_status(self.id, payload)
+            if not accepted:
+                LOGGER.info(
+                    "ignored status %s connector %s",
+                    payload.get("status"),
+                    payload.get("connector_id"),
+                )
+        except Exception:
+            LOGGER.exception("frame %s", self.connection.last_frame)
         return self._reply("StatusNotification", {})
 
     @on("StartTransaction")
     async def on_start_transaction(self, **payload: Any) -> dict[str, Any]:
-        transaction_id = await self.transactions.start(self.id, payload)
+        transaction_id = None
+        try:
+            transaction_id = self.events.find_recent_start(self.id, payload)
+        except Exception:
+            LOGGER.exception("frame %s", self.connection.last_frame)
+
+        if transaction_id is None:
+            transaction_id = await self.transactions.start(self.id, payload)
+            try:
+                self.events.record_transaction_start(transaction_id, self.id, payload)
+            except Exception:
+                LOGGER.exception("frame %s", self.connection.last_frame)
+        else:
+            LOGGER.info("deduplicated StartTransaction %s", transaction_id)
+
         self._record("StartTransaction", payload, transaction_id=transaction_id)
         return self._reply(
             "StartTransaction",
@@ -106,6 +130,10 @@ class ChargePointSession(OcppChargePoint):
     async def on_stop_transaction(self, **payload: Any) -> dict[str, Any]:
         self._record("StopTransaction", payload)
         try:
+            self.events.record_transaction_stop(self.id, payload)
+        except Exception:
+            LOGGER.exception("frame %s", self.connection.last_frame)
+        try:
             await self.transactions.stop(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
@@ -114,6 +142,12 @@ class ChargePointSession(OcppChargePoint):
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> dict[str, Any]:
         self._record("MeterValues", payload)
+        transaction_id = payload.get("transaction_id")
+        if transaction_id is not None:
+            try:
+                self.events.record_transaction_activity(int(transaction_id))
+            except Exception:
+                LOGGER.exception("frame %s", self.connection.last_frame)
         try:
             await self.transactions.meter_values(self.id, payload)
         except Exception:
