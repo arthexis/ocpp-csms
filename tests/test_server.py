@@ -21,11 +21,13 @@ class WebSocket:
         self.closed = asyncio.Event()
 
 
-def install_waiting_session(monkeypatch, started=None):
+def install_waiting_session(monkeypatch, started=None, sessions=None):
     class Session:
         def __init__(self, charge_point_id, connection, transactions, events):
             self.charge_point_id = charge_point_id
             self.connection = connection
+            if sessions is not None:
+                sessions.append(self)
 
         async def start(self):
             if started is not None:
@@ -47,7 +49,8 @@ def make_server(events):
 @pytest.mark.asyncio
 async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     started = []
-    install_waiting_session(monkeypatch, started)
+    sessions = []
+    install_waiting_session(monkeypatch, started, sessions)
     events = RuntimeEvents()
     server = make_server(events)
     first = WebSocket()
@@ -55,10 +58,13 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
 
     first_task = asyncio.create_task(server.accept(first, "/charger-a"))
     await asyncio.sleep(0)
+    assert server.session("charger-a") is sessions[0]
+
     second_task = asyncio.create_task(server.accept(second, "/charger-a"))
     await asyncio.sleep(0)
 
     assert started == ["charger-a", "charger-a"]
+    assert server.session("charger-a") is sessions[1]
     assert [row[:2] for row in events.rows] == [
         ("charger_connected", "charger-a"),
         ("charger_connected", "charger-a"),
@@ -67,6 +73,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     first.closed.set()
     await first_task
 
+    assert server.session("charger-a") is sessions[1]
     assert [row[:2] for row in events.rows] == [
         ("charger_connected", "charger-a"),
         ("charger_connected", "charger-a"),
@@ -75,6 +82,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     second.closed.set()
     await second_task
 
+    assert server.session("charger-a") is None
     assert events.rows[-1][:2] == ("charger_disconnected", "charger-a")
 
 
