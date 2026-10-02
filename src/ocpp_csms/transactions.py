@@ -83,16 +83,18 @@ class TransactionArchive:
         self._scan_existing()
 
     def _scan_existing(self) -> None:
-        highest = 0
+        highest_local = 0
         for path in self.transactions_dir.glob("*/*.json"):
             try:
                 record = json.loads(path.read_text(encoding="utf-8"))
                 transaction_id = int(record["transaction_id"])
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
                 continue
+            origin = _record_origin(record)
             self._paths[transaction_id] = path
-            self._origins[transaction_id] = _record_origin(record)
-            highest = max(highest, transaction_id)
+            self._origins[transaction_id] = origin
+            if origin == _ORIGIN_LOCAL:
+                highest_local = max(highest_local, transaction_id)
 
             start = record.get("start")
             created_at = _parse_time(record.get("created_at"))
@@ -102,7 +104,7 @@ class TransactionArchive:
                 existing = self._recent_starts.get(key)
                 if existing is None or created_at > existing[1]:
                     self._recent_starts[key] = (transaction_id, created_at)
-        self._next_transaction_id = highest + 1
+        self._next_transaction_id = highest_local + 1
 
     async def start(self, charge_point_id: str, payload: dict[str, Any]) -> int:
         async with self._lock:
@@ -201,7 +203,6 @@ class TransactionArchive:
         }
         self._paths[transaction_id] = path
         self._origins[transaction_id] = _ORIGIN_RECOVERED
-        self._next_transaction_id = max(self._next_transaction_id, transaction_id + 1)
         return path, record
 
     def _path_for(
