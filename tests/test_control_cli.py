@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 import ocpp_csms.app as app_module
