@@ -8,7 +8,7 @@ Type=simple
 User=@USER@
 Group=@GROUP@
 Environment="HOME=@HOME@"
-ExecStart="@COMMAND@" serve --data-dir "@DATA_DIR@"
+ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
