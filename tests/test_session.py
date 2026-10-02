@@ -14,22 +14,18 @@ from ocpp_csms.transactions import TransactionArchive
 
 
 def make_session(tmp_path):
-    archive = TransactionArchive(tmp_path)
     recorded = []
-    session = SimpleNamespace(
-        id="charger-a",
-        transactions=archive,
-        events=EventStore(tmp_path),
-        connection=SimpleNamespace(last_frame="test"),
+    session = ChargePointSession(
+        "charger-a",
+        SimpleNamespace(last_frame="test"),
+        TransactionArchive(tmp_path),
+        EventStore(tmp_path),
     )
 
     def record(action, payload, *, direction="in", transaction_id=None):
         recorded.append((action, payload, direction, transaction_id))
 
     session._record = record
-    session._record_recovery_decision = lambda decision: ChargePointSession._record_recovery_decision(
-        session, decision
-    )
     return session, recorded
 
 
@@ -87,7 +83,7 @@ def test_record_failure_logs_raw_frame(caplog):
 async def test_authorize_is_permissive_and_records_request(tmp_path):
     session, recorded = make_session(tmp_path)
 
-    response = await ChargePointSession.on_authorize(session, id_tag="any-card")
+    response = await session.on_authorize(id_tag="any-card")
 
     assert isinstance(response, call_result.AuthorizePayload)
     assert response.id_tag_info["status"] == "Accepted"
@@ -98,8 +94,7 @@ async def test_authorize_is_permissive_and_records_request(tmp_path):
 async def test_start_transaction_is_permissive_and_persisted(tmp_path):
     session, recorded = make_session(tmp_path)
 
-    response = await ChargePointSession.on_start_transaction(
-        session,
+    response = await session.on_start_transaction(
         connector_id=1,
         id_tag="card-a",
         timestamp="2026-10-01T15:00:00Z",
@@ -162,13 +157,11 @@ async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
 async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
     session, recorded = make_session(tmp_path)
 
-    meter = await ChargePointSession.on_meter_values(
-        session,
+    meter = await session.on_meter_values(
         transaction_id=999,
         meter_value=[{"timestamp": "2026-10-01T15:05:00Z"}],
     )
-    stop = await ChargePointSession.on_stop_transaction(
-        session,
+    stop = await session.on_stop_transaction(
         transaction_id=999,
         timestamp="2026-10-01T15:10:00Z",
         meter_stop=20,
