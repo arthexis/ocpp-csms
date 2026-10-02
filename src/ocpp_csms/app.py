@@ -4,11 +4,15 @@ import argparse
 import asyncio
 import logging
 
+from ocpp_csms.control import send_control
 from ocpp_csms.diagnostics import events_between, explain, format_events
 from ocpp_csms.events import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.transactions import TransactionArchive, default_data_dir
+
+
+CONTROL_COMMANDS = ("start", "stop", "reboot")
 
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
@@ -23,6 +27,19 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(serve, "--host", default="0.0.0.0")
     add(serve, "--port", type=int, default=9000)
     add(serve, "--log-level", default="INFO")
+
+    start = subcommands.add_parser("start", help="Request remote transaction start")
+    add(start, "charger", help="Charge point ID")
+    add(start, "--connector", type=int, help="Connector ID")
+    add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
+
+    stop = subcommands.add_parser("stop", help="Request remote transaction stop")
+    add(stop, "charger", help="Charge point ID")
+    add(stop, "--transaction", type=int, required=True, help="OCPP transaction ID")
+
+    reboot = subcommands.add_parser("reboot", help="Request charger reset")
+    add(reboot, "charger", help="Charge point ID")
+    add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
@@ -42,8 +59,19 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    add(help_parser, "topic", nargs="?", choices=("init", "serve", "status", "events", "explain"))
-    return parser, {"init": init, "serve": serve, "status": status, "events": events, "explain": explain_parser}
+    topics = ("init", "serve", "start", "stop", "reboot", "status", "events", "explain")
+    add(help_parser, "topic", nargs="?", choices=topics)
+    commands = {
+        "init": init,
+        "serve": serve,
+        "start": start,
+        "stop": stop,
+        "reboot": reboot,
+        "status": status,
+        "events": events,
+        "explain": explain_parser,
+    }
+    return parser, commands
 
 
 def print_help(parser: argparse.ArgumentParser, commands: dict[str, argparse.ArgumentParser], topic: str | None = None) -> None:
@@ -71,6 +99,48 @@ def initialize_storage(data_dir: str) -> None:
     EventStore(data_dir)
 
 
+def control_request(args: argparse.Namespace) -> dict[str, object]:
+    request: dict[str, object] = {"command": args.command, "charger": args.charger}
+    if args.command == "start":
+        request["id_tag"] = args.id_tag
+        if args.connector is not None:
+            request["connector"] = args.connector
+    elif args.command == "stop":
+        request["transaction"] = args.transaction
+    elif args.command == "reboot":
+        request["type"] = "Hard" if args.hard else "Soft"
+    return request
+
+
+def run_control(args: argparse.Namespace) -> int:
+    if args.command == "start" and args.connector is not None and args.connector < 0:
+        raise ValueError("--connector must be zero or greater")
+    if args.command == "stop" and args.transaction < 0:
+        raise ValueError("--transaction must be zero or greater")
+
+    try:
+        response = asyncio.run(send_control(args.data_dir, control_request(args)))
+    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        print(f"error: control unavailable: {exc}")
+        return 1
+
+    error = response.get("error")
+    if error:
+        detail = response.get("detail") or response.get("charger") or response.get("command")
+        suffix = f": {detail}" if detail is not None else ""
+        print(f"error: {error}{suffix}")
+        return 1
+
+    payload = response.get("response")
+    status = payload.get("status") if isinstance(payload, dict) else None
+    if status is None:
+        print("ok")
+        return 0
+
+    print(status)
+    return 0 if status == "Accepted" else 1
+
+
 def main() -> int:
     parser, commands = build_parser()
     args = parser.parse_args()
@@ -84,6 +154,11 @@ def main() -> int:
     if args.command == "serve":
         asyncio.run(run_server(args))
         return 0
+    if args.command in CONTROL_COMMANDS:
+        try:
+            return run_control(args)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.command == "status":
         print(format_status(appliance_status(args.data_dir), charger_id=args.charger, charging_only=args.charging))
         return 0
