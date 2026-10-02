@@ -280,18 +280,26 @@ class EventStore:
                 ),
             )
             if status in {"Finishing", "Available"}:
-                parameters: list[Any] = [received_at, charger_id, connector_id]
-                start_guard = ""
-                if charger_timestamp is not None:
-                    start_guard = " AND (started_at IS NULL OR started_at <= ?)"
-                    parameters.append(str(charger_timestamp))
-                connection.execute(
-                    f"""
-                    UPDATE transactions SET state = 'ended', last_activity_at = ?
-                    WHERE charger_id = ? AND connector_id = ? AND state = 'open'{start_guard}
+                transaction = connection.execute(
+                    """
+                    SELECT transaction_id, started_at FROM transactions
+                    WHERE charger_id = ? AND connector_id = ? AND state = 'open'
+                    ORDER BY start_received_at DESC LIMIT 1
                     """,
-                    parameters,
-                )
+                    (charger_id, connector_id),
+                ).fetchone()
+                if transaction:
+                    belongs_to_session = True
+                    if charger_timestamp is not None and transaction[1] is not None:
+                        belongs_to_session = _timestamp(str(charger_timestamp)) >= _timestamp(str(transaction[1]))
+                    if belongs_to_session:
+                        connection.execute(
+                            """
+                            UPDATE transactions SET state = 'ended', last_activity_at = ?
+                            WHERE transaction_id = ? AND state = 'open'
+                            """,
+                            (received_at, int(transaction[0])),
+                        )
         return True
 
     def record_runtime(
