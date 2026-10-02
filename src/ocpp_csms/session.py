@@ -26,6 +26,7 @@ class ChargePointSession(OcppChargePoint):
         super().__init__(charge_point_id, connection)
         self.transactions = transactions
         self.events = events
+        self.connection = connection
 
     def _record(
         self,
@@ -44,7 +45,7 @@ class ChargePointSession(OcppChargePoint):
                 transaction_id=transaction_id,
             )
         except Exception:
-            LOGGER.exception("Could not persist %s event for %s", action, self.id)
+            LOGGER.exception("frame %s", self.connection.last_frame)
 
     def _reply(
         self,

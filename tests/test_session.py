@@ -1,7 +1,9 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
 
+from ocpp_csms.server import RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
@@ -21,6 +23,41 @@ def make_session(tmp_path):
     session._record = record
     session._reply = reply
     return session, recorded
+
+
+@pytest.mark.asyncio
+async def test_websocket_keeps_exact_latest_frame():
+    raw = '[2,"abc","Heartbeat",{}]'
+
+    class WebSocket:
+        async def recv(self):
+            return raw
+
+    websocket = RecordedWebSocket(WebSocket())
+
+    assert await websocket.recv() == raw
+    assert websocket.last_frame == raw
+
+
+def test_record_failure_logs_raw_frame(caplog):
+    raw = '[2,"abc","Heartbeat",{}]'
+
+    class FailingEvents:
+        def record_ocpp(self, *args, **kwargs):
+            raise OSError("database unavailable")
+
+    session = SimpleNamespace(
+        id="charger-a",
+        events=FailingEvents(),
+        connection=SimpleNamespace(last_frame=raw),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="ocpp_csms.session"):
+        ChargePointSession._record(session, "Heartbeat", {})
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].message == f"frame {raw}"
+    assert caplog.records[0].exc_info is not None
 
 
 @pytest.mark.asyncio

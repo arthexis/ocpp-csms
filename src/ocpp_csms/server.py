@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import websockets
 from websockets.server import WebSocketServerProtocol
@@ -13,6 +14,19 @@ from ocpp_csms.transactions import TransactionArchive
 
 LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
+
+
+class RecordedWebSocket:
+    def __init__(self, websocket: Any) -> None:
+        self.websocket = websocket
+        self.last_frame: Any = None
+
+    async def recv(self) -> Any:
+        self.last_frame = await self.websocket.recv()
+        return self.last_frame
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.websocket, name)
 
 
 @dataclass(frozen=True)
@@ -55,9 +69,10 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
+        connection = RecordedWebSocket(websocket)
         session = ChargePointSession(
             charge_point_id,
-            websocket,
+            connection,
             self.transactions,
             self.events,
         )
