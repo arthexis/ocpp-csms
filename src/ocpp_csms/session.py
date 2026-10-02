@@ -36,18 +36,42 @@ class ChargePointSession(OcppChargePoint):
         id_tag: str,
         connector_id: int | None = None,
     ) -> call_result.RemoteStartTransactionPayload:
-        return await self.call(
+        payload: dict[str, Any] = {"id_tag": id_tag}
+        if connector_id is not None:
+            payload["connector_id"] = connector_id
+        self._record("RemoteStartTransaction", payload, direction="out")
+        response = await self.call(
             call.RemoteStartTransactionPayload(
                 id_tag=id_tag,
                 connector_id=connector_id,
             )
         )
+        self._record("RemoteStartTransaction", dict(response.__dict__), direction="in")
+        return response
 
     async def remote_stop(self, transaction_id: int) -> call_result.RemoteStopTransactionPayload:
-        return await self.call(call.RemoteStopTransactionPayload(transaction_id=transaction_id))
+        payload = {"transaction_id": transaction_id}
+        self._record(
+            "RemoteStopTransaction",
+            payload,
+            direction="out",
+            transaction_id=transaction_id,
+        )
+        response = await self.call(call.RemoteStopTransactionPayload(transaction_id=transaction_id))
+        self._record(
+            "RemoteStopTransaction",
+            dict(response.__dict__),
+            direction="in",
+            transaction_id=transaction_id,
+        )
+        return response
 
     async def reset(self, reset_type: str = "Soft") -> call_result.ResetPayload:
-        return await self.call(call.ResetPayload(type=reset_type))
+        payload = {"type": reset_type}
+        self._record("Reset", payload, direction="out")
+        response = await self.call(call.ResetPayload(type=reset_type))
+        self._record("Reset", dict(response.__dict__), direction="in")
+        return response
 
     def _record(
         self,
