@@ -162,3 +162,50 @@ async def test_restart_advances_from_highest_local_id_only(tmp_path):
         "timestamp": "2026-10-02T12:05:00Z",
     }
     assert await restarted.start("charger-a", next_start) == 2
+
+
+@pytest.mark.asyncio
+async def test_local_allocator_skips_recovered_id_when_sequence_reaches_it(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 3,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    assert await archive.start("charger-a", START) == 1
+    assert await archive.start(
+        "charger-a",
+        {**START, "meter_start": 200, "timestamp": "2026-10-02T12:05:00Z"},
+    ) == 2
+    assert await archive.start(
+        "charger-a",
+        {**START, "meter_start": 300, "timestamp": "2026-10-02T12:10:00Z"},
+    ) == 4
+
+
+@pytest.mark.asyncio
+async def test_local_allocator_skips_recovered_id_after_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    assert await archive.start("charger-a", START) == 1
+    assert await archive.start(
+        "charger-a",
+        {**START, "meter_start": 200, "timestamp": "2026-10-02T12:05:00Z"},
+    ) == 2
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 3,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    restarted = TransactionArchive(tmp_path)
+    assert await restarted.start(
+        "charger-a",
+        {**START, "meter_start": 300, "timestamp": "2026-10-02T12:15:00Z"},
+    ) == 4
