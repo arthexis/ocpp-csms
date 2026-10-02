@@ -33,6 +33,24 @@ def _response_payload(response: Any) -> dict[str, Any]:
     return {"status": getattr(response, "status", None)}
 
 
+async def send_control(data_dir: str | Path, request: dict[str, Any]) -> dict[str, Any]:
+    path = control_socket_path(data_dir)
+    reader, writer = await asyncio.open_unix_connection(str(path))
+    try:
+        writer.write(json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n")
+        await writer.drain()
+        line = await reader.readline()
+        if not line:
+            raise ConnectionError("control socket closed without a response")
+        response = json.loads(line)
+        if not isinstance(response, dict):
+            raise ValueError("invalid control response")
+        return response
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     charger = request.get("charger")
