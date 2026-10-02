@@ -32,6 +32,7 @@ class ChargePointSession(OcppChargePoint):
         action: str,
         payload: dict[str, Any],
         *,
+        direction: str = "in",
         transaction_id: int | None = None,
     ) -> None:
         try:
@@ -39,43 +40,66 @@ class ChargePointSession(OcppChargePoint):
                 self.id,
                 action,
                 payload,
+                direction=direction,
                 transaction_id=transaction_id,
             )
         except Exception:
             LOGGER.exception("Could not persist %s event for %s", action, self.id)
 
+    def _reply(
+        self,
+        action: str,
+        response: dict[str, Any],
+        *,
+        transaction_id: int | None = None,
+    ) -> dict[str, Any]:
+        self._record(
+            action,
+            response,
+            direction="out",
+            transaction_id=transaction_id,
+        )
+        return response
+
     @on("BootNotification")
     async def on_boot_notification(self, **payload: Any) -> dict[str, Any]:
         self._record("BootNotification", payload)
-        return {
-            "currentTime": utc_now_iso(),
-            "interval": 60,
-            "status": "Accepted",
-        }
+        return self._reply(
+            "BootNotification",
+            {
+                "currentTime": utc_now_iso(),
+                "interval": 60,
+                "status": "Accepted",
+            },
+        )
 
     @on("Heartbeat")
     async def on_heartbeat(self, **payload: Any) -> dict[str, Any]:
         self._record("Heartbeat", payload)
-        return {"currentTime": utc_now_iso()}
+        return self._reply("Heartbeat", {"currentTime": utc_now_iso()})
 
     @on("Authorize")
     async def on_authorize(self, **payload: Any) -> dict[str, Any]:
         self._record("Authorize", payload)
-        return {"idTagInfo": {"status": "Accepted"}}
+        return self._reply("Authorize", {"idTagInfo": {"status": "Accepted"}})
 
     @on("StatusNotification")
     async def on_status_notification(self, **payload: Any) -> dict[str, Any]:
         self._record("StatusNotification", payload)
-        return {}
+        return self._reply("StatusNotification", {})
 
     @on("StartTransaction")
     async def on_start_transaction(self, **payload: Any) -> dict[str, Any]:
         transaction_id = await self.transactions.start(self.id, payload)
         self._record("StartTransaction", payload, transaction_id=transaction_id)
-        return {
-            "transactionId": transaction_id,
-            "idTagInfo": {"status": "Accepted"},
-        }
+        return self._reply(
+            "StartTransaction",
+            {
+                "transactionId": transaction_id,
+                "idTagInfo": {"status": "Accepted"},
+            },
+            transaction_id=transaction_id,
+        )
 
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> dict[str, Any]:
@@ -84,7 +108,7 @@ class ChargePointSession(OcppChargePoint):
             await self.transactions.stop(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        return {}
+        return self._reply("StopTransaction", {})
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> dict[str, Any]:
@@ -93,4 +117,4 @@ class ChargePointSession(OcppChargePoint):
             await self.transactions.meter_values(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        return {}
+        return self._reply("MeterValues", {})

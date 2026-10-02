@@ -4,7 +4,7 @@ from ocpp_csms.events import EventStore
 from ocpp_csms.status import appliance_status, format_status
 
 
-def test_status_reduces_runtime_and_ocpp_events(tmp_path: Path):
+def test_status_reduces_inbound_runtime_and_ocpp_events(tmp_path: Path):
     events = EventStore(tmp_path)
     events.record_runtime("server_started")
     events.record_runtime("charger_connected", charger_id="charger-a")
@@ -15,8 +15,21 @@ def test_status_reduces_runtime_and_ocpp_events(tmp_path: Path):
     )
     events.record_ocpp(
         "charger-a",
+        "StatusNotification",
+        {},
+        direction="out",
+    )
+    events.record_ocpp(
+        "charger-a",
         "StartTransaction",
         {"id_tag": "card-a", "timestamp": "2026-10-01T15:00:00Z"},
+        transaction_id=7,
+    )
+    events.record_ocpp(
+        "charger-a",
+        "StartTransaction",
+        {"transactionId": 7, "idTagInfo": {"status": "Accepted"}},
+        direction="out",
         transaction_id=7,
     )
 
