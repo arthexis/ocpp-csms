@@ -100,3 +100,51 @@ def test_current_pid_marker_is_live(tmp_path: Path):
     (tmp_path / PID_FILENAME).write_text(f"{os.getpid()}\n", encoding="utf-8")
 
     assert appliance_status(tmp_path)["server"] == "running"
+
+
+def test_detailed_status_shows_latest_negotiated_subprotocol(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime(
+        "charger_connected",
+        charger_id="charger-a",
+        details={
+            "path": "/ocpp/charger-a",
+            "charge_point_id": "charger-a",
+            "subprotocol": None,
+        },
+    )
+    events.record_runtime(
+        "charger_connected",
+        charger_id="charger-a",
+        details={
+            "path": "/ocpp/charger-a",
+            "charge_point_id": "charger-a",
+            "subprotocol": "ocpp1.6",
+        },
+    )
+
+    data = appliance_status(tmp_path)
+
+    assert data["chargers"][0].subprotocol == "ocpp1.6"
+    assert "Protocol: ocpp1.6" in format_status(data, charger_id="charger-a")
+    assert "Protocol:" not in format_status(data)
+
+
+def test_detailed_status_shows_missing_subprotocol_without_rejecting_charger(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime(
+        "charger_connected",
+        charger_id="charger-a",
+        details={
+            "path": "/ocpp/charger-a",
+            "charge_point_id": "charger-a",
+            "subprotocol": None,
+        },
+    )
+
+    data = appliance_status(tmp_path)
+    charger = data["chargers"][0]
+
+    assert charger.connected is True
+    assert charger.subprotocol is None
+    assert "Protocol: not negotiated" in format_status(data, charger_id="charger-a")
