@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ocpp_csms.events import DATABASE_FILENAME
+
 
 @dataclass
 class ChargerStatus:
@@ -27,7 +29,7 @@ def _connect(database: Path) -> sqlite3.Connection:
 
 def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
-    database = root / "events.sqlite3"
+    database = root / DATABASE_FILENAME
     transactions = root / "transactions"
     result: dict[str, Any] = {
         "data_dir": str(root),
