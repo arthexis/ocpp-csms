@@ -27,13 +27,14 @@ def events_between(
     until: str | None = None,
     limit: int = 200,
 ) -> list[sqlite3.Row]:
-    database = Path(data_dir).expanduser() / DATABASE_FILENAME
-    if not database.exists():
-        return []
     since = _time(since) if since else None
     until = _time(until) if until else None
     if since and until and since > until:
         raise ValueError("--since must be earlier than or equal to --until")
+
+    database = Path(data_dir).expanduser() / DATABASE_FILENAME
+    if not database.exists():
+        return []
 
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
