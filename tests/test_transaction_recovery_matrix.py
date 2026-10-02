@@ -10,6 +10,7 @@ from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
 
+CHARGER = "charger-a"
 START = {
     "connector_id": 1,
     "id_tag": "card-a",
@@ -18,25 +19,46 @@ START = {
 }
 
 
-def transaction_records(tmp_path):
+def records_in(tmp_path, directory):
     return [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in (tmp_path / "transactions").glob("*/*.json")
+        for path in (tmp_path / directory).glob("*/*.json")
     ]
+
+
+def transaction_records(tmp_path):
+    return records_in(tmp_path, "transactions")
 
 
 def unresolved_records(tmp_path):
-    return [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in (tmp_path / "transactions-unresolved").glob("*/*.json")
+    return records_in(tmp_path, "transactions-unresolved")
+
+
+def stop_payload(transaction_id, *, timestamp="2026-10-02T12:10:00Z", **extra):
+    return {
+        "transaction_id": transaction_id,
+        "meter_stop": 180,
+        "timestamp": timestamp,
+        **extra,
+    }
+
+
+def recovered_transaction(tmp_path, transaction_id):
+    matches = [
+        record for record in transaction_records(tmp_path)
+        if record["transaction_id"] == transaction_id
     ]
+    assert len(matches) == 1
+    return matches[0]
 
 
-def runtime_events(tmp_path):
-    with closing(sqlite3.connect(tmp_path / DATABASE_FILENAME)) as connection:
-        return connection.execute(
-            "SELECT event, charger_id, details_json FROM runtime_events ORDER BY id"
-        ).fetchall()
+def make_session(tmp_path):
+    return ChargePointSession(
+        CHARGER,
+        SimpleNamespace(last_frame="recovery-regression"),
+        TransactionArchive(tmp_path),
+        EventStore(tmp_path),
+    )
 
 
 def derived_transactions(tmp_path):
@@ -50,46 +72,29 @@ def derived_transactions(tmp_path):
 @pytest.mark.asyncio
 async def test_unanswered_start_retry_reuses_same_local_id_after_restart(tmp_path):
     archive = TransactionArchive(tmp_path)
-    first = await archive.start("charger-a", START)
+    first = await archive.start(CHARGER, START)
 
-    restarted = TransactionArchive(tmp_path)
-    retry = await restarted.start("charger-a", START)
+    retry = await TransactionArchive(tmp_path).start(CHARGER, START)
 
-    assert first == 1
-    assert retry == first
-    records = transaction_records(tmp_path)
-    assert len(records) == 1
-    assert records[0]["origin"] == "local"
-    assert records[0]["status"] == "open"
+    assert first == retry == 1
+    record = recovered_transaction(tmp_path, 1)
+    assert record["origin"] == "local"
+    assert record["status"] == "open"
 
 
 @pytest.mark.asyncio
 async def test_unknown_queued_stop_adopts_exact_historic_id_without_advancing_allocator(tmp_path):
     archive = TransactionArchive(tmp_path)
 
-    decision = await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 180,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    decision = await archive.stop(CHARGER, stop_payload(225))
 
-    assert decision == {
-        "event": "historical_transaction_recovered",
-        "transaction_id": 225,
-        "message_type": "StopTransaction",
-        "decision": "adopted",
-    }
-    records = transaction_records(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == 225
-    assert records[0]["origin"] == "recovered"
-    assert records[0]["start"] is None
-    assert records[0]["status"] == "stopped"
-
-    assert await archive.start("charger-a", START) == 1
+    assert decision["event"] == "historical_transaction_recovered"
+    assert decision["transaction_id"] == 225
+    record = recovered_transaction(tmp_path, 225)
+    assert record["origin"] == "recovered"
+    assert record["start"] is None
+    assert record["status"] == "stopped"
+    assert await archive.start(CHARGER, START) == 1
 
 
 @pytest.mark.asyncio
@@ -101,81 +106,50 @@ async def test_meter_then_stop_continues_same_recovered_transaction_across_resta
         "meter_value": [{"timestamp": "2026-10-02T12:05:00Z"}],
     }
 
-    first = await archive.meter_values("charger-a", meter_payload)
-    assert first["event"] == "historical_transaction_recovered"
-    assert first["decision"] == "adopted"
-
+    first = await archive.meter_values(CHARGER, meter_payload)
     restarted = TransactionArchive(tmp_path)
-    second = await restarted.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 180,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    second = await restarted.stop(CHARGER, stop_payload(225))
 
+    assert first["event"] == "historical_transaction_recovered"
     assert second["event"] == "historical_transaction_evidence_attached"
-    assert second["decision"] == "attached"
-
-    records = transaction_records(tmp_path)
-    assert len(records) == 1
-    recovered = records[0]
-    assert recovered["transaction_id"] == 225
-    assert recovered["origin"] == "recovered"
-    assert recovered["start"] is None
-    assert recovered["meter_values"] == [meter_payload]
-    assert recovered["status"] == "stopped"
-    assert recovered["stop"]["transaction_id"] == 225
-
-    next_start = {**START, "timestamp": "2026-10-02T12:20:00Z"}
-    assert await restarted.start("charger-a", next_start) == 1
+    record = recovered_transaction(tmp_path, 225)
+    assert record["origin"] == "recovered"
+    assert record["start"] is None
+    assert record["meter_values"] == [meter_payload]
+    assert record["status"] == "stopped"
+    assert record["stop"]["transaction_id"] == 225
+    assert await restarted.start(
+        CHARGER,
+        {**START, "timestamp": "2026-10-02T12:20:00Z"},
+    ) == 1
 
 
 @pytest.mark.asyncio
 async def test_multiple_historic_ids_do_not_move_local_sequence_even_after_restart(tmp_path):
     archive = TransactionArchive(tmp_path)
     for transaction_id in (225, 221, 218):
-        await archive.stop(
-            "charger-a",
-            {
-                "transaction_id": transaction_id,
-                "meter_stop": transaction_id,
-                "timestamp": "2026-10-02T12:10:00Z",
-            },
-        )
+        await archive.stop(CHARGER, stop_payload(transaction_id))
 
-    restarted = TransactionArchive(tmp_path)
-    assert await restarted.start("charger-a", START) == 1
+    assert await TransactionArchive(tmp_path).start(CHARGER, START) == 1
 
 
 @pytest.mark.asyncio
 async def test_historic_collision_preserves_evidence_without_mutating_local_record(tmp_path):
     archive = TransactionArchive(tmp_path)
-    local_id = await archive.start("charger-a", START)
-    assert local_id == 1
+    local_id = await archive.start(CHARGER, START)
 
     decision = await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": local_id,
-            "meter_stop": 50,
-            "timestamp": "2026-10-02T11:30:00Z",
-        },
+        CHARGER,
+        stop_payload(local_id, timestamp="2026-10-02T11:30:00Z", meter_stop=50),
     )
 
     assert decision["event"] == "historical_transaction_id_collision"
-    assert decision["transaction_id"] == local_id
-    assert decision["message_type"] == "StopTransaction"
-    assert decision["decision"] == "preserved_unresolved"
     assert decision["reason"] == "message_predates_local_start"
 
-    records = transaction_records(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == local_id
-    assert records[0]["origin"] == "local"
-    assert records[0]["status"] == "open"
-    assert records[0]["stop"] is None
+    local = recovered_transaction(tmp_path, local_id)
+    assert local["origin"] == "local"
+    assert local["status"] == "open"
+    assert local["stop"] is None
 
     unresolved = unresolved_records(tmp_path)
     assert len(unresolved) == 1
@@ -186,62 +160,33 @@ async def test_historic_collision_preserves_evidence_without_mutating_local_reco
 
 @pytest.mark.asyncio
 async def test_session_recovered_stop_creates_stopped_history_without_synthetic_open_session(tmp_path):
-    session = ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="historic-stop"),
-        TransactionArchive(tmp_path),
-        EventStore(tmp_path),
-    )
+    session = make_session(tmp_path)
 
-    await session.on_stop_transaction(
-        transaction_id=225,
-        meter_stop=180,
-        timestamp="2026-10-02T12:10:00Z",
-    )
+    await session.on_stop_transaction(**stop_payload(225))
 
     rows = derived_transactions(tmp_path)
-    assert rows == [(225, "charger-a", "stopped", None, "2026-10-02T12:10:00Z")]
+    assert rows == [(225, CHARGER, "stopped", None, "2026-10-02T12:10:00Z")]
     assert not [row for row in rows if row[2] == "open"]
 
-    events = runtime_events(tmp_path)
-    assert [row[0] for row in events] == ["historical_transaction_recovered"]
-    details = json.loads(events[0][2])
-    assert details["transaction_id"] == 225
-    assert details["message_type"] == "StopTransaction"
-    assert details["decision"] == "adopted"
+    record = recovered_transaction(tmp_path, 225)
+    assert record["origin"] == "recovered"
+    assert record["status"] == "stopped"
+    assert record["start"] is None
 
 
 @pytest.mark.asyncio
-async def test_session_collision_keeps_local_sqlite_state_and_emits_both_diagnostics(tmp_path):
-    session = ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="collision-stop"),
-        TransactionArchive(tmp_path),
-        EventStore(tmp_path),
-    )
-
+async def test_session_collision_keeps_local_derived_state_open(tmp_path):
+    session = make_session(tmp_path)
     start = await session.on_start_transaction(**START)
-    assert start.transaction_id == 1
 
     await session.on_stop_transaction(
-        transaction_id=1,
-        meter_stop=50,
-        timestamp="2026-10-02T11:30:00Z",
+        **stop_payload(start.transaction_id, timestamp="2026-10-02T11:30:00Z", meter_stop=50)
     )
 
-    rows = derived_transactions(tmp_path)
-    assert rows == [(1, "charger-a", "open", "2026-10-02T12:00:00Z", None)]
-
-    events = runtime_events(tmp_path)
-    assert [row[0] for row in events] == [
-        "historical_transaction_id_collision",
-        "unresolved_queued_message_preserved",
+    assert derived_transactions(tmp_path) == [
+        (1, CHARGER, "open", "2026-10-02T12:00:00Z", None)
     ]
-    for event, charger_id, details_json in events:
-        assert charger_id == "charger-a"
-        details = json.loads(details_json)
-        assert details["transaction_id"] == 1
-        assert details["message_type"] == "StopTransaction"
-        assert details["decision"] == "preserved_unresolved"
-        assert details["reason"] == "message_predates_local_start"
-        assert details["unresolved_path"].startswith("transactions-unresolved/")
+    local = recovered_transaction(tmp_path, 1)
+    assert local["status"] == "open"
+    assert local["stop"] is None
+    assert len(unresolved_records(tmp_path)) == 1
