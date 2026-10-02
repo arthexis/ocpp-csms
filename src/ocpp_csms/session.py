@@ -63,6 +63,22 @@ class ChargePointSession(OcppChargePoint):
             transaction_id=transaction_id,
         )
 
+    def _record_recovery_decision(self, decision: dict[str, Any] | None) -> None:
+        if decision is None:
+            return
+        event = str(decision["event"])
+        details = {key: value for key, value in decision.items() if key != "event"}
+        try:
+            self.events.record_runtime(event, charger_id=self.id, details=details)
+            if event == "historical_transaction_id_collision":
+                self.events.record_runtime(
+                    "unresolved_queued_message_preserved",
+                    charger_id=self.id,
+                    details=details,
+                )
+        except Exception:
+            LOGGER.exception("frame %s", self.connection.last_frame)
+
     async def _handle_call(self, msg: Call):
         response = await super()._handle_call(msg)
         if response is None:
@@ -139,27 +155,35 @@ class ChargePointSession(OcppChargePoint):
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
         self._record("StopTransaction", payload)
+        decision = None
         try:
-            self.events.record_transaction_stop(self.id, payload)
-        except Exception:
-            LOGGER.exception("frame %s", self.connection.last_frame)
-        try:
-            await self.transactions.stop(self.id, payload)
+            decision = await self.transactions.stop(self.id, payload)
         except Exception:
             LOGGER.exception("Could not update transaction JSON for %s", self.id)
+        self._record_recovery_decision(decision)
+        if decision is None or decision.get("event") != "historical_transaction_id_collision":
+            try:
+                self.events.record_transaction_stop(self.id, payload)
+            except Exception:
+                LOGGER.exception("frame %s", self.connection.last_frame)
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
         self._record("MeterValues", payload)
+        decision = None
+        try:
+            decision = await self.transactions.meter_values(self.id, payload)
+        except Exception:
+            LOGGER.exception("Could not update transaction JSON for %s", self.id)
+        self._record_recovery_decision(decision)
         transaction_id = payload.get("transaction_id")
-        if transaction_id is not None:
+        if (
+            transaction_id is not None
+            and (decision is None or decision.get("event") != "historical_transaction_id_collision")
+        ):
             try:
                 self.events.record_transaction_activity(int(transaction_id))
             except Exception:
                 LOGGER.exception("frame %s", self.connection.last_frame)
-        try:
-            await self.transactions.meter_values(self.id, payload)
-        except Exception:
-            LOGGER.exception("Could not update transaction JSON for %s", self.id)
         return call_result.MeterValuesPayload()
