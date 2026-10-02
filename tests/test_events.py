@@ -70,7 +70,7 @@ def test_start_retry_returns_existing_transaction(tmp_path):
     assert rows == [(227, "open")]
 
 
-def test_equal_timestamp_conflict_does_not_replace_available(tmp_path):
+def test_equal_timestamp_later_receipt_wins(tmp_path):
     store = EventStore(tmp_path)
     available = {
         "connector_id": 2,
@@ -84,12 +84,37 @@ def test_equal_timestamp_conflict_does_not_replace_available(tmp_path):
     }
 
     assert store.record_connector_status("charger-a", available) is True
-    assert store.record_connector_status("charger-a", preparing) is False
+    assert store.record_connector_status("charger-a", preparing) is True
 
     row = sqlite3.connect(database(tmp_path)).execute(
         "SELECT status, event_timestamp FROM connector_status"
     ).fetchone()
-    assert row == ("Available", "2026-10-01T19:05:36Z")
+    assert row == ("Preparing", "2026-10-01T19:05:36Z")
+
+
+def test_older_status_does_not_replace_newer_connector_state(tmp_path):
+    store = EventStore(tmp_path)
+    assert store.record_connector_status(
+        "charger-a",
+        {
+            "connector_id": 1,
+            "status": "Charging",
+            "timestamp": "2026-10-01T15:10:00Z",
+        },
+    ) is True
+    assert store.record_connector_status(
+        "charger-a",
+        {
+            "connector_id": 1,
+            "status": "Preparing",
+            "timestamp": "2026-10-01T15:09:59Z",
+        },
+    ) is False
+
+    row = sqlite3.connect(database(tmp_path)).execute(
+        "SELECT status FROM connector_status"
+    ).fetchone()
+    assert row == ("Charging",)
 
 
 def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path):
@@ -116,6 +141,79 @@ def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path
         "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227"
     ).fetchone()
     assert row == ("ended", None, None)
+
+
+def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_transaction_start(
+        7,
+        "charger-a",
+        {
+            "connector_id": 1,
+            "id_tag": "card-a",
+            "meter_start": 100,
+            "timestamp": "2026-10-01T15:10:00Z",
+        },
+    )
+
+    assert store.record_connector_status(
+        "charger-a",
+        {
+            "connector_id": 1,
+            "status": "Available",
+            "timestamp": "2026-10-01T15:05:00Z",
+        },
+    ) is True
+
+    connection = sqlite3.connect(database(tmp_path))
+    assert connection.execute(
+        "SELECT state FROM transactions WHERE transaction_id = 7"
+    ).fetchone() == ("open",)
+
+    assert store.record_connector_status(
+        "charger-a",
+        {
+            "connector_id": 1,
+            "status": "Available",
+            "timestamp": "2026-10-01T15:11:00Z",
+        },
+    ) is True
+    assert connection.execute(
+        "SELECT state FROM transactions WHERE transaction_id = 7"
+    ).fetchone() == ("ended",)
+    connection.close()
+
+
+def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    for transaction_id, timestamp in (
+        (1, "2026-10-01T15:00:00Z"),
+        (2, "2026-10-01T15:10:00Z"),
+    ):
+        store.record_transaction_start(
+            transaction_id,
+            "charger-a",
+            {
+                "connector_id": 1,
+                "id_tag": "card-a",
+                "meter_start": transaction_id * 100,
+                "timestamp": timestamp,
+            },
+        )
+
+    store.record_connector_status(
+        "charger-a",
+        {
+            "connector_id": 1,
+            "status": "Available",
+            "timestamp": "2026-10-01T15:11:00Z",
+        },
+    )
+
+    rows = sqlite3.connect(database(tmp_path)).execute(
+        "SELECT transaction_id, state FROM transactions ORDER BY transaction_id"
+    ).fetchall()
+    assert rows == [(1, "open"), (2, "ended")]
 
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
