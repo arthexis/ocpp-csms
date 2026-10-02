@@ -244,3 +244,153 @@ async def test_failed_write_after_skipping_recovered_id_does_not_consume_candida
 
     monkeypatch.setattr(archive, "_write", original_write)
     assert await archive.start("charger-a", next_start) == 3
+
+
+@pytest.mark.asyncio
+async def test_conflicting_charge_point_does_not_mutate_local_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", START)
+
+    await archive.stop(
+        "charger-b",
+        {
+            "transaction_id": transaction_id,
+            "connector_id": 1,
+            "meter_stop": 999,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
+    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert local["status"] == "open"
+    assert local["stop"] is None
+
+    unresolved_paths = list((tmp_path / "transactions-unresolved").glob("*/*.json"))
+    assert len(unresolved_paths) == 1
+    unresolved = json.loads(unresolved_paths[0].read_text(encoding="utf-8"))
+    assert unresolved["transaction_id"] == transaction_id
+    assert unresolved["charge_point_id"] == "charger-b"
+    assert unresolved["message_type"] == "StopTransaction"
+    assert unresolved["reason"] == "charge_point_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_conflicting_connector_does_not_mutate_local_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", START)
+
+    await archive.meter_values(
+        "charger-a",
+        {
+            "transaction_id": transaction_id,
+            "connector_id": 2,
+            "meter_value": [
+                {
+                    "timestamp": "2026-10-02T12:05:00Z",
+                    "sampled_value": [{"value": "120"}],
+                }
+            ],
+        },
+    )
+
+    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
+    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert local["meter_values"] == []
+
+    unresolved_path = next((tmp_path / "transactions-unresolved").glob("*/*.json"))
+    unresolved = json.loads(unresolved_path.read_text(encoding="utf-8"))
+    assert unresolved["message_type"] == "MeterValues"
+    assert unresolved["reason"] == "connector_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_message_predating_local_start_is_preserved_as_unresolved(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", START)
+
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": transaction_id,
+            "connector_id": 1,
+            "meter_stop": 90,
+            "timestamp": "2026-10-02T11:55:00Z",
+        },
+    )
+
+    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
+    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert local["status"] == "open"
+    assert local["stop"] is None
+
+    unresolved_path = next((tmp_path / "transactions-unresolved").glob("*/*.json"))
+    unresolved = json.loads(unresolved_path.read_text(encoding="utf-8"))
+    assert unresolved["reason"] == "message_predates_local_start"
+
+
+@pytest.mark.asyncio
+async def test_matching_local_transaction_continues_normally(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", START)
+    meter_values = {
+        "transaction_id": transaction_id,
+        "connector_id": 1,
+        "meter_value": [
+            {
+                "timestamp": "2026-10-02T12:05:00Z",
+                "sampled_value": [{"value": "120"}],
+            }
+        ],
+    }
+    stop = {
+        "transaction_id": transaction_id,
+        "connector_id": 1,
+        "meter_stop": 150,
+        "timestamp": "2026-10-02T12:10:00Z",
+    }
+
+    await archive.meter_values("charger-a", meter_values)
+    await archive.stop("charger-a", stop)
+
+    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
+    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert local["meter_values"] == [meter_values]
+    assert local["stop"] == stop
+    assert local["status"] == "stopped"
+    assert not list((tmp_path / "transactions-unresolved").glob("*/*.json"))
+
+
+@pytest.mark.asyncio
+async def test_recovered_transaction_accepts_later_matching_evidence(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    await archive.meter_values(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "connector_id": 1,
+            "meter_value": [
+                {
+                    "timestamp": "2026-10-02T11:55:00Z",
+                    "sampled_value": [{"value": "120"}],
+                }
+            ],
+        },
+    )
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "connector_id": 1,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
+    recovered = json.loads(transaction_path.read_text(encoding="utf-8"))
+    assert recovered["transaction_id"] == 225
+    assert recovered["origin"] == "recovered"
+    assert len(recovered["meter_values"]) == 1
+    assert recovered["status"] == "stopped"
+    assert not list((tmp_path / "transactions-unresolved").glob("*/*.json"))
