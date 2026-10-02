@@ -248,14 +248,15 @@ class EventStore:
         connector_id = int(payload["connector_id"])
         status = str(payload["status"])
         received_at = utc_now_iso()
-        event_timestamp = str(payload.get("timestamp") or received_at)
+        charger_timestamp = payload.get("timestamp")
+        event_timestamp = str(charger_timestamp or received_at)
 
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT event_timestamp FROM connector_status WHERE charger_id = ? AND connector_id = ?",
                 (charger_id, connector_id),
             ).fetchone()
-            if row and _timestamp(event_timestamp) <= _timestamp(str(row[0])):
+            if row and _timestamp(event_timestamp) < _timestamp(str(row[0])):
                 return False
 
             connection.execute(
@@ -279,12 +280,17 @@ class EventStore:
                 ),
             )
             if status in {"Finishing", "Available"}:
+                parameters: list[Any] = [received_at, charger_id, connector_id]
+                start_guard = ""
+                if charger_timestamp is not None:
+                    start_guard = " AND (started_at IS NULL OR started_at <= ?)"
+                    parameters.append(str(charger_timestamp))
                 connection.execute(
-                    """
+                    f"""
                     UPDATE transactions SET state = 'ended', last_activity_at = ?
-                    WHERE charger_id = ? AND connector_id = ? AND state = 'open'
+                    WHERE charger_id = ? AND connector_id = ? AND state = 'open'{start_guard}
                     """,
-                    (received_at, charger_id, connector_id),
+                    parameters,
                 )
         return True
 
