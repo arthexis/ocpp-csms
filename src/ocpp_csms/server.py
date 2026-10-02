@@ -9,6 +9,7 @@ import websockets
 from websockets.server import WebSocketServerProtocol
 
 from ocpp_csms.events import EventStore
+from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
@@ -49,6 +50,7 @@ class CSMSServer:
             LOGGER.exception("Could not persist runtime event %s", event)
 
     async def serve_forever(self) -> None:
+        write_pid(self.events.data_dir)
         self._record_runtime("server_started")
         try:
             async with websockets.serve(
@@ -61,6 +63,7 @@ class CSMSServer:
                 await asyncio.Future()
         finally:
             self._record_runtime("server_stopped")
+            remove_pid(self.events.data_dir)
 
     async def accept(self, websocket: WebSocketServerProtocol, path: str) -> None:
         charge_point_id = charge_point_id_from_path(path)
