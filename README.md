@@ -72,7 +72,7 @@ All commands accept `--data-dir PATH` before the command name. Diagnostic timest
       <charger>-<transaction>.json
 ```
 
-Existing `events.sqlite3` files are renamed to `ocpp-csms.sqlite3` when the appliance storage is next opened. The JSON transaction archive remains directly readable and copyable. SQLite is the append-only operational evidence index. OCPP requests and handled replies are recorded, along with server and charger connection lifecycle events.
+The JSON transaction archive remains directly readable and copyable. SQLite is the append-only operational evidence index. OCPP requests and handled replies are recorded, along with server and charger connection lifecycle events.
 
 ## Layout
 
