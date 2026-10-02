@@ -17,16 +17,21 @@ def make_session(tmp_path):
     )
 
 
-@pytest.mark.asyncio
-async def test_remote_start_sends_ocpp_request(tmp_path):
-    session = make_session(tmp_path)
+def capture_calls(session, status="Accepted"):
     sent = []
 
     async def send(payload):
         sent.append(payload)
-        return SimpleNamespace(status="Accepted")
+        return SimpleNamespace(status=status)
 
     session.call = send
+    return sent
+
+
+@pytest.mark.asyncio
+async def test_remote_start_sends_ocpp_request(tmp_path):
+    session = make_session(tmp_path)
+    sent = capture_calls(session)
 
     response = await session.remote_start(id_tag="REMOTE", connector_id=2)
 
@@ -40,13 +45,7 @@ async def test_remote_start_sends_ocpp_request(tmp_path):
 @pytest.mark.asyncio
 async def test_remote_start_allows_unspecified_connector(tmp_path):
     session = make_session(tmp_path)
-    sent = []
-
-    async def send(payload):
-        sent.append(payload)
-        return SimpleNamespace(status="Accepted")
-
-    session.call = send
+    sent = capture_calls(session)
 
     await session.remote_start(id_tag="REMOTE")
 
@@ -57,13 +56,7 @@ async def test_remote_start_allows_unspecified_connector(tmp_path):
 @pytest.mark.asyncio
 async def test_remote_stop_sends_transaction_id(tmp_path):
     session = make_session(tmp_path)
-    sent = []
-
-    async def send(payload):
-        sent.append(payload)
-        return SimpleNamespace(status="Accepted")
-
-    session.call = send
+    sent = capture_calls(session)
 
     response = await session.remote_stop(42)
 
@@ -77,13 +70,7 @@ async def test_remote_stop_sends_transaction_id(tmp_path):
 @pytest.mark.parametrize("reset_type", ["Soft", "Hard"])
 async def test_reset_sends_requested_reset_type(tmp_path, reset_type):
     session = make_session(tmp_path)
-    sent = []
-
-    async def send(payload):
-        sent.append(payload)
-        return SimpleNamespace(status="Accepted")
-
-    session.call = send
+    sent = capture_calls(session)
 
     response = await session.reset(reset_type)
 
