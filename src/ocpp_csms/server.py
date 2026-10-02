@@ -25,9 +25,6 @@ class RecordedWebSocket:
         self.last_frame = await self.websocket.recv()
         return self.last_frame
 
-    async def send(self, frame: Any) -> None:
-        await self.websocket.send(frame)
-
     def __getattr__(self, name: str) -> Any:
         return getattr(self.websocket, name)
 
