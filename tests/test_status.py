@@ -1,11 +1,14 @@
+import os
 from pathlib import Path
 
 from ocpp_csms.events import EventStore
+from ocpp_csms.runtime import PID_FILENAME, write_pid
 from ocpp_csms.status import appliance_status, format_status
 
 
 def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
     events = EventStore(tmp_path)
+    write_pid(tmp_path)
     events.record_runtime("server_started")
     events.record_runtime("charger_connected", charger_id="charger-a")
     events.record_connector_status(
@@ -66,3 +69,34 @@ def test_charging_filter_requires_open_transaction(tmp_path: Path):
 
     assert "charger-a" in text
     assert "charger-b" not in text
+
+
+def test_historical_start_event_does_not_imply_running(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+
+    data = appliance_status(tmp_path)
+
+    assert data["server"] == "stopped"
+    assert data["started_at"] is None
+
+
+def test_live_pid_reports_running_without_database(tmp_path: Path):
+    write_pid(tmp_path)
+
+    data = appliance_status(tmp_path)
+
+    assert data["server"] == "running"
+    assert data["database"] == "missing"
+
+
+def test_dead_pid_reports_stopped(tmp_path: Path):
+    (tmp_path / PID_FILENAME).write_text("999999999\n", encoding="utf-8")
+
+    assert appliance_status(tmp_path)["server"] == "stopped"
+
+
+def test_current_pid_marker_is_live(tmp_path: Path):
+    (tmp_path / PID_FILENAME).write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    assert appliance_status(tmp_path)["server"] == "running"
