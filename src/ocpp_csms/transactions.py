@@ -106,6 +106,12 @@ class TransactionArchive:
                     self._recent_starts[key] = (transaction_id, created_at)
         self._next_transaction_id = highest_local + 1
 
+    def _next_available_local_id(self) -> int:
+        transaction_id = self._next_transaction_id
+        while transaction_id in self._paths:
+            transaction_id += 1
+        return transaction_id
+
     async def start(self, charge_point_id: str, payload: dict[str, Any]) -> int:
         async with self._lock:
             now = datetime.now(timezone.utc)
@@ -116,7 +122,7 @@ class TransactionArchive:
                 if timedelta(0) <= age <= _START_RETRY_WINDOW:
                     return recent[0]
 
-            transaction_id = self._next_transaction_id
+            transaction_id = self._next_available_local_id()
             timestamp = utc_now_iso()
             record = {
                 "transaction_id": transaction_id,
@@ -144,7 +150,7 @@ class TransactionArchive:
             self._paths[transaction_id] = path
             self._origins[transaction_id] = _ORIGIN_LOCAL
             self._recent_starts[key] = (transaction_id, _parse_time(timestamp) or now)
-            self._next_transaction_id += 1
+            self._next_transaction_id = transaction_id + 1
             return transaction_id
 
     async def meter_values(
