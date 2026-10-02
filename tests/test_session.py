@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ocpp_csms.server import RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 
@@ -22,6 +23,20 @@ def make_session(tmp_path):
     session._record = record
     session._reply = reply
     return session, recorded
+
+
+@pytest.mark.asyncio
+async def test_websocket_keeps_exact_latest_frame():
+    raw = '[2,"abc","Heartbeat",{}]'
+
+    class WebSocket:
+        async def recv(self):
+            return raw
+
+    websocket = RecordedWebSocket(WebSocket())
+
+    assert await websocket.recv() == raw
+    assert websocket.last_frame == raw
 
 
 def test_record_failure_logs_raw_frame(caplog):
