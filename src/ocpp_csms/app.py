@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import logging
 
-from ocpp_csms.diagnostics import events_between, explain, format_events
+from ocpp_csms.diagnostics import events_between, explain, explain_between, format_events
 from ocpp_csms.events import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.status import appliance_status, format_status
@@ -44,10 +44,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 
     explain_parser = subcommands.add_parser(
         "explain",
-        help="Show evidence around a charger and time",
+        help="Show evidence around a charger and time or between two times",
     )
     explain_parser.add_argument("charger", help="Charge point ID")
-    explain_parser.add_argument("--at", required=True, help="ISO-8601 center timestamp")
+    explain_parser.add_argument("--at", help="ISO-8601 center timestamp")
+    explain_parser.add_argument("--since", help="ISO-8601 lower timestamp bound")
+    explain_parser.add_argument("--until", help="ISO-8601 upper timestamp bound")
     explain_parser.add_argument(
         "--minutes",
         type=int,
@@ -123,10 +125,21 @@ def run_events(args: argparse.Namespace) -> int:
 
 
 def run_explain(args: argparse.Namespace) -> int:
-    if args.minutes < 1:
-        raise SystemExit("--minutes must be at least 1")
-    print(explain(args.data_dir, args.charger, args.at, minutes=args.minutes))
-    return 0
+    if args.at:
+        if args.since or args.until:
+            raise SystemExit("use either --at or --since/--until, not both")
+        if args.minutes < 1:
+            raise SystemExit("--minutes must be at least 1")
+        print(explain(args.data_dir, args.charger, args.at, minutes=args.minutes))
+        return 0
+
+    if bool(args.since) != bool(args.until):
+        raise SystemExit("--since and --until must be supplied together for explain")
+    if args.since and args.until:
+        print(explain_between(args.data_dir, args.charger, args.since, args.until))
+        return 0
+
+    raise SystemExit("explain requires --at TIME or --since TIME --until TIME")
 
 
 def main() -> int:
