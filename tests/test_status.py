@@ -4,33 +4,28 @@ from ocpp_csms.events import EventStore
 from ocpp_csms.status import appliance_status, format_status
 
 
-def test_status_reduces_inbound_runtime_and_ocpp_events(tmp_path: Path):
+def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
     events = EventStore(tmp_path)
     events.record_runtime("server_started")
     events.record_runtime("charger_connected", charger_id="charger-a")
-    events.record_ocpp(
+    events.record_connector_status(
         "charger-a",
-        "StatusNotification",
-        {"status": "Charging", "error_code": "NoError"},
+        {
+            "connector_id": 1,
+            "status": "Charging",
+            "error_code": "NoError",
+            "timestamp": "2026-10-01T15:00:01Z",
+        },
     )
-    events.record_ocpp(
+    events.record_transaction_start(
+        7,
         "charger-a",
-        "StatusNotification",
-        {},
-        direction="out",
-    )
-    events.record_ocpp(
-        "charger-a",
-        "StartTransaction",
-        {"id_tag": "card-a", "timestamp": "2026-10-01T15:00:00Z"},
-        transaction_id=7,
-    )
-    events.record_ocpp(
-        "charger-a",
-        "StartTransaction",
-        {"transactionId": 7, "idTagInfo": {"status": "Accepted"}},
-        direction="out",
-        transaction_id=7,
+        {
+            "connector_id": 1,
+            "id_tag": "card-a",
+            "meter_start": 1000,
+            "timestamp": "2026-10-01T15:00:00Z",
+        },
     )
 
     data = appliance_status(tmp_path)
@@ -44,15 +39,30 @@ def test_status_reduces_inbound_runtime_and_ocpp_events(tmp_path: Path):
     assert "RFID: card-a" in charger
 
 
-def test_charging_filter_hides_idle_chargers(tmp_path: Path):
+def test_charging_filter_requires_open_transaction(tmp_path: Path):
     events = EventStore(tmp_path)
     events.record_runtime("charger_connected", charger_id="charger-a")
     events.record_runtime("charger_connected", charger_id="charger-b")
-    events.record_ocpp("charger-a", "StatusNotification", {"status": "Available"})
-    events.record_ocpp("charger-b", "StatusNotification", {"status": "Charging"})
+    events.record_connector_status(
+        "charger-a",
+        {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
+    )
+    events.record_connector_status(
+        "charger-b",
+        {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
+    )
+    events.record_transaction_start(
+        7,
+        "charger-a",
+        {
+            "connector_id": 1,
+            "id_tag": "card-a",
+            "meter_start": 1000,
+            "timestamp": "2026-10-01T15:00:01Z",
+        },
+    )
 
-    data = appliance_status(tmp_path)
-    text = format_status(data, charging_only=True)
+    text = format_status(appliance_status(tmp_path), charging_only=True)
 
-    assert "charger-b" in text
-    assert "charger-a" not in text
+    assert "charger-a" in text
+    assert "charger-b" not in text
