@@ -248,14 +248,15 @@ class EventStore:
         connector_id = int(payload["connector_id"])
         status = str(payload["status"])
         received_at = utc_now_iso()
-        event_timestamp = str(payload.get("timestamp") or received_at)
+        charger_timestamp = payload.get("timestamp")
+        event_timestamp = str(charger_timestamp or received_at)
 
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT event_timestamp FROM connector_status WHERE charger_id = ? AND connector_id = ?",
                 (charger_id, connector_id),
             ).fetchone()
-            if row and _timestamp(event_timestamp) <= _timestamp(str(row[0])):
+            if row and _timestamp(event_timestamp) < _timestamp(str(row[0])):
                 return False
 
             connection.execute(
@@ -279,13 +280,26 @@ class EventStore:
                 ),
             )
             if status in {"Finishing", "Available"}:
-                connection.execute(
+                transaction = connection.execute(
                     """
-                    UPDATE transactions SET state = 'ended', last_activity_at = ?
+                    SELECT transaction_id, started_at FROM transactions
                     WHERE charger_id = ? AND connector_id = ? AND state = 'open'
+                    ORDER BY start_received_at DESC LIMIT 1
                     """,
-                    (received_at, charger_id, connector_id),
-                )
+                    (charger_id, connector_id),
+                ).fetchone()
+                if transaction:
+                    belongs_to_session = True
+                    if charger_timestamp is not None and transaction[1] is not None:
+                        belongs_to_session = _timestamp(str(charger_timestamp)) >= _timestamp(str(transaction[1]))
+                    if belongs_to_session:
+                        connection.execute(
+                            """
+                            UPDATE transactions SET state = 'ended', last_activity_at = ?
+                            WHERE transaction_id = ? AND state = 'open'
+                            """,
+                            (received_at, int(transaction[0])),
+                        )
         return True
 
     def record_runtime(
