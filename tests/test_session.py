@@ -1,6 +1,7 @@
 import json
 import logging
 import sqlite3
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -37,7 +38,7 @@ def transaction_records(tmp_path):
 
 
 def event_directions(tmp_path, action):
-    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
+    with closing(sqlite3.connect(tmp_path / DATABASE_FILENAME)) as connection:
         return connection.execute(
             "SELECT direction FROM events WHERE action = ? ORDER BY id",
             (action,),
