@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.events import DATABASE_FILENAME
+from ocpp_csms.runtime import process_is_running
 
 
 @dataclass
@@ -42,11 +43,12 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
+    running = process_is_running(root)
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
         "transactions": "missing",
-        "server": "unknown",
+        "server": "running" if running else "stopped",
         "started_at": None,
         "chargers": [],
     }
@@ -58,16 +60,15 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
                     result["database"] = "upgrade-needed"
                 else:
                     result["database"] = "ok"
-                    row = connection.execute(
-                        """
-                        SELECT occurred_at, event FROM runtime_events
-                        WHERE event IN ('server_started', 'server_stopped')
-                        ORDER BY id DESC LIMIT 1
-                        """
-                    ).fetchone()
-                    if row:
-                        result["server"] = "running" if row["event"] == "server_started" else "stopped"
-                        if row["event"] == "server_started":
+                    if running:
+                        row = connection.execute(
+                            """
+                            SELECT occurred_at FROM runtime_events
+                            WHERE event = 'server_started'
+                            ORDER BY id DESC LIMIT 1
+                            """
+                        ).fetchone()
+                        if row:
                             result["started_at"] = row["occurred_at"]
         except sqlite3.Error:
             result["database"] = "error"
