@@ -26,6 +26,13 @@ def _connect(database: Path) -> sqlite3.Connection:
     return connection
 
 
+def _has_table(connection: sqlite3.Connection, name: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone() is not None
+
+
 def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
     database = root / "events.sqlite3"
@@ -93,7 +100,7 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
 
     latest = connection.execute(
         """
-        SELECT received_at, action, transaction_id, id_tag, payload_json
+        SELECT received_at
         FROM events
         WHERE charger_id = ? AND direction = 'in'
         ORDER BY id DESC LIMIT 1
@@ -102,47 +109,78 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
     ).fetchone()
     last_seen = latest["received_at"] if latest else None
 
-    status_row = connection.execute(
-        """
-        SELECT payload_json FROM events
-        WHERE charger_id = ? AND action = 'StatusNotification' AND direction = 'in'
-        ORDER BY id DESC LIMIT 1
-        """,
-        (charger_id,),
-    ).fetchone()
     status = None
     error_code = None
-    if status_row:
-        payload = json.loads(status_row["payload_json"])
-        status = payload.get("status")
-        error_code = payload.get("error_code")
+    if _has_table(connection, "connector_status"):
+        status_row = connection.execute(
+            """
+            SELECT status, error_code
+            FROM connector_status
+            WHERE charger_id = ?
+            ORDER BY received_at DESC
+            LIMIT 1
+            """,
+            (charger_id,),
+        ).fetchone()
+        if status_row:
+            status = status_row["status"]
+            error_code = status_row["error_code"]
+    else:
+        status_row = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE charger_id = ? AND action = 'StatusNotification' AND direction = 'in'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (charger_id,),
+        ).fetchone()
+        if status_row:
+            payload = json.loads(status_row["payload_json"])
+            status = payload.get("status")
+            error_code = payload.get("error_code")
 
-    start = connection.execute(
-        """
-        SELECT id, received_at, transaction_id, id_tag
-        FROM events
-        WHERE charger_id = ? AND action = 'StartTransaction' AND direction = 'in'
-        ORDER BY id DESC LIMIT 1
-        """,
-        (charger_id,),
-    ).fetchone()
     transaction_id = None
     id_tag = None
     started_at = None
-    if start and start["transaction_id"] is not None:
-        stop = connection.execute(
+    if _has_table(connection, "transactions"):
+        transaction = connection.execute(
             """
-            SELECT id FROM events
-            WHERE charger_id = ? AND action = 'StopTransaction'
-              AND direction = 'in' AND transaction_id = ? AND id > ?
+            SELECT transaction_id, id_tag, started_at, start_received_at
+            FROM transactions
+            WHERE charger_id = ? AND state = 'open'
+            ORDER BY start_received_at DESC
+            LIMIT 1
+            """,
+            (charger_id,),
+        ).fetchone()
+        if transaction:
+            transaction_id = int(transaction["transaction_id"])
+            id_tag = transaction["id_tag"]
+            started_at = transaction["started_at"] or transaction["start_received_at"]
+    else:
+        start = connection.execute(
+            """
+            SELECT id, received_at, transaction_id, id_tag
+            FROM events
+            WHERE charger_id = ? AND action = 'StartTransaction' AND direction = 'in'
             ORDER BY id DESC LIMIT 1
             """,
-            (charger_id, start["transaction_id"], start["id"]),
+            (charger_id,),
         ).fetchone()
-        if stop is None:
-            transaction_id = int(start["transaction_id"])
-            id_tag = start["id_tag"]
-            started_at = start["received_at"]
+        if start and start["transaction_id"] is not None:
+            stop = connection.execute(
+                """
+                SELECT id FROM events
+                WHERE charger_id = ? AND action = 'StopTransaction'
+                  AND direction = 'in' AND transaction_id = ? AND id > ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (charger_id, start["transaction_id"], start["id"]),
+            ).fetchone()
+            if stop is None:
+                transaction_id = int(start["transaction_id"])
+                id_tag = start["id_tag"]
+                started_at = start["received_at"]
 
     return ChargerStatus(
         charger_id=charger_id,
@@ -162,7 +200,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     if charger_id is not None:
         chargers = [item for item in chargers if item.charger_id == charger_id]
     if charging_only:
-        chargers = [item for item in chargers if item.transaction_id is not None or item.status == "Charging"]
+        chargers = [item for item in chargers if item.transaction_id is not None]
 
     if charger_id is not None:
         if not chargers:
@@ -179,7 +217,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             lines.append(f"Error: {item.error_code}")
         lines.extend(
             [
-                f"Charging: {'yes' if item.transaction_id is not None or item.status == 'Charging' else 'no'}",
+                f"Charging: {'yes' if item.transaction_id is not None else 'no'}",
                 f"Transaction: {item.transaction_id if item.transaction_id is not None else '-'}",
                 f"RFID: {item.id_tag or '-'}",
                 f"Started: {item.started_at or '-'}",
@@ -202,7 +240,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     lines.append("Chargers:")
     lines.append("ID                 Connected  Status       Charging  Last seen")
     for item in chargers:
-        charging = "yes" if item.transaction_id is not None or item.status == "Charging" else "no"
+        charging = "yes" if item.transaction_id is not None else "no"
         lines.append(
             f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.status or 'Unknown'):<12} {charging:<9} {item.last_seen or '-'}"
         )
