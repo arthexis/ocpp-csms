@@ -23,5 +23,6 @@ def test_installer_enables_and_validates_service():
     assert 'sudo systemctl enable --now "$SERVICE_NAME"' in installer
     assert 'sudo systemctl is-active --quiet "$SERVICE_NAME"' in installer
     assert '"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null' in installer
-    assert 'socket.create_connection(("127.0.0.1", 9000)' in installer
+    assert 'probe_host = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host' in installer
+    assert 'socket.create_connection((probe_host, port), timeout=0.5)' in installer
     assert 'sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager' in installer

@@ -85,7 +85,12 @@ def charger_statuses(database: Path, charger_id: str | None = None) -> list[Char
     with _connect(database) as connection:
         if charger_id is None:
             rows = connection.execute(
-                "SELECT DISTINCT charger_id FROM events UNION SELECT DISTINCT charger_id FROM runtime_events WHERE charger_id IS NOT NULL"
+                """
+                SELECT charger_id FROM events
+                UNION SELECT charger_id FROM runtime_events WHERE charger_id IS NOT NULL
+                UNION SELECT charger_id FROM connector_status
+                UNION SELECT charger_id FROM transactions
+                """
             ).fetchall()
             charger_ids = sorted(row[0] for row in rows if row[0])
         else:
