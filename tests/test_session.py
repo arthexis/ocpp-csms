@@ -27,6 +27,9 @@ def make_session(tmp_path):
         recorded.append((action, payload, direction, transaction_id))
 
     session._record = record
+    session._record_recovery_decision = lambda decision: ChargePointSession._record_recovery_decision(
+        session, decision
+    )
     return session, recorded
 
 

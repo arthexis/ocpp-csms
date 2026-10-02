@@ -87,6 +87,25 @@ def _record_origin(record: dict[str, Any]) -> str:
     return _ORIGIN_LOCAL if isinstance(record.get("start"), dict) else _ORIGIN_RECOVERED
 
 
+def _decision(
+    event: str,
+    transaction_id: int,
+    message_type: str,
+    payload: dict[str, Any],
+    **extra: Any,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "event": event,
+        "transaction_id": transaction_id,
+        "message_type": message_type,
+    }
+    connector_id = payload.get("connector_id")
+    if connector_id is not None:
+        result["connector_id"] = int(connector_id)
+    result.update(extra)
+    return result
+
+
 class TransactionArchive:
     """Human-readable, append-friendly JSON transaction persistence."""
 
@@ -177,11 +196,11 @@ class TransactionArchive:
         self,
         charge_point_id: str,
         payload: dict[str, Any],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         async with self._lock:
             transaction_id = payload.get("transaction_id")
             if transaction_id is None:
-                return
+                return None
             transaction_id = int(transaction_id)
             loaded = self._load_or_recover(
                 transaction_id,
@@ -189,14 +208,19 @@ class TransactionArchive:
                 payload,
                 message_type="MeterValues",
             )
-            if loaded is None:
-                return
-            path, record = loaded
+            if loaded[0] is None:
+                return loaded[2]
+            path, record, decision = loaded
             record.setdefault("meter_values", []).append(payload)
             record["updated_at"] = utc_now_iso()
             self._write(path, record)
+            return decision
 
-    async def stop(self, charge_point_id: str, payload: dict[str, Any]) -> None:
+    async def stop(
+        self,
+        charge_point_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
         async with self._lock:
             transaction_id = int(payload["transaction_id"])
             loaded = self._load_or_recover(
@@ -205,13 +229,14 @@ class TransactionArchive:
                 payload,
                 message_type="StopTransaction",
             )
-            if loaded is None:
-                return
-            path, record = loaded
+            if loaded[0] is None:
+                return loaded[2]
+            path, record, decision = loaded
             record["stop"] = payload
             record["status"] = "stopped"
             record["updated_at"] = utc_now_iso()
             self._write(path, record)
+            return decision
 
     def _load_or_recover(
         self,
@@ -220,7 +245,7 @@ class TransactionArchive:
         payload: dict[str, Any],
         *,
         message_type: str,
-    ) -> tuple[Path, dict[str, Any]] | None:
+    ) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any] | None]:
         path = self._paths.get(transaction_id)
         if path is not None and path.exists():
             try:
@@ -230,15 +255,32 @@ class TransactionArchive:
                 self._origins[transaction_id] = origin
                 reason = self._conflict_reason(record, charge_point_id, payload)
                 if reason is not None:
-                    self._preserve_unresolved(
+                    unresolved_path = self._preserve_unresolved(
                         transaction_id,
                         charge_point_id,
                         payload,
                         message_type=message_type,
                         reason=reason,
                     )
-                    return None
-                return path, record
+                    decision = _decision(
+                        "historical_transaction_id_collision",
+                        transaction_id,
+                        message_type,
+                        payload,
+                        decision="preserved_unresolved",
+                        reason=reason,
+                        unresolved_path=str(unresolved_path.relative_to(self.data_dir)),
+                    )
+                    return None, None, decision
+                if origin == _ORIGIN_RECOVERED:
+                    return path, record, _decision(
+                        "historical_transaction_evidence_attached",
+                        transaction_id,
+                        message_type,
+                        payload,
+                        decision="attached",
+                    )
+                return path, record, None
             except (OSError, json.JSONDecodeError):
                 pass
 
@@ -257,7 +299,13 @@ class TransactionArchive:
         }
         self._paths[transaction_id] = path
         self._origins[transaction_id] = _ORIGIN_RECOVERED
-        return path, record
+        return path, record, _decision(
+            "historical_transaction_recovered",
+            transaction_id,
+            message_type,
+            payload,
+            decision="adopted",
+        )
 
     def _conflict_reason(
         self,
