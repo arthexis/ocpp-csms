@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ class ChargerStatus:
     charger_id: str
     connected: bool
     connected_at: str | None
+    subprotocol: str | None
     last_seen: str | None
     status: str | None
     error_code: str | None
@@ -109,6 +111,22 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
     ).fetchone()
     connected = bool(runtime and runtime["event"] == "charger_connected")
 
+    connection_event = connection.execute(
+        """
+        SELECT details_json FROM runtime_events
+        WHERE charger_id = ? AND event = 'charger_connected'
+        ORDER BY id DESC LIMIT 1
+        """,
+        (charger_id,),
+    ).fetchone()
+    subprotocol = None
+    if connection_event and connection_event["details_json"]:
+        try:
+            details = json.loads(connection_event["details_json"])
+            subprotocol = details.get("subprotocol")
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+
     latest = connection.execute(
         """
         SELECT received_at FROM events
@@ -177,6 +195,7 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
         charger_id=charger_id,
         connected=connected,
         connected_at=runtime["occurred_at"] if connected else None,
+        subprotocol=subprotocol,
         last_seen=latest["received_at"] if latest else None,
         status=summary_status,
         error_code=summary_error,
@@ -202,6 +221,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             item.charger_id,
             f"Connected: {'yes' if item.connected else 'no'}",
             f"Connected since: {item.connected_at or '-'}",
+            f"Protocol: {item.subprotocol or 'not negotiated'}",
             f"Last seen: {item.last_seen or '-'}",
             f"Status: {item.status or 'Unknown'}",
         ]
