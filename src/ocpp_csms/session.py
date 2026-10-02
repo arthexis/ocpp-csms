@@ -6,7 +6,7 @@ from typing import Any
 from ocpp.messages import Call
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OcppChargePoint
-from ocpp.v16 import call_result
+from ocpp.v16 import call, call_result
 
 from ocpp_csms.events import EventStore
 from ocpp_csms.time import utc_now_iso
@@ -29,6 +29,25 @@ class ChargePointSession(OcppChargePoint):
         self.transactions = transactions
         self.events = events
         self.connection = connection
+
+    async def remote_start(
+        self,
+        *,
+        id_tag: str,
+        connector_id: int | None = None,
+    ) -> call_result.RemoteStartTransactionPayload:
+        return await self.call(
+            call.RemoteStartTransactionPayload(
+                id_tag=id_tag,
+                connector_id=connector_id,
+            )
+        )
+
+    async def remote_stop(self, transaction_id: int) -> call_result.RemoteStopTransactionPayload:
+        return await self.call(call.RemoteStopTransactionPayload(transaction_id=transaction_id))
+
+    async def reset(self, reset_type: str = "Soft") -> call_result.ResetPayload:
+        return await self.call(call.ResetPayload(type=reset_type))
 
     def _record(
         self,
