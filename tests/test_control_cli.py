@@ -62,28 +62,20 @@ def install_control_response(monkeypatch, response=None, exc=None):
     monkeypatch.setattr(app_module, "send_control", fake_send)
 
 
-def test_accepted_command_prints_status_and_returns_zero(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("status", "expected_code"),
+    [("Accepted", 0), ("Rejected", 1)],
+)
+def test_command_status_controls_exit_code(monkeypatch, capsys, status, expected_code):
     install_control_response(
         monkeypatch,
-        {"ok": True, "response": {"status": "Accepted"}},
+        {"ok": True, "response": {"status": status}},
     )
 
     result = run_control(parse("reboot", "charger-a"))
 
-    assert result == 0
-    assert capsys.readouterr().out == "Accepted\n"
-
-
-def test_rejected_command_prints_status_and_returns_one(monkeypatch, capsys):
-    install_control_response(
-        monkeypatch,
-        {"ok": True, "response": {"status": "Rejected"}},
-    )
-
-    result = run_control(parse("reboot", "charger-a"))
-
-    assert result == 1
-    assert capsys.readouterr().out == "Rejected\n"
+    assert result == expected_code
+    assert capsys.readouterr().out == f"{status}\n"
 
 
 def test_control_error_returns_one(monkeypatch, capsys):
