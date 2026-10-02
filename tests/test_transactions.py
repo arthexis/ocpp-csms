@@ -13,6 +13,71 @@ START = {
 }
 
 
+def start_payload(*, meter_start=100, timestamp="2026-10-02T12:00:00Z"):
+    return {**START, "meter_start": meter_start, "timestamp": timestamp}
+
+
+def stop_payload(
+    transaction_id,
+    *,
+    meter_stop=150,
+    timestamp="2026-10-02T12:10:00Z",
+    connector_id=None,
+):
+    payload = {
+        "transaction_id": transaction_id,
+        "meter_stop": meter_stop,
+        "timestamp": timestamp,
+    }
+    if connector_id is not None:
+        payload["connector_id"] = connector_id
+    return payload
+
+
+def meter_payload(
+    transaction_id,
+    *,
+    connector_id=1,
+    timestamp="2026-10-02T12:05:00Z",
+    value="120",
+):
+    return {
+        "transaction_id": transaction_id,
+        "connector_id": connector_id,
+        "meter_value": [
+            {
+                "timestamp": timestamp,
+                "sampled_value": [{"value": value}],
+            }
+        ],
+    }
+
+
+def json_records(root):
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in root.glob("*/*.json")
+    ]
+
+
+def transaction_records(tmp_path):
+    return json_records(tmp_path / "transactions")
+
+
+def unresolved_records(tmp_path):
+    return json_records(tmp_path / "transactions-unresolved")
+
+
+def only_transaction(tmp_path):
+    [record] = transaction_records(tmp_path)
+    return record
+
+
+def only_unresolved(tmp_path):
+    [record] = unresolved_records(tmp_path)
+    return record
+
+
 @pytest.mark.asyncio
 async def test_exact_start_retry_survives_archive_restart(tmp_path):
     archive = TransactionArchive(tmp_path)
@@ -23,7 +88,7 @@ async def test_exact_start_retry_survives_archive_restart(tmp_path):
 
     assert first == 1
     assert retry == first
-    assert len(list((tmp_path / "transactions").glob("*/*.json"))) == 1
+    assert len(transaction_records(tmp_path)) == 1
 
 
 @pytest.mark.asyncio
@@ -42,12 +107,10 @@ async def test_failed_start_write_does_not_consume_transaction_id(tmp_path, monk
     assert await archive.start("charger-a", START) == 1
 
     restarted = TransactionArchive(tmp_path)
-    next_start = {
-        **START,
-        "meter_start": 200,
-        "timestamp": "2026-10-02T12:05:00Z",
-    }
-    assert await restarted.start("charger-a", next_start) == 2
+    assert await restarted.start(
+        "charger-a",
+        start_payload(meter_start=200, timestamp="2026-10-02T12:05:00Z"),
+    ) == 2
 
 
 @pytest.mark.asyncio
@@ -55,20 +118,9 @@ async def test_transaction_records_persist_local_and_recovered_origin(tmp_path):
     archive = TransactionArchive(tmp_path)
 
     local_id = await archive.start("charger-a", START)
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(225))
 
-    records = {
-        record["transaction_id"]: record
-        for path in (tmp_path / "transactions").glob("*/*.json")
-        for record in [json.loads(path.read_text(encoding="utf-8"))]
-    }
+    records = {record["transaction_id"]: record for record in transaction_records(tmp_path)}
 
     assert records[local_id]["origin"] == "local"
     assert records[225]["origin"] == "recovered"
@@ -97,14 +149,7 @@ async def test_legacy_recovered_record_gets_inferred_origin_when_updated(tmp_pat
     )
 
     archive = TransactionArchive(tmp_path)
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(225))
 
     updated = json.loads(path.read_text(encoding="utf-8"))
     assert updated["origin"] == "recovered"
@@ -113,14 +158,7 @@ async def test_legacy_recovered_record_gets_inferred_origin_when_updated(tmp_pat
 @pytest.mark.asyncio
 async def test_recovered_id_does_not_advance_local_allocator(tmp_path):
     archive = TransactionArchive(tmp_path)
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(225))
 
     assert await archive.start("charger-a", START) == 1
 
@@ -129,14 +167,7 @@ async def test_recovered_id_does_not_advance_local_allocator(tmp_path):
 async def test_recovered_ids_do_not_advance_allocator_after_restart(tmp_path):
     archive = TransactionArchive(tmp_path)
     for transaction_id in (225, 221, 218):
-        await archive.stop(
-            "charger-a",
-            {
-                "transaction_id": transaction_id,
-                "meter_stop": transaction_id,
-                "timestamp": "2026-10-02T12:10:00Z",
-            },
-        )
+        await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=transaction_id))
 
     restarted = TransactionArchive(tmp_path)
     assert await restarted.start("charger-a", START) == 1
@@ -146,44 +177,28 @@ async def test_recovered_ids_do_not_advance_allocator_after_restart(tmp_path):
 async def test_restart_advances_from_highest_local_id_only(tmp_path):
     archive = TransactionArchive(tmp_path)
     assert await archive.start("charger-a", START) == 1
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(225))
 
     restarted = TransactionArchive(tmp_path)
-    next_start = {
-        **START,
-        "meter_start": 200,
-        "timestamp": "2026-10-02T12:05:00Z",
-    }
-    assert await restarted.start("charger-a", next_start) == 2
+    assert await restarted.start(
+        "charger-a",
+        start_payload(meter_start=200, timestamp="2026-10-02T12:05:00Z"),
+    ) == 2
 
 
 @pytest.mark.asyncio
 async def test_local_allocator_skips_recovered_id_when_sequence_reaches_it(tmp_path):
     archive = TransactionArchive(tmp_path)
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 3,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(3))
 
     assert await archive.start("charger-a", START) == 1
     assert await archive.start(
         "charger-a",
-        {**START, "meter_start": 200, "timestamp": "2026-10-02T12:05:00Z"},
+        start_payload(meter_start=200, timestamp="2026-10-02T12:05:00Z"),
     ) == 2
     assert await archive.start(
         "charger-a",
-        {**START, "meter_start": 300, "timestamp": "2026-10-02T12:10:00Z"},
+        start_payload(meter_start=300, timestamp="2026-10-02T12:10:00Z"),
     ) == 4
 
 
@@ -193,21 +208,14 @@ async def test_local_allocator_skips_recovered_id_after_restart(tmp_path):
     assert await archive.start("charger-a", START) == 1
     assert await archive.start(
         "charger-a",
-        {**START, "meter_start": 200, "timestamp": "2026-10-02T12:05:00Z"},
+        start_payload(meter_start=200, timestamp="2026-10-02T12:05:00Z"),
     ) == 2
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 3,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(3))
 
     restarted = TransactionArchive(tmp_path)
     assert await restarted.start(
         "charger-a",
-        {**START, "meter_start": 300, "timestamp": "2026-10-02T12:15:00Z"},
+        start_payload(meter_start=300, timestamp="2026-10-02T12:15:00Z"),
     ) == 4
 
 
@@ -217,20 +225,9 @@ async def test_failed_write_after_skipping_recovered_id_does_not_consume_candida
 ):
     archive = TransactionArchive(tmp_path)
     assert await archive.start("charger-a", START) == 1
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 2,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(2))
 
-    next_start = {
-        **START,
-        "meter_start": 200,
-        "timestamp": "2026-10-02T12:15:00Z",
-    }
+    next_start = start_payload(meter_start=200, timestamp="2026-10-02T12:15:00Z")
     original_write = archive._write
 
     def fail_write(path, record):
@@ -253,22 +250,14 @@ async def test_conflicting_charge_point_does_not_mutate_local_transaction(tmp_pa
 
     await archive.stop(
         "charger-b",
-        {
-            "transaction_id": transaction_id,
-            "connector_id": 1,
-            "meter_stop": 999,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
+        stop_payload(transaction_id, meter_stop=999, connector_id=1),
     )
 
-    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
-    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    local = only_transaction(tmp_path)
     assert local["status"] == "open"
     assert local["stop"] is None
 
-    unresolved_paths = list((tmp_path / "transactions-unresolved").glob("*/*.json"))
-    assert len(unresolved_paths) == 1
-    unresolved = json.loads(unresolved_paths[0].read_text(encoding="utf-8"))
+    unresolved = only_unresolved(tmp_path)
     assert unresolved["transaction_id"] == transaction_id
     assert unresolved["charge_point_id"] == "charger-b"
     assert unresolved["message_type"] == "StopTransaction"
@@ -282,24 +271,11 @@ async def test_conflicting_connector_does_not_mutate_local_transaction(tmp_path)
 
     await archive.meter_values(
         "charger-a",
-        {
-            "transaction_id": transaction_id,
-            "connector_id": 2,
-            "meter_value": [
-                {
-                    "timestamp": "2026-10-02T12:05:00Z",
-                    "sampled_value": [{"value": "120"}],
-                }
-            ],
-        },
+        meter_payload(transaction_id, connector_id=2),
     )
 
-    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
-    local = json.loads(transaction_path.read_text(encoding="utf-8"))
-    assert local["meter_values"] == []
-
-    unresolved_path = next((tmp_path / "transactions-unresolved").glob("*/*.json"))
-    unresolved = json.loads(unresolved_path.read_text(encoding="utf-8"))
+    assert only_transaction(tmp_path)["meter_values"] == []
+    unresolved = only_unresolved(tmp_path)
     assert unresolved["message_type"] == "MeterValues"
     assert unresolved["reason"] == "connector_mismatch"
 
@@ -311,54 +287,35 @@ async def test_message_predating_local_start_is_preserved_as_unresolved(tmp_path
 
     await archive.stop(
         "charger-a",
-        {
-            "transaction_id": transaction_id,
-            "connector_id": 1,
-            "meter_stop": 90,
-            "timestamp": "2026-10-02T11:55:00Z",
-        },
+        stop_payload(
+            transaction_id,
+            meter_stop=90,
+            timestamp="2026-10-02T11:55:00Z",
+            connector_id=1,
+        ),
     )
 
-    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
-    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    local = only_transaction(tmp_path)
     assert local["status"] == "open"
     assert local["stop"] is None
-
-    unresolved_path = next((tmp_path / "transactions-unresolved").glob("*/*.json"))
-    unresolved = json.loads(unresolved_path.read_text(encoding="utf-8"))
-    assert unresolved["reason"] == "message_predates_local_start"
+    assert only_unresolved(tmp_path)["reason"] == "message_predates_local_start"
 
 
 @pytest.mark.asyncio
 async def test_matching_local_transaction_continues_normally(tmp_path):
     archive = TransactionArchive(tmp_path)
     transaction_id = await archive.start("charger-a", START)
-    meter_values = {
-        "transaction_id": transaction_id,
-        "connector_id": 1,
-        "meter_value": [
-            {
-                "timestamp": "2026-10-02T12:05:00Z",
-                "sampled_value": [{"value": "120"}],
-            }
-        ],
-    }
-    stop = {
-        "transaction_id": transaction_id,
-        "connector_id": 1,
-        "meter_stop": 150,
-        "timestamp": "2026-10-02T12:10:00Z",
-    }
+    meter_values = meter_payload(transaction_id)
+    stop = stop_payload(transaction_id, connector_id=1)
 
     await archive.meter_values("charger-a", meter_values)
     await archive.stop("charger-a", stop)
 
-    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
-    local = json.loads(transaction_path.read_text(encoding="utf-8"))
+    local = only_transaction(tmp_path)
     assert local["meter_values"] == [meter_values]
     assert local["stop"] == stop
     assert local["status"] == "stopped"
-    assert not list((tmp_path / "transactions-unresolved").glob("*/*.json"))
+    assert unresolved_records(tmp_path) == []
 
 
 @pytest.mark.asyncio
@@ -366,31 +323,13 @@ async def test_recovered_transaction_accepts_later_matching_evidence(tmp_path):
     archive = TransactionArchive(tmp_path)
     await archive.meter_values(
         "charger-a",
-        {
-            "transaction_id": 225,
-            "connector_id": 1,
-            "meter_value": [
-                {
-                    "timestamp": "2026-10-02T11:55:00Z",
-                    "sampled_value": [{"value": "120"}],
-                }
-            ],
-        },
+        meter_payload(225, timestamp="2026-10-02T11:55:00Z"),
     )
-    await archive.stop(
-        "charger-a",
-        {
-            "transaction_id": 225,
-            "connector_id": 1,
-            "meter_stop": 150,
-            "timestamp": "2026-10-02T12:10:00Z",
-        },
-    )
+    await archive.stop("charger-a", stop_payload(225, connector_id=1))
 
-    transaction_path = next((tmp_path / "transactions").glob("*/*.json"))
-    recovered = json.loads(transaction_path.read_text(encoding="utf-8"))
+    recovered = only_transaction(tmp_path)
     assert recovered["transaction_id"] == 225
     assert recovered["origin"] == "recovered"
     assert len(recovered["meter_values"]) == 1
     assert recovered["status"] == "stopped"
-    assert not list((tmp_path / "transactions-unresolved").glob("*/*.json"))
+    assert unresolved_records(tmp_path) == []
