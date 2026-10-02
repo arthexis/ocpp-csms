@@ -1,3 +1,4 @@
+import json
 import logging
 import sqlite3
 from types import SimpleNamespace
@@ -26,6 +27,21 @@ def make_session(tmp_path):
 
     session._record = record
     return session, recorded
+
+
+def transaction_records(tmp_path):
+    return [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "transactions").glob("*/*.json")
+    ]
+
+
+def event_directions(tmp_path, action):
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
+        return connection.execute(
+            "SELECT direction FROM events WHERE action = ? ORDER BY id",
+            (action,),
+        ).fetchall()
 
 
 @pytest.mark.asyncio
@@ -89,9 +105,9 @@ async def test_start_transaction_is_permissive_and_persisted(tmp_path):
     assert isinstance(response, call_result.StartTransactionPayload)
     assert response.transaction_id == 1
     assert response.id_tag_info["status"] == "Accepted"
-    files = list((tmp_path / "transactions" / "2026-10-01").glob("*.json"))
-    assert len(files) == 1
-    assert '"id_tag": "card-a"' in files[0].read_text(encoding="utf-8")
+    records = transaction_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["id_tag"] == "card-a"
     assert recorded == [
         (
             "StartTransaction",
@@ -135,7 +151,7 @@ async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
 
     assert first.transaction_id == 1
     assert retry.transaction_id == first.transaction_id
-    assert len(list((tmp_path / "transactions").glob("*/*.json"))) == 1
+    assert len(transaction_records(tmp_path)) == 1
 
 
 @pytest.mark.asyncio
@@ -156,11 +172,10 @@ async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
 
     assert isinstance(meter, call_result.MeterValuesPayload)
     assert isinstance(stop, call_result.StopTransactionPayload)
-    files = list((tmp_path / "transactions").glob("*/*.json"))
-    assert len(files) == 1
-    text = files[0].read_text(encoding="utf-8")
-    assert '"transaction_id": 999' in text
-    assert '"status": "stopped"' in text
+    records = transaction_records(tmp_path)
+    assert len(records) == 1
+    assert records[0]["transaction_id"] == 999
+    assert records[0]["status"] == "stopped"
     assert [(entry[0], entry[2]) for entry in recorded] == [
         ("MeterValues", "in"),
         ("StopTransaction", "in"),
@@ -190,10 +205,7 @@ async def test_outbound_evidence_is_recorded_after_successful_send(tmp_path):
 
     await session.route_message(raw)
 
-    rows = sqlite3.connect(tmp_path / DATABASE_FILENAME).execute(
-        "SELECT direction FROM events WHERE action = 'Heartbeat' ORDER BY id"
-    ).fetchall()
-    assert rows == [("in",), ("out",)]
+    assert event_directions(tmp_path, "Heartbeat") == [("in",), ("out",)]
     assert len(connection.sent) == 1
 
 
@@ -217,7 +229,4 @@ async def test_failed_send_does_not_record_outbound_evidence(tmp_path):
     with pytest.raises(OSError, match="connection lost"):
         await session.route_message(raw)
 
-    rows = sqlite3.connect(tmp_path / DATABASE_FILENAME).execute(
-        "SELECT direction FROM events WHERE action = 'Heartbeat' ORDER BY id"
-    ).fetchall()
-    assert rows == [("in",)]
+    assert event_directions(tmp_path, "Heartbeat") == [("in",)]
