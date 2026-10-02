@@ -2,7 +2,7 @@
 
 A deliberately small Python OCPP 1.6J CSMS intended to run as an appliance-style service.
 
-Its default policy is simple: **accept chargers, avoid blocking charging, preserve evidence, and expose a small diagnostic surface.** The implementation stays intentionally direct so operational behavior remains easy to inspect.
+Its default policy is simple: **accept chargers, avoid blocking charging, preserve evidence, and expose a small diagnostic and control surface.** The implementation stays intentionally direct so operational behavior remains easy to inspect.
 
 ## Quick start
 
@@ -22,6 +22,9 @@ Useful commands:
 ocpp-csms status
 ocpp-csms status --charging
 ocpp-csms events
+ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
+ocpp-csms stop charger-01 --transaction 42
+ocpp-csms reboot charger-01
 sudo systemctl status ocpp-csms
 sudo systemctl restart ocpp-csms
 sudo journalctl -u ocpp-csms -f
@@ -66,6 +69,8 @@ When chargers must reach the CSMS across a broader network, put an appropriate b
 
 Charger allowlists, RFID deny policies, client certificates, or mandatory strict admission are intentionally not part of the default appliance behavior. Add them only as opt-in deployment policy when a real environment requires them.
 
+Operator control commands do not open another TCP service. The CLI talks to the running daemon through a Unix-domain socket named `control.sock` inside the configured data directory. The socket is created mode `0660`, so local filesystem ownership and permissions are the control boundary.
+
 ## Commands
 
 Run `ocpp-csms`, `ocpp-csms help`, or `ocpp-csms --help` to show commands and parameters.
@@ -75,6 +80,9 @@ ocpp-csms init
 ocpp-csms serve [--host HOST] [--port PORT] [--log-level LEVEL]
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
+ocpp-csms start CHARGER [--connector N] --id-tag TAG
+ocpp-csms stop CHARGER --transaction ID
+ocpp-csms reboot CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
@@ -85,12 +93,59 @@ ocpp-csms explain CHARGER --since TIME --until TIME
 Examples:
 
 ```bash
+ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
+ocpp-csms stop charger-01 --transaction 42
+ocpp-csms reboot charger-01
+ocpp-csms reboot charger-01 --hard
 ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z --until 2026-10-01T21:00:00Z
 ocpp-csms explain charger-01 --at 2026-10-01T20:35:00Z
 ocpp-csms explain charger-01 --since 2026-10-01T20:30:00Z --until 2026-10-01T20:45:00Z
 ```
 
 All commands accept `--data-dir PATH` before the command name. Diagnostic timestamps accept ISO-8601; timestamps without an offset are treated as UTC.
+
+Control-command exit behavior is intentionally simple:
+
+- OCPP `Accepted` returns exit status `0`;
+- OCPP `Rejected`, disconnected chargers, and control-socket failures return exit status `1`;
+- invalid command-line arguments use normal `argparse` behavior and return exit status `2`.
+
+## Remote charger control
+
+The control path stays inside the daemon that already owns the live charger WebSocket:
+
+```text
+ocpp-csms CLI
+    |
+    | Unix socket: <data-dir>/control.sock
+    v
+running CSMS daemon
+    |
+    | current ChargePointSession
+    v
+charger WebSocket
+```
+
+The supported OCPP 1.6J mappings are:
+
+- `start` -> `RemoteStartTransaction`;
+- `stop` -> `RemoteStopTransaction`;
+- `reboot` -> `Reset` with `Soft` by default and `Hard` when `--hard` is used.
+
+Commands are only sent to a charger that is currently connected. They are not queued for later delivery.
+
+A remote command confirmation and an actual transaction state change are deliberately treated as different facts. `RemoteStartTransaction.conf(status=Accepted)` means the charger accepted the request; it does **not** create a local transaction. The transaction is created only when the charger later sends `StartTransaction`. Likewise, `RemoteStopTransaction.conf(status=Accepted)` does **not** mark a transaction stopped; the transaction becomes stopped only when the charger later sends `StopTransaction`.
+
+The event stream preserves both sides of each remote command. A CSMS-initiated request is recorded as `out`, and the charger's confirmation is recorded as `in`. For example, a successful remote-start sequence can appear as:
+
+```text
+out RemoteStartTransaction
+in  RemoteStartTransaction
+in  StartTransaction
+out StartTransaction
+```
+
+This distinction is intentional so `events` and `explain` can answer separately whether the CSMS issued a command, whether the charger accepted it, and whether the charger actually changed transaction state.
 
 ## Transaction recovery
 
@@ -113,6 +168,7 @@ By default the appliance stores data under:
 
 ```text
 ~/ocpp-csms-data/
+  control.sock
   ocpp-csms.sqlite3
   transactions/
     YYYY-MM-DD/
@@ -122,9 +178,9 @@ By default the appliance stores data under:
       <charger>-<transaction>-<message>-<suffix>.json
 ```
 
-The JSON transaction archive remains directly readable and copyable. SQLite stores append-oriented OCPP evidence, runtime events, and small derived operational state used by status/diagnostic commands.
+`control.sock` exists only while the daemon is running and is removed on shutdown. The JSON transaction archive remains directly readable and copyable. SQLite stores append-oriented OCPP evidence, runtime events, and small derived operational state used by status/diagnostic commands.
 
-Incoming OCPP requests and handled replies are recorded, together with connection lifecycle and recovery diagnostics. Unresolved transaction collisions are preserved outside the normal transaction archive so they cannot silently mutate an unrelated transaction.
+Incoming OCPP requests and handled replies are recorded together with CSMS-initiated remote requests and charger confirmations. Connection lifecycle and recovery diagnostics are also preserved. Unresolved transaction collisions are stored outside the normal transaction archive so they cannot silently mutate an unrelated transaction.
 
 ## Installation details
 
@@ -145,6 +201,8 @@ To use another user-owned data directory:
 OCPP_CSMS_DATA_DIR="$HOME/my-csms-data" sh install.sh
 ```
 
+The daemon and control CLI must use the same data directory because that directory determines the local control-socket path.
+
 ## Development and tests
 
 Install development dependencies and run the test suite with:
@@ -161,13 +219,16 @@ CI exercises the project on the appliance target and a newer compatibility targe
 
 Tests are organized by behavior rather than framework layer where practical. Recovery tests deliberately cover both archive-level invariants and session/SQLite integration so restart, collision, and synthetic-session regressions remain visible.
 
+Remote-control tests cover the outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
+
 ## Source layout
 
 ```text
 src/ocpp_csms/
   app.py           # CLI and process startup
+  control.py       # local Unix-socket control protocol and client
   server.py        # WebSocket accept loop and connection lifecycle
-  session.py       # direct OCPP 1.6J handlers
+  session.py       # direct OCPP 1.6J handlers and outbound commands
   events.py        # SQLite event store and derived state
   diagnostics.py   # direct event queries and formatting
   status.py        # status queries and formatting

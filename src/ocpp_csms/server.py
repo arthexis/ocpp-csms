@@ -8,6 +8,7 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
@@ -41,7 +42,10 @@ class CSMSServer:
     port: int
     transactions: TransactionArchive
     events: EventStore
-    _active_connections: dict[str, object] = field(default_factory=dict, init=False, repr=False)
+    _active_sessions: dict[str, ChargePointSession] = field(default_factory=dict, init=False, repr=False)
+
+    def session(self, charge_point_id: str) -> ChargePointSession | None:
+        return self._active_sessions.get(charge_point_id)
 
     def _record_runtime(
         self,
@@ -58,15 +62,18 @@ class CSMSServer:
     async def serve_forever(self) -> None:
         write_pid(self.events.data_dir)
         self._record_runtime("server_started")
+        socket_path = control_socket_path(self.events.data_dir)
         try:
-            async with websockets.serve(
-                self.accept,
-                self.host,
-                self.port,
-                subprotocols=[OCPP_16_SUBPROTOCOL],
-            ):
-                LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
-                await asyncio.Future()
+            async with ControlServer(self, socket_path):
+                async with websockets.serve(
+                    self.accept,
+                    self.host,
+                    self.port,
+                    subprotocols=[OCPP_16_SUBPROTOCOL],
+                ):
+                    LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
+                    LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
+                    await asyncio.Future()
         finally:
             self._record_runtime("server_stopped")
             remove_pid(self.events.data_dir)
@@ -84,8 +91,6 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
-        connection_id = object()
-        self._active_connections[charge_point_id] = connection_id
         connection = RecordedWebSocket(websocket)
         session = ChargePointSession(
             charge_point_id,
@@ -93,6 +98,7 @@ class CSMSServer:
             self.transactions,
             self.events,
         )
+        self._active_sessions[charge_point_id] = session
         LOGGER.info("Charge point connected: %s", charge_point_id)
         self._record_runtime(
             "charger_connected",
@@ -106,8 +112,8 @@ class CSMSServer:
         try:
             await session.start()
         finally:
-            if self._active_connections.get(charge_point_id) is connection_id:
-                del self._active_connections[charge_point_id]
+            if self._active_sessions.get(charge_point_id) is session:
+                del self._active_sessions[charge_point_id]
                 LOGGER.info("Charge point disconnected: %s", charge_point_id)
                 self._record_runtime("charger_disconnected", charger_id=charge_point_id)
             else:
