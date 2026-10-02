@@ -11,15 +11,21 @@ def test_systemd_service_runs_as_installing_user_and_restarts():
     assert "Group=@GROUP@" in unit
     assert 'Environment="HOME=@HOME@"' in unit
     assert 'ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve' in unit
+    assert 'serve --host "@HOST@" --port @PORT@' in unit
     assert "Restart=always" in unit
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_installer_enables_and_validates_service():
+def test_installer_configures_enables_and_validates_service():
     installer = (ROOT / "install.sh").read_text(encoding="utf-8")
 
     assert 'if [ "$(id -u)" -eq 0 ]' in installer
     assert "Do not run this installer as root or with sudo" in installer
+    assert 'HOST=${OCPP_CSMS_HOST:-"0.0.0.0"}' in installer
+    assert 'PORT=${OCPP_CSMS_PORT:-9000}' in installer
+    assert "--host)" in installer
+    assert "--port)" in installer
+    assert '"$VENV/bin/python" - "$HOST" "$PORT"' in installer
     assert 'sudo systemctl enable --now "$SERVICE_NAME"' in installer
     assert 'sudo systemctl is-active --quiet "$SERVICE_NAME"' in installer
     assert '"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null' in installer

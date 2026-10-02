@@ -40,4 +40,9 @@ async def test_failed_start_write_does_not_consume_transaction_id(tmp_path, monk
     assert await archive.start("charger-a", START) == 1
 
     restarted = TransactionArchive(tmp_path)
-    assert restarted._next_transaction_id == 2
+    next_start = {
+        **START,
+        "meter_start": 200,
+        "timestamp": "2026-10-02T12:05:00Z",
+    }
+    assert await restarted.start("charger-a", next_start) == 2

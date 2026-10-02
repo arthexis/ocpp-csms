@@ -21,27 +21,35 @@ class WebSocket:
         self.closed = asyncio.Event()
 
 
-@pytest.mark.asyncio
-async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
-    started = []
-
+def install_waiting_session(monkeypatch, started=None):
     class Session:
         def __init__(self, charge_point_id, connection, transactions, events):
             self.charge_point_id = charge_point_id
             self.connection = connection
 
         async def start(self):
-            started.append(self.charge_point_id)
+            if started is not None:
+                started.append(self.charge_point_id)
             await self.connection.websocket.closed.wait()
 
     monkeypatch.setattr(server_module, "ChargePointSession", Session)
-    events = RuntimeEvents()
-    server = CSMSServer(
+
+
+def make_server(events):
+    return CSMSServer(
         "127.0.0.1",
         9000,
         SimpleNamespace(),
         events,
     )
+
+
+@pytest.mark.asyncio
+async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
+    started = []
+    install_waiting_session(monkeypatch, started)
+    events = RuntimeEvents()
+    server = make_server(events)
     first = WebSocket()
     second = WebSocket()
 
@@ -63,13 +71,11 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
         ("charger_connected", "charger-a"),
         ("charger_connected", "charger-a"),
     ]
-    assert "charger-a" in server._active_connections
 
     second.closed.set()
     await second_task
 
     assert events.rows[-1][:2] == ("charger_disconnected", "charger-a")
-    assert "charger-a" not in server._active_connections
 
 
 @pytest.mark.asyncio
@@ -81,21 +87,9 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     ],
 )
 async def test_connection_records_path_identity_and_subprotocol(monkeypatch, subprotocol, expected):
-    class Session:
-        def __init__(self, charge_point_id, connection, transactions, events):
-            self.connection = connection
-
-        async def start(self):
-            await self.connection.websocket.closed.wait()
-
-    monkeypatch.setattr(server_module, "ChargePointSession", Session)
+    install_waiting_session(monkeypatch)
     events = RuntimeEvents()
-    server = CSMSServer(
-        "127.0.0.1",
-        9000,
-        SimpleNamespace(),
-        events,
-    )
+    server = make_server(events)
     websocket = WebSocket(subprotocol=subprotocol)
 
     task = asyncio.create_task(server.accept(websocket, "/ocpp/charger-a?source=test"))

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -8,6 +9,16 @@ from ocpp_csms.events import DATABASE_FILENAME, EventStore
 
 def database(tmp_path):
     return tmp_path / DATABASE_FILENAME
+
+
+def fetchone(tmp_path, sql):
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
+        return connection.execute(sql).fetchone()
+
+
+def fetchall(tmp_path, sql):
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
+        return connection.execute(sql).fetchall()
 
 
 def test_event_store_records_ocpp_and_runtime_events(tmp_path):
@@ -20,14 +31,14 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     )
     store.record_runtime("charger_connected", charger_id="charger-a")
 
-    connection = sqlite3.connect(database(tmp_path))
-    event = connection.execute(
-        "SELECT charger_id, action, id_tag, charger_timestamp, payload_json FROM events"
-    ).fetchone()
-    runtime = connection.execute(
-        "SELECT event, charger_id FROM runtime_events"
-    ).fetchone()
-    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
+        event = connection.execute(
+            "SELECT charger_id, action, id_tag, charger_timestamp, payload_json FROM events"
+        ).fetchone()
+        runtime = connection.execute(
+            "SELECT event, charger_id FROM runtime_events"
+        ).fetchone()
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
 
     assert event[:4] == (
         "charger-a",
@@ -64,10 +75,10 @@ def test_start_retry_returns_existing_transaction(tmp_path):
     store.record_transaction_start(227, "charger-a", payload)
 
     assert store.find_recent_start("charger-a", payload) == 227
-    rows = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT transaction_id, state FROM transactions"
-    ).fetchall()
-    assert rows == [(227, "open")]
+    assert fetchall(
+        tmp_path,
+        "SELECT transaction_id, state FROM transactions",
+    ) == [(227, "open")]
 
 
 def test_equal_timestamp_later_receipt_wins(tmp_path):
@@ -86,10 +97,10 @@ def test_equal_timestamp_later_receipt_wins(tmp_path):
     assert store.record_connector_status("charger-a", available) is True
     assert store.record_connector_status("charger-a", preparing) is True
 
-    row = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT status, event_timestamp FROM connector_status"
-    ).fetchone()
-    assert row == ("Preparing", "2026-10-01T19:05:36Z")
+    assert fetchone(
+        tmp_path,
+        "SELECT status, event_timestamp FROM connector_status",
+    ) == ("Preparing", "2026-10-01T19:05:36Z")
 
 
 def test_older_status_does_not_replace_newer_connector_state(tmp_path):
@@ -111,10 +122,10 @@ def test_older_status_does_not_replace_newer_connector_state(tmp_path):
         },
     ) is False
 
-    row = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT status FROM connector_status"
-    ).fetchone()
-    assert row == ("Charging",)
+    assert fetchone(
+        tmp_path,
+        "SELECT status FROM connector_status",
+    ) == ("Charging",)
 
 
 def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path):
@@ -137,10 +148,10 @@ def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path
         },
     )
 
-    row = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227"
-    ).fetchone()
-    assert row == ("ended", None, None)
+    assert fetchone(
+        tmp_path,
+        "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227",
+    ) == ("ended", None, None)
 
 
 def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
@@ -164,11 +175,10 @@ def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
             "timestamp": "2026-10-01T15:05:00Z",
         },
     ) is True
-
-    connection = sqlite3.connect(database(tmp_path))
-    assert connection.execute(
-        "SELECT state FROM transactions WHERE transaction_id = 7"
-    ).fetchone() == ("open",)
+    assert fetchone(
+        tmp_path,
+        "SELECT state FROM transactions WHERE transaction_id = 7",
+    ) == ("open",)
 
     assert store.record_connector_status(
         "charger-a",
@@ -178,10 +188,10 @@ def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
             "timestamp": "2026-10-01T15:11:00Z",
         },
     ) is True
-    assert connection.execute(
-        "SELECT state FROM transactions WHERE transaction_id = 7"
-    ).fetchone() == ("ended",)
-    connection.close()
+    assert fetchone(
+        tmp_path,
+        "SELECT state FROM transactions WHERE transaction_id = 7",
+    ) == ("ended",)
 
 
 def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
@@ -210,10 +220,10 @@ def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
         },
     )
 
-    rows = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT transaction_id, state FROM transactions ORDER BY transaction_id"
-    ).fetchall()
-    assert rows == [(1, "open"), (2, "ended")]
+    assert fetchall(
+        tmp_path,
+        "SELECT transaction_id, state FROM transactions ORDER BY transaction_id",
+    ) == [(1, "open"), (2, "ended")]
 
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
@@ -237,7 +247,7 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
     store.record_transaction_stop("charger-a", stop)
     store.record_transaction_stop("charger-a", stop)
 
-    row = sqlite3.connect(database(tmp_path)).execute(
-        "SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = 140"
-    ).fetchone()
-    assert row == ("stopped", 1170)
+    assert fetchone(
+        tmp_path,
+        "SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = 140",
+    ) == ("stopped", 1170)

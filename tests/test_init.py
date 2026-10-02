@@ -14,10 +14,11 @@ def test_init_command_is_available():
 def test_initialize_storage_creates_database_and_archive(tmp_path):
     initialize_storage(str(tmp_path))
 
+    status = appliance_status(tmp_path)
     assert (tmp_path / DATABASE_FILENAME).is_file()
     assert (tmp_path / "transactions").is_dir()
-    assert appliance_status(tmp_path)["database"] == "ok"
-    assert appliance_status(tmp_path)["transactions"] == "ok"
+    assert status["database"] == "ok"
+    assert status["transactions"] == "ok"
 
 
 def test_status_remains_read_only_on_empty_directory(tmp_path):
