@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -11,12 +12,12 @@ def database(tmp_path):
 
 
 def fetchone(tmp_path, sql):
-    with sqlite3.connect(database(tmp_path)) as connection:
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
         return connection.execute(sql).fetchone()
 
 
 def fetchall(tmp_path, sql):
-    with sqlite3.connect(database(tmp_path)) as connection:
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
         return connection.execute(sql).fetchall()
 
 
@@ -30,7 +31,7 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     )
     store.record_runtime("charger_connected", charger_id="charger-a")
 
-    with sqlite3.connect(database(tmp_path)) as connection:
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
         event = connection.execute(
             "SELECT charger_id, action, id_tag, charger_timestamp, payload_json FROM events"
         ).fetchone()
