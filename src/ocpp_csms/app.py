@@ -136,7 +136,11 @@ def run_explain(args: argparse.Namespace) -> int:
     if bool(args.since) != bool(args.until):
         raise SystemExit("--since and --until must be supplied together for explain")
     if args.since and args.until:
-        print(explain_between(args.data_dir, args.charger, args.since, args.until))
+        try:
+            text = explain_between(args.data_dir, args.charger, args.since, args.until)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from None
+        print(text)
         return 0
 
     raise SystemExit("explain requires --at TIME or --since TIME --until TIME")
