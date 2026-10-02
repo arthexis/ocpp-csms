@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from ocpp_csms.transactions import TransactionArchive
@@ -46,3 +48,63 @@ async def test_failed_start_write_does_not_consume_transaction_id(tmp_path, monk
         "timestamp": "2026-10-02T12:05:00Z",
     }
     assert await restarted.start("charger-a", next_start) == 2
+
+
+@pytest.mark.asyncio
+async def test_transaction_records_persist_local_and_recovered_origin(tmp_path):
+    archive = TransactionArchive(tmp_path)
+
+    local_id = await archive.start("charger-a", START)
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    records = {
+        record["transaction_id"]: record
+        for path in (tmp_path / "transactions").glob("*/*.json")
+        for record in [json.loads(path.read_text(encoding="utf-8"))]
+    }
+
+    assert records[local_id]["origin"] == "local"
+    assert records[225]["origin"] == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_legacy_recovered_record_gets_inferred_origin_when_updated(tmp_path):
+    transactions_dir = tmp_path / "transactions" / "2026-10-02"
+    transactions_dir.mkdir(parents=True)
+    path = transactions_dir / "charger-a-225.json"
+    path.write_text(
+        json.dumps(
+            {
+                "transaction_id": 225,
+                "charge_point_id": "charger-a",
+                "status": "recovered",
+                "created_at": "2026-10-02T12:00:00Z",
+                "updated_at": "2026-10-02T12:00:00Z",
+                "id_tag": None,
+                "start": None,
+                "meter_values": [],
+                "stop": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    archive = TransactionArchive(tmp_path)
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 225,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    updated = json.loads(path.read_text(encoding="utf-8"))
+    assert updated["origin"] == "recovered"
