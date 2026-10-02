@@ -4,7 +4,7 @@ import pytest
 import websockets
 
 from ocpp_csms.events import EventStore
-from ocpp_csms.server import CSMSServer, OCPP_16_SUBPROTOCOL
+from ocpp_csms.server import CSMSServer, OCPP_16_SUBPROTOCOL, charge_point_id_from_path
 from ocpp_csms.transactions import TransactionArchive
 
 
@@ -17,6 +17,14 @@ async def result(websocket, unique_id):
     assert message_type == 3
     assert response_id == unique_id
     return payload
+
+
+def test_charge_point_id_uses_final_path_segment():
+    assert charge_point_id_from_path("/charger-a") == "charger-a"
+    assert charge_point_id_from_path("/ocpp/charger-a") == "charger-a"
+    assert charge_point_id_from_path("/ocpp/charger-a/") == "charger-a"
+    assert charge_point_id_from_path("/ocpp/charger-a?token=test") == "charger-a"
+    assert charge_point_id_from_path("/") == ""
 
 
 @pytest.mark.asyncio
@@ -36,7 +44,7 @@ async def test_real_websocket_boot_and_charging_flow(tmp_path):
     ) as websocket_server:
         port = websocket_server.sockets[0].getsockname()[1]
         async with websockets.connect(
-            f"ws://127.0.0.1:{port}/charger-a",
+            f"ws://127.0.0.1:{port}/ocpp/charger-a",
             subprotocols=[OCPP_16_SUBPROTOCOL],
         ) as websocket:
             assert websocket.subprotocol == OCPP_16_SUBPROTOCOL
@@ -112,13 +120,15 @@ async def test_real_websocket_boot_and_charging_flow(tmp_path):
     assert len(transaction_files) == 1
     transaction = json.loads(transaction_files[0].read_text(encoding="utf-8"))
     assert transaction["transaction_id"] == transaction_id
+    assert transaction["charge_point_id"] == "charger-a"
     assert transaction["status"] == "stopped"
 
     with server.events._connect() as connection:
         actions = connection.execute(
-            "SELECT action, direction FROM events ORDER BY id"
+            "SELECT charger_id, action, direction FROM events ORDER BY id"
         ).fetchall()
-    assert [(row[0], row[1]) for row in actions] == [
+    assert {row[0] for row in actions} == {"charger-a"}
+    assert [(row[1], row[2]) for row in actions] == [
         ("BootNotification", "in"),
         ("BootNotification", "out"),
         ("Authorize", "in"),
