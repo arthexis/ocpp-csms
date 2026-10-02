@@ -209,3 +209,38 @@ async def test_local_allocator_skips_recovered_id_after_restart(tmp_path):
         "charger-a",
         {**START, "meter_start": 300, "timestamp": "2026-10-02T12:15:00Z"},
     ) == 4
+
+
+@pytest.mark.asyncio
+async def test_failed_write_after_skipping_recovered_id_does_not_consume_candidate(
+    tmp_path, monkeypatch
+):
+    archive = TransactionArchive(tmp_path)
+    assert await archive.start("charger-a", START) == 1
+    await archive.stop(
+        "charger-a",
+        {
+            "transaction_id": 2,
+            "meter_stop": 150,
+            "timestamp": "2026-10-02T12:10:00Z",
+        },
+    )
+
+    next_start = {
+        **START,
+        "meter_start": 200,
+        "timestamp": "2026-10-02T12:15:00Z",
+    }
+    original_write = archive._write
+
+    def fail_write(path, record):
+        if record.get("origin") == "local" and record.get("transaction_id") == 3:
+            raise OSError("disk unavailable")
+        original_write(path, record)
+
+    monkeypatch.setattr(archive, "_write", fail_write)
+    with pytest.raises(OSError, match="disk unavailable"):
+        await archive.start("charger-a", next_start)
+
+    monkeypatch.setattr(archive, "_write", original_write)
+    assert await archive.start("charger-a", next_start) == 3
