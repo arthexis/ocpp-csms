@@ -10,14 +10,21 @@ def make_session(tmp_path):
     archive = TransactionArchive(tmp_path)
     recorded = []
     session = SimpleNamespace(id="charger-a", transactions=archive)
-    session._record = lambda action, payload, transaction_id=None: recorded.append(
-        (action, payload, transaction_id)
-    )
+
+    def record(action, payload, *, direction="in", transaction_id=None):
+        recorded.append((action, payload, direction, transaction_id))
+
+    def reply(action, response, *, transaction_id=None):
+        record(action, response, direction="out", transaction_id=transaction_id)
+        return response
+
+    session._record = record
+    session._reply = reply
     return session, recorded
 
 
 @pytest.mark.asyncio
-async def test_authorize_is_permissive_and_recorded(tmp_path):
+async def test_authorize_is_permissive_and_records_request_and_reply(tmp_path):
     session, recorded = make_session(tmp_path)
 
     response = await ChargePointSession.on_authorize(session, id_tag="any-card")
@@ -25,10 +32,14 @@ async def test_authorize_is_permissive_and_recorded(tmp_path):
     assert response["idTagInfo"]["status"] == "Accepted"
     assert recorded[0][0] == "Authorize"
     assert recorded[0][1]["id_tag"] == "any-card"
+    assert recorded[0][2] == "in"
+    assert recorded[1][0] == "Authorize"
+    assert recorded[1][1]["idTagInfo"]["status"] == "Accepted"
+    assert recorded[1][2] == "out"
 
 
 @pytest.mark.asyncio
-async def test_start_transaction_is_permissive_persisted_and_recorded(tmp_path):
+async def test_start_transaction_is_permissive_persisted_and_records_reply(tmp_path):
     session, recorded = make_session(tmp_path)
 
     response = await ChargePointSession.on_start_transaction(
@@ -44,7 +55,11 @@ async def test_start_transaction_is_permissive_persisted_and_recorded(tmp_path):
     assert len(files) == 1
     assert '"id_tag": "card-a"' in files[0].read_text(encoding="utf-8")
     assert recorded[0][0] == "StartTransaction"
-    assert recorded[0][2] == 1
+    assert recorded[0][2] == "in"
+    assert recorded[0][3] == 1
+    assert recorded[1][0] == "StartTransaction"
+    assert recorded[1][2] == "out"
+    assert recorded[1][3] == 1
 
 
 @pytest.mark.asyncio
@@ -70,4 +85,9 @@ async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
     text = files[0].read_text(encoding="utf-8")
     assert '"transaction_id": 999' in text
     assert '"status": "stopped"' in text
-    assert [entry[0] for entry in recorded] == ["MeterValues", "StopTransaction"]
+    assert [(entry[0], entry[2]) for entry in recorded] == [
+        ("MeterValues", "in"),
+        ("MeterValues", "out"),
+        ("StopTransaction", "in"),
+        ("StopTransaction", "out"),
+    ]
