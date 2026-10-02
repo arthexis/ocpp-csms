@@ -21,7 +21,7 @@ The application runs as the installing user, not root. The installer uses `sudo`
 /etc/systemd/system/ocpp-csms.service
 ```
 
-The installer explicitly initializes the appliance storage before touching systemd, then validates the command, writable data directory, SQLite database, transaction archive, service state, and listening port. The service starts at boot and restarts on failure.
+The installer explicitly initializes the appliance storage before touching systemd, then validates the command, writable data directory, SQLite database, transaction archive, service state, and listening endpoint. The service starts at boot and restarts on failure.
 
 Useful commands:
 
@@ -37,6 +37,20 @@ Do not run the installer itself with sudo. To use another user-owned data direct
 ```bash
 OCPP_CSMS_DATA_DIR="$HOME/my-csms-data" sh install.sh
 ```
+
+The installed service listens on `0.0.0.0:9000` by default. Set a persistent listener endpoint during installation with arguments:
+
+```bash
+sh install.sh --host 0.0.0.0 --port 8888
+```
+
+or with environment variables:
+
+```bash
+OCPP_CSMS_HOST=0.0.0.0 OCPP_CSMS_PORT=8888 sh install.sh
+```
+
+The selected host and port are written into the installed systemd service and reused after reboot.
 
 ## Commands
 
