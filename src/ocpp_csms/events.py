@@ -9,7 +9,6 @@ from typing import Any
 from ocpp_csms.time import utc_now_iso
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-LEGACY_DATABASE_FILENAME = "events.sqlite3"
 _SCHEMA_VERSION = 2
 
 _DERIVED_SCHEMA = """
@@ -64,9 +63,6 @@ class EventStore:
         self.data_dir = Path(data_dir).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.data_dir / DATABASE_FILENAME
-        legacy = self.data_dir / LEGACY_DATABASE_FILENAME
-        if legacy.exists() and not self.path.exists():
-            legacy.replace(self.path)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
