@@ -94,7 +94,9 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
     latest = connection.execute(
         """
         SELECT received_at, action, transaction_id, id_tag, payload_json
-        FROM events WHERE charger_id = ? ORDER BY id DESC LIMIT 1
+        FROM events
+        WHERE charger_id = ? AND direction = 'in'
+        ORDER BY id DESC LIMIT 1
         """,
         (charger_id,),
     ).fetchone()
@@ -103,7 +105,7 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
     status_row = connection.execute(
         """
         SELECT payload_json FROM events
-        WHERE charger_id = ? AND action = 'StatusNotification'
+        WHERE charger_id = ? AND action = 'StatusNotification' AND direction = 'in'
         ORDER BY id DESC LIMIT 1
         """,
         (charger_id,),
@@ -119,7 +121,7 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
         """
         SELECT id, received_at, transaction_id, id_tag
         FROM events
-        WHERE charger_id = ? AND action = 'StartTransaction'
+        WHERE charger_id = ? AND action = 'StartTransaction' AND direction = 'in'
         ORDER BY id DESC LIMIT 1
         """,
         (charger_id,),
@@ -131,7 +133,8 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
         stop = connection.execute(
             """
             SELECT id FROM events
-            WHERE charger_id = ? AND action = 'StopTransaction' AND transaction_id = ? AND id > ?
+            WHERE charger_id = ? AND action = 'StopTransaction'
+              AND direction = 'in' AND transaction_id = ? AND id > ?
             ORDER BY id DESC LIMIT 1
             """,
             (charger_id, start["transaction_id"], start["id"]),
