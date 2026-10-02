@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ocpp_csms.events import DATABASE_FILENAME
+
 
 def _time(value: str) -> str:
     text = value.strip()
@@ -25,7 +27,7 @@ def events_between(
     until: str | None = None,
     limit: int = 200,
 ) -> list[sqlite3.Row]:
-    database = Path(data_dir).expanduser() / "events.sqlite3"
+    database = Path(data_dir).expanduser() / DATABASE_FILENAME
     if not database.exists():
         return []
     since = _time(since) if since else None

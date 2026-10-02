@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from ocpp.v16 import call_result
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.events import DATABASE_FILENAME, EventStore
 from ocpp_csms.server import RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
@@ -159,7 +159,7 @@ async def test_outbound_evidence_is_recorded_after_successful_send(tmp_path):
 
     await session.route_message(raw)
 
-    rows = sqlite3.connect(tmp_path / "events.sqlite3").execute(
+    rows = sqlite3.connect(tmp_path / DATABASE_FILENAME).execute(
         "SELECT direction FROM events WHERE action = 'Heartbeat' ORDER BY id"
     ).fetchall()
     assert rows == [("in",), ("out",)]
@@ -186,7 +186,7 @@ async def test_failed_send_does_not_record_outbound_evidence(tmp_path):
     with pytest.raises(OSError, match="connection lost"):
         await session.route_message(raw)
 
-    rows = sqlite3.connect(tmp_path / "events.sqlite3").execute(
+    rows = sqlite3.connect(tmp_path / DATABASE_FILENAME).execute(
         "SELECT direction FROM events WHERE action = 'Heartbeat' ORDER BY id"
     ).fetchall()
     assert rows == [("in",)]

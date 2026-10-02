@@ -21,7 +21,7 @@ The application runs as the installing user, not root. The installer uses `sudo`
 /etc/systemd/system/ocpp-csms.service
 ```
 
-The installer validates the command, writable data directory, SQLite initialization, service state, and listening port. The service starts at boot and restarts on failure.
+The installer explicitly initializes the appliance storage before touching systemd, then validates the command, writable data directory, SQLite database, transaction archive, service state, and listening port. The service starts at boot and restarts on failure.
 
 Useful commands:
 
@@ -43,6 +43,7 @@ OCPP_CSMS_DATA_DIR="$HOME/my-csms-data" sh install.sh
 Run `ocpp-csms`, `ocpp-csms help`, or `ocpp-csms --help` to show commands and parameters.
 
 ```text
+ocpp-csms init
 ocpp-csms serve [--host HOST] [--port PORT] [--log-level LEVEL]
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
@@ -51,7 +52,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-`events` reads the recorded OCPP/runtime timeline. `explain` is the same evidence view constrained to one charger and a selected incident window; it does not infer a root cause.
+`init` creates the SQLite database and transaction archive. `status` remains read-only. `events` reads the recorded OCPP/runtime timeline. `explain` is the same evidence view constrained to one charger and a selected incident window; it does not infer a root cause.
 
 ```bash
 ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z --until 2026-10-01T21:00:00Z
@@ -65,7 +66,7 @@ All commands accept `--data-dir PATH` before the command name. Diagnostic timest
 
 ```text
 ~/ocpp-csms-data/
-  events.sqlite3
+  ocpp-csms.sqlite3
   transactions/
     YYYY-MM-DD/
       <charger>-<transaction>.json

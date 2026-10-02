@@ -12,6 +12,7 @@ BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
 DATA_DIR=${OCPP_CSMS_DATA_DIR:-"$HOME/ocpp-csms-data"}
 VENV="$PREFIX/venv"
 COMMAND="$BIN_DIR/ocpp-csms"
+DATABASE_NAME=ocpp-csms.sqlite3
 SERVICE_NAME=ocpp-csms.service
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
@@ -46,9 +47,13 @@ ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
 }
 
 # Initialize and validate the local evidence store before touching systemd.
-"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null
-[ -f "$DATA_DIR/events.sqlite3" ] || {
-    printf 'SQLite evidence database was not created: %s/events.sqlite3\n' "$DATA_DIR" >&2
+"$COMMAND" --data-dir "$DATA_DIR" init
+[ -f "$DATA_DIR/$DATABASE_NAME" ] || {
+    printf 'SQLite evidence database was not created: %s/%s\n' "$DATA_DIR" "$DATABASE_NAME" >&2
+    exit 1
+}
+[ -d "$DATA_DIR/transactions" ] || {
+    printf 'Transaction archive was not created: %s/transactions\n' "$DATA_DIR" >&2
     exit 1
 }
 
