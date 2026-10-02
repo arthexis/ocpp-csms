@@ -108,6 +108,37 @@ async def test_start_transaction_is_permissive_and_persisted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    session = ChargePointSession(
+        "charger-a",
+        SimpleNamespace(last_frame="start"),
+        archive,
+        events,
+    )
+    payload = {
+        "connector_id": 1,
+        "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z",
+        "meter_start": 100,
+    }
+
+    lock = sqlite3.connect(tmp_path / DATABASE_FILENAME)
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        first = await session.on_start_transaction(**payload)
+        retry = await session.on_start_transaction(**payload)
+    finally:
+        lock.rollback()
+        lock.close()
+
+    assert first.transaction_id == 1
+    assert retry.transaction_id == first.transaction_id
+    assert len(list((tmp_path / "transactions").glob("*/*.json"))) == 1
+
+
+@pytest.mark.asyncio
 async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
     session, recorded = make_session(tmp_path)
 
