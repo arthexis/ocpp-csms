@@ -10,6 +10,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
 DATA_DIR=${OCPP_CSMS_DATA_DIR:-"$HOME/ocpp-csms-data"}
+HOST=${OCPP_CSMS_HOST:-"0.0.0.0"}
+PORT=${OCPP_CSMS_PORT:-9000}
 VENV="$PREFIX/venv"
 COMMAND="$BIN_DIR/ocpp-csms"
 DATABASE_NAME=ocpp-csms.sqlite3
@@ -18,6 +20,57 @@ SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
+
+usage() {
+    printf 'Usage: sh install.sh [--host HOST] [--port PORT]\n'
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --host)
+            [ "$#" -ge 2 ] || { printf 'Missing value for --host\n' >&2; exit 2; }
+            HOST=$2
+            shift 2
+            ;;
+        --host=*)
+            HOST=${1#*=}
+            shift
+            ;;
+        --port)
+            [ "$#" -ge 2 ] || { printf 'Missing value for --port\n' >&2; exit 2; }
+            PORT=$2
+            shift 2
+            ;;
+        --port=*)
+            PORT=${1#*=}
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'Unknown option: %s\n' "$1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+[ -n "$HOST" ] || {
+    printf 'Listener host must not be empty.\n' >&2
+    exit 2
+}
+case "$PORT" in
+    ''|*[!0-9]*)
+        printf 'Listener port must be an integer: %s\n' "$PORT" >&2
+        exit 2
+        ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    printf 'Listener port must be between 1 and 65535: %s\n' "$PORT" >&2
+    exit 2
+fi
 
 need() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -66,6 +119,7 @@ GROUP_ESC=$(escape_sed "$INSTALL_GROUP")
 HOME_ESC=$(escape_sed "$HOME")
 COMMAND_ESC=$(escape_sed "$COMMAND")
 DATA_ESC=$(escape_sed "$DATA_DIR")
+HOST_ESC=$(escape_sed "$HOST")
 
 TMP_SERVICE=$(mktemp)
 trap 'rm -f "$TMP_SERVICE"' EXIT HUP INT TERM
@@ -75,6 +129,8 @@ sed \
     -e "s|@HOME@|$HOME_ESC|g" \
     -e "s|@COMMAND@|$COMMAND_ESC|g" \
     -e "s|@DATA_DIR@|$DATA_ESC|g" \
+    -e "s|@HOST@|$HOST_ESC|g" \
+    -e "s|@PORT@|$PORT|g" \
     "$SERVICE_TEMPLATE" > "$TMP_SERVICE"
 
 if command -v systemd-analyze >/dev/null 2>&1; then
@@ -91,21 +147,26 @@ if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
     exit 1
 fi
 
-# Verify the process actually accepts TCP connections on the default OCPP port.
-if ! "$VENV/bin/python" - <<'PY'
+# Verify the process actually accepts TCP connections on the configured endpoint.
+if ! "$VENV/bin/python" - "$HOST" "$PORT" <<'PY'
 import socket
+import sys
 import time
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+probe_host = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host
 
 for _ in range(20):
     try:
-        with socket.create_connection(("127.0.0.1", 9000), timeout=0.5):
+        with socket.create_connection((probe_host, port), timeout=0.5):
             raise SystemExit(0)
     except OSError:
         time.sleep(0.25)
 raise SystemExit(1)
 PY
 then
-    printf 'Service is active but port 9000 is not accepting connections. Recent logs:\n' >&2
+    printf 'Service is active but %s:%s is not accepting connections. Recent logs:\n' "$HOST" "$PORT" >&2
     sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager >&2 || true
     exit 1
 fi
@@ -121,7 +182,7 @@ fi
 printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
 printf 'Command: %s\n' "$COMMAND"
 printf 'Data:    %s\n' "$DATA_DIR"
-printf 'Service: %s (active, enabled, listening on port 9000)\n' "$SERVICE_NAME"
+printf 'Service: %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
 printf '\nUseful commands:\n'
 printf '  %s status\n' "$COMMAND"
 printf '  sudo systemctl status %s\n' "$SERVICE_NAME"
