@@ -4,6 +4,20 @@ A deliberately small Python OCPP 1.6J CSMS.
 
 The first version keeps protocol handling direct and permissive. It is intended to become an appliance-style service: accept chargers, avoid blocking charging, preserve evidence, and expose only a small diagnostic surface.
 
+## Trust boundary
+
+The built-in listener is designed for a trusted charger LAN or an equivalent private network boundary. Its default operating policy is deliberately permissive: unknown charge-point identities are accepted, RFID authorization is accepted by default, and a charger is not rejected solely because it failed to negotiate the expected `ocpp1.6` WebSocket subprotocol. Those conditions are preserved as operational evidence so they can be diagnosed without turning the CSMS itself into an accidental charging gatekeeper.
+
+The built-in listener uses plain `ws://`; it does not terminate TLS or authenticate clients itself. Do not expose that listener directly to an untrusted network or the public Internet.
+
+When chargers must reach the CSMS across a broader network, place the appliance behind an appropriate transport/security boundary, for example:
+
+- a private VPN or WireGuard network between chargers/sites and the CSMS;
+- a TLS-terminating reverse proxy that exposes `wss://` and forwards trusted traffic to the local `ws://` listener;
+- an equivalent private routed network, firewall, or gateway that prevents arbitrary external clients from reaching the listener.
+
+Access restrictions such as charger allowlists, RFID deny policies, client certificates, or mandatory strict admission are intentionally not part of the default appliance behavior. They should be added only as opt-in deployment policy when a real environment requires them.
+
 ## Install the appliance
 
 From the repository checkout:
