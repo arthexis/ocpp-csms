@@ -14,6 +14,8 @@ from ocpp_csms.time import utc_now_iso
 LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 _START_RETRY_WINDOW = timedelta(seconds=60)
+_ORIGIN_LOCAL = "local"
+_ORIGIN_RECOVERED = "recovered"
 
 
 def default_data_dir() -> Path:
@@ -58,6 +60,14 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _record_origin(record: dict[str, Any]) -> str:
+    """Return explicit provenance, inferring it for pre-origin archives."""
+    origin = record.get("origin")
+    if origin in {_ORIGIN_LOCAL, _ORIGIN_RECOVERED}:
+        return origin
+    return _ORIGIN_LOCAL if isinstance(record.get("start"), dict) else _ORIGIN_RECOVERED
+
+
 class TransactionArchive:
     """Human-readable, append-friendly JSON transaction persistence."""
 
@@ -67,6 +77,7 @@ class TransactionArchive:
         self.transactions_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
         self._paths: dict[int, Path] = {}
+        self._origins: dict[int, str] = {}
         self._recent_starts: dict[str, tuple[int, datetime]] = {}
         self._next_transaction_id = 1
         self._scan_existing()
@@ -80,6 +91,7 @@ class TransactionArchive:
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
                 continue
             self._paths[transaction_id] = path
+            self._origins[transaction_id] = _record_origin(record)
             highest = max(highest, transaction_id)
 
             start = record.get("start")
@@ -106,6 +118,7 @@ class TransactionArchive:
             timestamp = utc_now_iso()
             record = {
                 "transaction_id": transaction_id,
+                "origin": _ORIGIN_LOCAL,
                 "charge_point_id": charge_point_id,
                 "status": "open",
                 "created_at": timestamp,
@@ -127,6 +140,7 @@ class TransactionArchive:
                 raise
 
             self._paths[transaction_id] = path
+            self._origins[transaction_id] = _ORIGIN_LOCAL
             self._recent_starts[key] = (transaction_id, _parse_time(timestamp) or now)
             self._next_transaction_id += 1
             return transaction_id
@@ -164,13 +178,18 @@ class TransactionArchive:
         path = self._paths.get(transaction_id)
         if path is not None and path.exists():
             try:
-                return path, json.loads(path.read_text(encoding="utf-8"))
+                record = json.loads(path.read_text(encoding="utf-8"))
+                origin = _record_origin(record)
+                record.setdefault("origin", origin)
+                self._origins[transaction_id] = origin
+                return path, record
             except (OSError, json.JSONDecodeError):
                 pass
 
         path = self._path_for(transaction_id, charge_point_id, payload)
         record = {
             "transaction_id": transaction_id,
+            "origin": _ORIGIN_RECOVERED,
             "charge_point_id": charge_point_id,
             "status": "recovered",
             "created_at": utc_now_iso(),
@@ -181,6 +200,7 @@ class TransactionArchive:
             "stop": None,
         }
         self._paths[transaction_id] = path
+        self._origins[transaction_id] = _ORIGIN_RECOVERED
         self._next_transaction_id = max(self._next_transaction_id, transaction_id + 1)
         return path, record
 
