@@ -199,12 +199,11 @@ def format_events(events: list[DiagnosticEvent]) -> str:
     return "\n".join(lines)
 
 
-def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10) -> str:
-    events = events_around(data_dir, charger_id, at, minutes=minutes)
+def _format_explanation(charger_id: str, heading: str, events: list[DiagnosticEvent]) -> str:
     if not events:
-        return f"{charger_id}: no recorded evidence around {at}"
+        return f"{charger_id}: no recorded evidence {heading}"
 
-    lines = [f"{charger_id} around {at}", ""]
+    lines = [f"{charger_id} {heading}", ""]
     for event in events:
         lines.append(f"{event.occurred_at}  {_summary(event)}")
 
@@ -227,19 +226,13 @@ def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10
     lines.append("Evidence summary:")
     if "Authorize" in inbound_actions:
         lines.append("- Authorization request was received by the CSMS.")
-        authorize_reply = next(
-            (event for event in outbound if event.action == "Authorize"),
-            None,
-        )
+        authorize_reply = next((event for event in outbound if event.action == "Authorize"), None)
         if authorize_reply is not None:
             status = _response_status(authorize_reply.payload or {})
             lines.append(f"- CSMS authorization reply: {status or 'recorded response'}.")
     if "StartTransaction" in inbound_actions:
         lines.append("- A StartTransaction was received.")
-        start_reply = next(
-            (event for event in outbound if event.action == "StartTransaction"),
-            None,
-        )
+        start_reply = next((event for event in outbound if event.action == "StartTransaction"), None)
         if start_reply is not None:
             status = _response_status(start_reply.payload or {})
             lines.append(f"- CSMS StartTransaction reply: {status or 'recorded response'}.")
@@ -258,3 +251,26 @@ def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10
         lines.append("- A StopTransaction was received.")
 
     return "\n".join(lines)
+
+
+def explain(data_dir: str | Path, charger_id: str, at: str, *, minutes: int = 10) -> str:
+    events = events_around(data_dir, charger_id, at, minutes=minutes)
+    return _format_explanation(charger_id, f"around {at}", events)
+
+
+def explain_between(
+    data_dir: str | Path,
+    charger_id: str,
+    since: str,
+    until: str,
+) -> str:
+    if _parse_time(since) > _parse_time(until):
+        raise ValueError("--since must be earlier than or equal to --until")
+    events = events_between(
+        data_dir,
+        charger_id=charger_id,
+        since=since,
+        until=until,
+        limit=1000,
+    )
+    return _format_explanation(charger_id, f"from {since} until {until}", events)
