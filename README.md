@@ -93,7 +93,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-`init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
+`init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. It never starts, stops, closes, repairs, or deletes a transaction. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
 
 Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction, so an active transaction and `--last` are never the same record. A positional transaction ID opens a detailed read-only view. List filters include `--charger`, `--connector` / `--cp`, `--id-tag`, `--since`, `--until`, and `--limit`.
 
