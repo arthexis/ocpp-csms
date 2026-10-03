@@ -5,10 +5,12 @@ import asyncio
 import logging
 
 from ocpp_csms.control import send_control
-from ocpp_csms.diagnostics import events_between, explain, format_events
+from ocpp_csms.diagnostics import events_between, explain, format_events, transaction_events
 from ocpp_csms.events import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.status import appliance_status, format_status
+from ocpp_csms.transaction_cli import format_transaction, format_transactions
+from ocpp_csms.transaction_query import TransactionQuery
 from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
 
@@ -30,12 +32,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 
     start = subcommands.add_parser("start", help="Request remote transaction start")
     add(start, "charger", help="Charge point ID")
-    add(start, "--connector", type=int, help="Connector ID")
+    add(start, "--connector", "--cp", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
     add(stop, "charger", help="Charge point ID")
-    add(stop, "--transaction", type=int, required=True, help="OCPP transaction ID")
+    add(stop, "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
 
     reboot = subcommands.add_parser("reboot", help="Request charger reset")
     add(reboot, "charger", help="Charge point ID")
@@ -44,6 +46,24 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
     add(status, "--charging", action="store_true", help="Show only charging chargers")
+
+    transactions = subcommands.add_parser(
+        "transactions",
+        aliases=["txn"],
+        help="Inspect archived transactions",
+    )
+    transactions.set_defaults(command="transactions")
+    add(transactions, "transaction_id", nargs="?", type=int, help="Transaction ID for detailed inspection")
+    selection = transactions.add_mutually_exclusive_group()
+    selection.add_argument("--active", action="store_true", help="Show only active transactions")
+    selection.add_argument("--last", action="store_true", help="Show the most recent non-active transaction")
+    add(transactions, "--charger", help="Filter by charge point ID")
+    add(transactions, "--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
+    add(transactions, "--id-tag", help="Filter by OCPP idTag")
+    add(transactions, "--since", help="ISO-8601 lower timestamp bound")
+    add(transactions, "--until", help="ISO-8601 upper timestamp bound")
+    add(transactions, "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
+    add(transactions, "--events", action="store_true", help="Show OCPP timeline for a transaction ID")
 
     events = subcommands.add_parser("events", help="Show recorded events")
     add(events, "charger", nargs="?", help="Optional charge point ID")
@@ -59,7 +79,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    topics = ("init", "serve", "start", "stop", "reboot", "status", "events", "explain")
+    topics = ("init", "serve", "start", "stop", "reboot", "status", "transactions", "txn", "events", "explain")
     add(help_parser, "topic", nargs="?", choices=topics)
     commands = {
         "init": init,
@@ -68,6 +88,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "stop": stop,
         "reboot": reboot,
         "status": status,
+        "transactions": transactions,
+        "txn": transactions,
         "events": events,
         "explain": explain_parser,
     }
@@ -79,7 +101,12 @@ def print_help(parser: argparse.ArgumentParser, commands: dict[str, argparse.Arg
         commands[topic].print_help()
         return
     parser.print_help()
+    printed: set[int] = set()
     for command in commands.values():
+        identity = id(command)
+        if identity in printed:
+            continue
+        printed.add(identity)
         print()
         command.print_help()
 
@@ -141,6 +168,49 @@ def run_control(args: argparse.Namespace) -> int:
     return 0 if status == "Accepted" else 1
 
 
+def run_transactions(args: argparse.Namespace) -> str:
+    if args.transaction_id is not None and args.transaction_id < 0:
+        raise ValueError("transaction ID must be zero or greater")
+    if args.connector is not None and args.connector < 0:
+        raise ValueError("--connector/--cp must be zero or greater")
+    if args.limit < 1:
+        raise ValueError("--limit must be at least 1")
+
+    filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until))
+    if args.events and args.transaction_id is None:
+        raise ValueError("--events requires a transaction ID")
+    if args.transaction_id is not None and (args.active or args.last or filtered or args.limit != 20):
+        raise ValueError("transaction ID cannot be combined with list filters or selectors")
+
+    query = TransactionQuery(args.data_dir)
+    if args.transaction_id is not None:
+        view = query.get(args.transaction_id)
+        if view is None:
+            return f"Transaction {args.transaction_id} not found."
+        detail = format_transaction(view)
+        if not args.events:
+            return detail
+        timeline = format_events(
+            transaction_events(args.data_dir, args.transaction_id),
+            heading=f"Transaction {args.transaction_id} OCPP events",
+        )
+        return f"{detail}\n\n{timeline}"
+
+    filters = {
+        "charger": args.charger,
+        "connector": args.connector,
+        "id_tag": args.id_tag,
+        "since": args.since,
+        "until": args.until,
+    }
+    if args.active:
+        return format_transactions(query.active(**filters))
+    if args.last:
+        view = query.last(**filters)
+        return format_transactions([view] if view is not None else [])
+    return format_transactions(query.list(limit=args.limit, **filters))
+
+
 def main() -> int:
     parser, commands = build_parser()
     args = parser.parse_args()
@@ -161,6 +231,12 @@ def main() -> int:
             parser.error(str(exc))
     if args.command == "status":
         print(format_status(appliance_status(args.data_dir), charger_id=args.charger, charging_only=args.charging))
+        return 0
+    if args.command == "transactions":
+        try:
+            print(run_transactions(args))
+        except ValueError as exc:
+            parser.error(str(exc))
         return 0
     if args.command == "events":
         if args.limit < 1:

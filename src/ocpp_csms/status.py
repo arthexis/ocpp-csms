@@ -8,6 +8,7 @@ from typing import Any
 
 from ocpp_csms.events import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
+from ocpp_csms.transaction_query import TransactionQuery
 
 
 @dataclass
@@ -46,6 +47,13 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
     running = process_is_running(root)
+    active_chargers = sorted(
+        {
+            view.charge_point_id
+            for view in TransactionQuery(root).active()
+            if view.charge_point_id
+        }
+    )
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
@@ -53,6 +61,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         "server": "running" if running else "stopped",
         "started_at": None,
         "chargers": [],
+        "active_chargers": active_chargers,
     }
     if database.exists():
         try:
@@ -208,10 +217,11 @@ def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerS
 
 def format_status(data: dict[str, Any], *, charger_id: str | None = None, charging_only: bool = False) -> str:
     chargers: list[ChargerStatus] = data.get("chargers", [])
+    active_chargers = set(data.get("active_chargers", []))
     if charger_id is not None:
         chargers = [item for item in chargers if item.charger_id == charger_id]
     if charging_only:
-        chargers = [item for item in chargers if item.transaction_id is not None]
+        chargers = [item for item in chargers if item.charger_id in active_chargers]
 
     if charger_id is not None:
         if not chargers:
@@ -244,7 +254,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         else:
             lines.extend(
                 [
-                    f"Charging: {'yes' if item.transaction_id is not None else 'no'}",
+                    f"Charging: {'yes' if item.charger_id in active_chargers else 'no'}",
                     f"Transaction: {item.transaction_id if item.transaction_id is not None else '-'}",
                     f"RFID: {item.id_tag or '-'}",
                     f"Started: {item.started_at or '-'}",
@@ -268,6 +278,6 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     lines.append("ID                 Connected  Status       Charging  Last seen")
     for item in chargers:
         lines.append(
-            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.status or 'Unknown'):<12} {'yes' if item.transaction_id is not None else 'no':<9} {item.last_seen or '-'}"
+            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.status or 'Unknown'):<12} {'yes' if item.charger_id in active_chargers else 'no':<9} {item.last_seen or '-'}"
         )
     return "\n".join(lines)
