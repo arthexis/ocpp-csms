@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 
 from ocpp_csms.control import send_control
@@ -65,6 +66,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(profile_set, "template", help="Built-in profile template name")
     add(profile_set, "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_set, "--watts", type=int, required=True, help="Maximum charging power in watts")
+    profile_composite = profile_subcommands.add_parser("composite", help="Show the charger's effective composite schedule")
+    add(profile_composite, "--charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_composite, "--connector", "--cp", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
+    add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
+    add(profile_composite, "--json", action="store_true", help="Print the OCPP response as JSON")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
@@ -267,6 +273,52 @@ def _profile_set_request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
+def _profile_composite_request(args: argparse.Namespace) -> dict[str, object]:
+    if args.connector < 0:
+        raise ValueError("--connector/--cp must be zero or greater")
+    if args.duration < 1:
+        raise ValueError("--duration must be at least 1 second")
+    request: dict[str, object] = {
+        "command": "get_composite_schedule",
+        "connector": args.connector,
+        "duration": args.duration,
+    }
+    if args.charger is not None:
+        request["charger"] = args.charger
+    return request
+
+
+def _schedule_value(mapping: dict[str, object], snake: str, camel: str) -> object:
+    return mapping.get(snake, mapping.get(camel))
+
+
+def _format_composite_schedule(payload: dict[str, object]) -> str:
+    status = payload.get("status")
+    if status != "Accepted":
+        return str(status or "Unknown")
+    connector = payload.get("connector_id", payload.get("connectorId"))
+    start = payload.get("schedule_start", payload.get("scheduleStart"))
+    schedule = payload.get("charging_schedule", payload.get("chargingSchedule"))
+    if not isinstance(schedule, dict):
+        raise ValueError("invalid composite schedule response")
+    unit = _schedule_value(schedule, "charging_rate_unit", "chargingRateUnit")
+    periods = _schedule_value(schedule, "charging_schedule_period", "chargingSchedulePeriod")
+    if not isinstance(periods, list):
+        raise ValueError("invalid composite schedule response")
+    lines = [f"Connector: {connector}", f"Schedule start: {start}", f"Rate unit: {unit}", "Periods:"]
+    for period in periods:
+        if not isinstance(period, dict):
+            raise ValueError("invalid composite schedule response")
+        offset = _schedule_value(period, "start_period", "startPeriod")
+        limit = period.get("limit")
+        phases = _schedule_value(period, "number_phases", "numberPhases")
+        line = f"  +{offset}s\t{limit} {unit}"
+        if phases is not None:
+            line += f"\t{phases} phase(s)"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def run_profile(args: argparse.Namespace) -> int:
     if args.profile_command == "list":
         print(format_profile_template_list())
@@ -295,6 +347,31 @@ def run_profile(args: argparse.Namespace) -> int:
         status = payload.get("status") if isinstance(payload, dict) else None
         print(status or "Unknown")
         return 0 if status == "Accepted" else 1
+    if args.profile_command == "composite":
+        try:
+            request = _profile_composite_request(args)
+            response = asyncio.run(send_control(args.data_dir, request))
+        except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+            print(f"error: {exc}")
+            return 1
+        error = response.get("error")
+        if error:
+            detail = response.get("detail") or response.get("charger")
+            suffix = f": {detail}" if detail is not None else ""
+            print(f"error: {error}{suffix}")
+            return 1
+        payload = response.get("response")
+        if not isinstance(payload, dict):
+            return 1
+        if args.json:
+            print(json.dumps(payload, sort_keys=True))
+        else:
+            try:
+                print(_format_composite_schedule(payload))
+            except ValueError as exc:
+                print(f"error: {exc}")
+                return 1
+        return 0 if payload.get("status") == "Accepted" else 1
     raise ValueError("profile requires a subcommand")
 
 
