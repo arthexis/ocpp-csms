@@ -8,6 +8,27 @@ from typing import Any
 
 from ocpp_csms.events import DATABASE_FILENAME
 
+REDACTED = "[REDACTED]"
+_SENSITIVE_EXACT_KEYS = {
+    "rfidtagfreecharging",
+    "tykey",
+}
+_SENSITIVE_KEY_FRAGMENTS = (
+    "password",
+    "passwd",
+    "pwd",
+    "passphrase",
+    "secret",
+    "token",
+    "psk",
+    "authorizationkey",
+    "authkey",
+    "privatekey",
+    "apikey",
+    "accesskey",
+    "clientsecret",
+)
+
 
 async def _send_control(path: str, request: dict[str, Any]) -> dict[str, Any]:
     reader, writer = await asyncio.open_unix_connection(str(Path(path).expanduser()))
@@ -71,6 +92,17 @@ def reboot_observation(
     }
 
 
+def _normalized_key_name(key: str) -> str:
+    return "".join(character for character in key.lower() if character.isalnum())
+
+
+def sensitive_configuration_key(key: str) -> bool:
+    normalized = _normalized_key_name(key)
+    return normalized in _SENSITIVE_EXACT_KEYS or any(
+        fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS
+    )
+
+
 def configuration_payload(response: dict[str, Any]) -> dict[str, Any]:
     if response.get("ok") is not True:
         raise RuntimeError(str(response.get("error") or "configuration request failed"))
@@ -92,6 +124,8 @@ def configuration_payload(response: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("invalid configuration response")
         if value is not None and not isinstance(value, str):
             raise ValueError("invalid configuration response")
+        if sensitive_configuration_key(key):
+            value = REDACTED
         normalized.append({"key": key, "readonly": readonly, "value": value})
     if any(not isinstance(key, str) for key in unknown):
         raise ValueError("invalid configuration response")
