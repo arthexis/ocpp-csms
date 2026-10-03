@@ -16,6 +16,21 @@ class Session(Protocol):
     async def reset(self, reset_type: str = "Soft") -> Any: ...
     async def get_configuration(self, keys: list[str] | None = None) -> Any: ...
     async def change_configuration(self, key: str, value: str) -> Any: ...
+    async def set_charging_profile(self, connector_id: int, profile: dict[str, Any]) -> Any: ...
+    async def clear_charging_profile(
+        self,
+        *,
+        profile_id: int | None = None,
+        connector_id: int | None = None,
+        purpose: str | None = None,
+        stack_level: int | None = None,
+    ) -> Any: ...
+    async def get_composite_schedule(
+        self,
+        connector_id: int,
+        duration: int,
+        charging_rate_unit: str | None = None,
+    ) -> Any: ...
 
 
 class SessionRegistry(Protocol):
@@ -63,6 +78,14 @@ def _configuration_keys(request: dict[str, Any]) -> list[str] | None | object:
     if any(not isinstance(key, str) or not key for key in keys):
         return _INVALID
     return keys
+
+
+def _non_negative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
@@ -127,12 +150,12 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             connector = request.get("connector")
             if not isinstance(id_tag, str) or not id_tag:
                 return {"error": "missing_id_tag"}
-            if connector is not None and (not isinstance(connector, int) or isinstance(connector, bool) or connector < 0):
+            if connector is not None and not _non_negative_int(connector):
                 return {"error": "invalid_connector"}
             response = await session.remote_start(id_tag=id_tag, connector_id=connector)
         elif command == "stop":
             transaction = request.get("transaction")
-            if not isinstance(transaction, int) or isinstance(transaction, bool) or transaction < 0:
+            if not _non_negative_int(transaction):
                 return {"error": "invalid_transaction"}
             response = await session.remote_stop(transaction)
         elif command == "reboot":
@@ -167,6 +190,44 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                     "readback": _response_payload(readback),
                 },
             }
+        elif command == "set_charging_profile":
+            connector = request.get("connector")
+            profile = request.get("profile")
+            if not _non_negative_int(connector):
+                return {"error": "invalid_connector"}
+            if not isinstance(profile, dict):
+                return {"error": "invalid_profile"}
+            response = await session.set_charging_profile(connector, profile)
+        elif command == "clear_charging_profile":
+            profile_id = request.get("id")
+            connector = request.get("connector")
+            purpose = request.get("purpose")
+            stack_level = request.get("stack_level")
+            if profile_id is not None and not _non_negative_int(profile_id):
+                return {"error": "invalid_profile_id"}
+            if connector is not None and not _non_negative_int(connector):
+                return {"error": "invalid_connector"}
+            if purpose is not None and (not isinstance(purpose, str) or not purpose):
+                return {"error": "invalid_purpose"}
+            if stack_level is not None and not _non_negative_int(stack_level):
+                return {"error": "invalid_stack_level"}
+            response = await session.clear_charging_profile(
+                profile_id=profile_id,
+                connector_id=connector,
+                purpose=purpose,
+                stack_level=stack_level,
+            )
+        elif command == "get_composite_schedule":
+            connector = request.get("connector")
+            duration = request.get("duration")
+            charging_rate_unit = request.get("charging_rate_unit")
+            if not _non_negative_int(connector):
+                return {"error": "invalid_connector"}
+            if not _positive_int(duration):
+                return {"error": "invalid_duration"}
+            if charging_rate_unit is not None and charging_rate_unit not in {"A", "W"}:
+                return {"error": "invalid_charging_rate_unit"}
+            response = await session.get_composite_schedule(connector, duration, charging_rate_unit)
         else:
             return {"error": "unknown_command", "command": command}
     except Exception as exc:
