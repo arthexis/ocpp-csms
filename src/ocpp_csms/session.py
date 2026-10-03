@@ -85,6 +85,17 @@ class ChargePointSession(OcppChargePoint):
         self._record("GetConfiguration", dict(response.__dict__), direction="in")
         return response
 
+    async def change_configuration(
+        self,
+        key: str,
+        value: str,
+    ) -> call_result.ChangeConfigurationPayload:
+        payload = {"key": key, "value": value}
+        self._record("ChangeConfiguration", payload, direction="out")
+        response = await self.call(call.ChangeConfigurationPayload(key=key, value=value))
+        self._record("ChangeConfiguration", dict(response.__dict__), direction="in")
+        return response
+
     def _record(
         self,
         action: str,

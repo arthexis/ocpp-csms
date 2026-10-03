@@ -24,7 +24,6 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     subcommands = parser.add_subparsers(dest="command")
 
     init = subcommands.add_parser("init", help="Initialize appliance storage")
-
     serve = subcommands.add_parser("serve", help="Run the OCPP server")
     add(serve, "--host", default="0.0.0.0")
     add(serve, "--port", type=int, default=9000)
@@ -46,20 +45,16 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(reboot, "--charger", dest="charger_option", help="Explicit charge point ID")
     add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
-    config = subcommands.add_parser("config", help="Read charger configuration")
+    config = subcommands.add_parser("config", help="Read or change charger configuration")
     add(config, "--charger", help="Explicit charge point ID when more than one charger is connected")
-    add(config, "keys", nargs="*", metavar="KEY", help="Optional OCPP configuration keys")
-    add(config, "-f", "--force", action="store_true", help="Query even with an active transaction")
+    add(config, "items", nargs="*", metavar="KEY", help="Keys to read, or: set KEY VALUE")
+    add(config, "-f", "--force", action="store_true", help="Operate even with an active transaction")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
     add(status, "--charging", action="store_true", help="Show only charging chargers")
 
-    transactions = subcommands.add_parser(
-        "transactions",
-        aliases=["txn"],
-        help="Inspect archived transactions",
-    )
+    transactions = subcommands.add_parser("transactions", aliases=["txn"], help="Inspect archived transactions")
     transactions.set_defaults(command="transactions")
     add(transactions, "transaction_id", nargs="?", type=int, help="Transaction ID for detailed inspection")
     selection = transactions.add_mutually_exclusive_group()
@@ -89,19 +84,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
     topics = ("init", "serve", "start", "stop", "reboot", "config", "status", "transactions", "txn", "events", "explain")
     add(help_parser, "topic", nargs="?", choices=topics)
-    commands = {
-        "init": init,
-        "serve": serve,
-        "start": start,
-        "stop": stop,
-        "reboot": reboot,
-        "config": config,
-        "status": status,
-        "transactions": transactions,
-        "txn": transactions,
-        "events": events,
-        "explain": explain_parser,
-    }
+    commands = {"init": init, "serve": serve, "start": start, "stop": stop, "reboot": reboot, "config": config, "status": status, "transactions": transactions, "txn": transactions, "events": events, "explain": explain_parser}
     return parser, commands
 
 
@@ -122,12 +105,7 @@ def print_help(parser: argparse.ArgumentParser, commands: dict[str, argparse.Arg
 
 async def run_server(args: argparse.Namespace) -> None:
     logging.basicConfig(level=args.log_level.upper())
-    await CSMSServer(
-        host=args.host,
-        port=args.port,
-        transactions=TransactionArchive(args.data_dir),
-        events=EventStore(args.data_dir),
-    ).serve_forever()
+    await CSMSServer(host=args.host, port=args.port, transactions=TransactionArchive(args.data_dir), events=EventStore(args.data_dir)).serve_forever()
 
 
 def initialize_storage(data_dir: str) -> None:
@@ -160,14 +138,22 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
 
 
 def configuration_request(args: argparse.Namespace) -> dict[str, object]:
-    request: dict[str, object] = {
-        "command": "config",
-        "force": bool(args.force),
-    }
+    items = list(args.items)
+    if items and items[0] == "set":
+        if len(items) != 3:
+            raise ValueError("config set requires KEY and VALUE")
+        request: dict[str, object] = {
+            "command": "config_set",
+            "key": items[1],
+            "value": items[2],
+            "force": bool(args.force),
+        }
+    else:
+        request = {"command": "config", "force": bool(args.force)}
+        if items:
+            request["keys"] = items
     if args.charger is not None:
         request["charger"] = args.charger
-    if args.keys:
-        request["keys"] = list(args.keys)
     return request
 
 
@@ -176,40 +162,31 @@ def run_control(args: argparse.Namespace) -> int:
         raise ValueError("--connector must be zero or greater")
     if args.command == "stop" and args.transaction < 0:
         raise ValueError("--transaction must be zero or greater")
-
     try:
         response = asyncio.run(send_control(args.data_dir, control_request(args)))
     except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"error: control unavailable: {exc}")
         return 1
-
     error = response.get("error")
     if error:
         detail = response.get("detail") or response.get("charger") or response.get("command")
         suffix = f": {detail}" if detail is not None else ""
         print(f"error: {error}{suffix}")
         return 1
-
     payload = response.get("response")
     status = payload.get("status") if isinstance(payload, dict) else None
     if status is None:
         print("ok")
         return 0
-
     print(status)
     return 0 if status == "Accepted" else 1
 
 
 def _format_configuration(payload: dict[str, object]) -> str:
-    rows = payload.get("configuration_key")
-    unknown = payload.get("unknown_key")
-    if rows is None:
-        rows = []
-    if unknown is None:
-        unknown = []
+    rows = payload.get("configuration_key") or []
+    unknown = payload.get("unknown_key") or []
     if not isinstance(rows, list) or not isinstance(unknown, list):
         raise ValueError("invalid configuration response")
-
     lines = ["KEY\tACCESS\tVALUE"]
     for row in rows:
         if not isinstance(row, dict):
@@ -217,12 +194,9 @@ def _format_configuration(payload: dict[str, object]) -> str:
         key = row.get("key")
         readonly = row.get("readonly")
         value = row.get("value")
-        if not isinstance(key, str) or not isinstance(readonly, bool):
-            raise ValueError("invalid configuration response")
-        if value is not None and not isinstance(value, str):
+        if not isinstance(key, str) or not isinstance(readonly, bool) or (value is not None and not isinstance(value, str)):
             raise ValueError("invalid configuration response")
         lines.append(f"{key}\t{'R' if readonly else 'RW'}\t{value or ''}")
-
     for key in unknown:
         if not isinstance(key, str):
             raise ValueError("invalid configuration response")
@@ -232,21 +206,32 @@ def _format_configuration(payload: dict[str, object]) -> str:
 
 def run_configuration(args: argparse.Namespace) -> int:
     try:
-        response = asyncio.run(send_control(args.data_dir, configuration_request(args)))
+        request = configuration_request(args)
+        response = asyncio.run(send_control(args.data_dir, request))
     except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"error: control unavailable: {exc}")
         return 1
-
     error = response.get("error")
     if error:
         detail = response.get("detail") or response.get("charger")
         suffix = f": {detail}" if detail is not None else ""
         print(f"error: {error}{suffix}")
         return 1
-
     payload = response.get("response")
     if not isinstance(payload, dict):
         return 1
+    if request["command"] == "config_set":
+        change = payload.get("change")
+        readback = payload.get("readback")
+        if not isinstance(change, dict) or not isinstance(readback, dict):
+            return 1
+        status = change.get("status")
+        print(status or "Unknown")
+        try:
+            print(_format_configuration(readback))
+        except ValueError:
+            return 1
+        return 0 if status in {"Accepted", "RebootRequired"} else 1
     try:
         print(_format_configuration(payload))
     except ValueError:
@@ -261,13 +246,11 @@ def run_transactions(args: argparse.Namespace) -> str:
         raise ValueError("--connector/--cp must be zero or greater")
     if args.limit < 1:
         raise ValueError("--limit must be at least 1")
-
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until))
     if args.events and args.transaction_id is None:
         raise ValueError("--events requires a transaction ID")
     if args.transaction_id is not None and (args.active or args.last or filtered or args.limit != 20):
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
-
     query = TransactionQuery(args.data_dir)
     if args.transaction_id is not None:
         view = query.get(args.transaction_id)
@@ -276,19 +259,9 @@ def run_transactions(args: argparse.Namespace) -> str:
         detail = format_transaction(view)
         if not args.events:
             return detail
-        timeline = format_events(
-            transaction_events(args.data_dir, args.transaction_id),
-            heading=f"Transaction {args.transaction_id} OCPP events",
-        )
+        timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events")
         return f"{detail}\n\n{timeline}"
-
-    filters = {
-        "charger": args.charger,
-        "connector": args.connector,
-        "id_tag": args.id_tag,
-        "since": args.since,
-        "until": args.until,
-    }
+    filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": args.since, "until": args.until}
     if args.active:
         return format_transactions(query.active(**filters))
     if args.last:
@@ -300,7 +273,6 @@ def run_transactions(args: argparse.Namespace) -> str:
 def main() -> int:
     parser, commands = build_parser()
     args = parser.parse_args()
-
     if args.command is None or args.command == "help":
         print_help(parser, commands, getattr(args, "topic", None))
         return 0
@@ -316,7 +288,10 @@ def main() -> int:
         except ValueError as exc:
             parser.error(str(exc))
     if args.command == "config":
-        return run_configuration(args)
+        try:
+            return run_configuration(args)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.command == "status":
         print(format_status(appliance_status(args.data_dir), charger_id=args.charger, charging_only=args.charging))
         return 0
