@@ -11,6 +11,11 @@ def parse(*argv: str):
     return parser.parse_args(list(argv))
 
 
+def listed_ids(text: str) -> list[int]:
+    rows = text.splitlines()[1:]
+    return [int(row.split()[0]) for row in rows if row.strip()]
+
+
 def start_payload(*, charger_time: str, connector: int = 1, id_tag: str = "card-a"):
     return {
         "connector_id": connector,
@@ -57,9 +62,8 @@ def test_default_list_is_newest_first_and_limited_by_query(tmp_path):
 
     rows = text.splitlines()
     assert rows[0].startswith("TXN")
-    assert str(second) in rows[1]
+    assert listed_ids(text) == [second, first]
     assert "charger-b" in rows[1]
-    assert str(first) in rows[2]
 
 
 def test_active_and_last_never_return_same_transaction(tmp_path):
@@ -71,10 +75,8 @@ def test_active_and_last_never_return_same_transaction(tmp_path):
     active_text = run_transactions(parse("--data-dir", str(tmp_path), "txn", "--active"))
     last_text = run_transactions(parse("--data-dir", str(tmp_path), "txn", "--last"))
 
-    assert str(active) in active_text
-    assert str(previous) not in active_text
-    assert str(previous) in last_text
-    assert str(active) not in last_text
+    assert listed_ids(active_text) == [active]
+    assert listed_ids(last_text) == [previous]
 
 
 def test_last_applies_filters_before_selection(tmp_path):
@@ -86,9 +88,8 @@ def test_last_applies_filters_before_selection(tmp_path):
 
     text = run_transactions(parse("--data-dir", str(tmp_path), "txn", "--charger", "charger-a", "--last"))
 
-    assert str(a) in text
+    assert listed_ids(text) == [a]
     assert "charger-a" in text
-    assert str(b) not in text
 
 
 def test_transaction_id_shows_detail(tmp_path):
@@ -147,8 +148,7 @@ def test_list_supports_id_tag_time_and_cp_filters(tmp_path):
         )
     )
 
-    assert str(wanted) in text
-    assert str(old) not in text
+    assert listed_ids(text) == [wanted]
 
 
 def test_transaction_id_rejects_list_selectors(tmp_path):
