@@ -1,6 +1,13 @@
 import pytest
 
-from field.protocol import configuration_map, configuration_payload, evidence_checkpoint, reboot_observation
+from field.protocol import (
+    REDACTED,
+    configuration_map,
+    configuration_payload,
+    evidence_checkpoint,
+    reboot_observation,
+    sensitive_configuration_key,
+)
 from ocpp_csms.events import EventStore
 
 
@@ -16,7 +23,7 @@ def test_configuration_payload_rejects_invalid_results(response, error):
         configuration_payload(response)
 
 
-def test_configuration_payload_preserves_semantics():
+def test_configuration_payload_preserves_non_sensitive_semantics():
     payload = configuration_payload(
         {
             "ok": True,
@@ -35,6 +42,60 @@ def test_configuration_payload_preserves_semantics():
         "SupportedFeatureProfiles": (True, "Core"),
     }
     assert payload["unknown_key"] == ["NotARealKey"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "AuthorizationKey",
+        "defaultAuthorizationKey",
+        "apPwd",
+        "vpnPsk",
+        "client_secret",
+        "api-token",
+        "PrivateKey",
+        "tyKey",
+        "rfidtagfreecharging",
+    ],
+)
+def test_sensitive_configuration_keys_are_classified(key):
+    assert sensitive_configuration_key(key) is True
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "HeartbeatInterval",
+        "GetConfigurationMaxKeys",
+        "SupportedFeatureProfiles",
+        "MeterValueSampleInterval",
+        "NumberOfConnectors",
+    ],
+)
+def test_normal_configuration_keys_are_not_redacted(key):
+    assert sensitive_configuration_key(key) is False
+
+
+def test_configuration_payload_redacts_sensitive_values_before_json_evidence():
+    payload = configuration_payload(
+        {
+            "ok": True,
+            "response": {
+                "configuration_key": [
+                    {"key": "apPwd", "readonly": False, "value": "do-not-publish"},
+                    {"key": "HeartbeatInterval", "readonly": False, "value": "60"},
+                    {"key": "AuthorizationKey", "readonly": False, "value": "also-secret"},
+                ],
+                "unknown_key": [],
+            },
+        }
+    )
+
+    assert configuration_map(payload) == {
+        "apPwd": (False, REDACTED),
+        "HeartbeatInterval": (False, "60"),
+        "AuthorizationKey": (False, REDACTED),
+    }
 
 
 def test_reboot_observation_ignores_old_evidence_and_accepts_new_sequence(tmp_path):
