@@ -28,6 +28,7 @@ DEFAULT_CONFIG_KEYS = [
 ]
 
 _ATTEMPT_EVIDENCE = (
+    "refresh.json",
     "baseline.json",
     "reboot.json",
     "configuration.json",
