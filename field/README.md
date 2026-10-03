@@ -108,10 +108,52 @@ Evidence written by this phase includes `reboot.json`, `config/all.json`, `confi
 
 Successful completion leaves the run in phase `configuration`.
 
-Inspect stored state at any point with:
+## Independent unattended watchdog
+
+The watchdog is a separate process from both the field harness controller and `ocpp-csms`. It uses the run configuration already stored in `state.json` and has an explicit enabled/disabled state:
+
+```sh
+python -m field.watchdog enable /path/to/run
+python -m field.watchdog status /path/to/run
+python -m field.watchdog disable /path/to/run
+```
+
+`enable` and `disable` only change watchdog state. They do not start, stop, enable, or disable either configured CSMS service. A supervisor may run the independent watchdog process with:
+
+```sh
+python -m field.watchdog run /path/to/run \
+  --interval 30 \
+  --failure-threshold 3 \
+  --rollback-timeout 30 \
+  --rollback-poll-interval 1
+```
+
+The watchdog remains active only while stored watchdog state is `enabled`. Disabling it causes the next loop iteration to exit without changing either CSMS service.
+
+Each check records the candidate CSMS service state, configured listener, configured control socket, charger connection state, last Heartbeat evidence, and active transaction evidence. Snapshots are appended to `watchdog-snapshots.jsonl`; the newest snapshot is also stored in `watchdog-latest.json`.
+
+Only strong local CSMS failures contribute to automatic rollback:
+
+- configured candidate CSMS service is inactive;
+- configured listener is unavailable;
+- configured control socket is unavailable.
+
+These failures are debounced by `--failure-threshold`; the counter resets after a healthy check. When the threshold is reached, the watchdog invokes the same common rollback primitive used by the harness and then disarms itself.
+
+Charger disconnects, delayed/missing Heartbeats, reconnect behavior, and charger evidence-read errors are recorded as diagnostics but do **not** trigger automatic rollback. They may reflect charger, site power, or network conditions rather than a local CSMS failure.
+
+For supervision or diagnostics, `--once` performs one health check and exits:
+
+```sh
+python -m field.watchdog run /path/to/run --once
+```
+
+The watchdog contains no hardcoded field service names, paths, hosts, ports, or socket locations.
+
+Inspect stored harness state at any point with:
 
 ```sh
 python -m field.harness status /path/to/run
 ```
 
-The independent unattended watchdog, soak transition, and handoff remain for the following chunks.
+The soak transition and explicit Monday handoff remain for chunk 5.
