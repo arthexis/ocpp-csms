@@ -1,7 +1,7 @@
 import pytest
 
 import ocpp_csms.app as app_module
-from ocpp_csms.app import build_parser, control_request, run_control
+from ocpp_csms.app import build_parser, control_request, run_configuration, run_control
 
 
 def parse(*args):
@@ -45,6 +45,29 @@ def test_reboot_defaults_to_soft_and_supports_hard():
     }
 
 
+def test_config_command_requests_all_or_selected_keys():
+    assert control_request(parse("config", "charger-a")) == {
+        "command": "config",
+        "charger": "charger-a",
+    }
+    assert control_request(parse("config", "charger-a", "HeartbeatInterval", "NumberOfConnectors")) == {
+        "command": "config",
+        "charger": "charger-a",
+        "keys": ["HeartbeatInterval", "NumberOfConnectors"],
+    }
+
+
+def test_config_force_aliases_set_override():
+    expected = {
+        "command": "config",
+        "charger": "charger-a",
+        "force": True,
+    }
+
+    assert control_request(parse("config", "charger-a", "--force")) == expected
+    assert control_request(parse("config", "charger-a", "-f")) == expected
+
+
 def install_control_response(monkeypatch, response=None, exc=None):
     async def fake_send(data_dir, request):
         assert data_dir
@@ -81,6 +104,34 @@ def test_missing_control_socket_returns_one(monkeypatch):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
 
     assert run_control(parse("reboot", "charger-a")) == 1
+
+
+def test_config_success_and_blocked_request_have_distinct_exit_codes(monkeypatch):
+    install_control_response(
+        monkeypatch,
+        {
+            "ok": True,
+            "response": {
+                "configuration_key": [
+                    {"key": "HeartbeatInterval", "readonly": False, "value": "300"},
+                ],
+                "unknown_key": [],
+            },
+        },
+    )
+    assert run_configuration(parse("config", "charger-a")) == 0
+
+    install_control_response(
+        monkeypatch,
+        {"error": "active_transaction", "charger": "charger-a", "transactions": [7]},
+    )
+    assert run_configuration(parse("config", "charger-a")) == 1
+
+
+def test_config_rejects_invalid_control_response(monkeypatch):
+    install_control_response(monkeypatch, {"ok": True, "response": None})
+
+    assert run_configuration(parse("config", "charger-a")) == 1
 
 
 @pytest.mark.parametrize(
