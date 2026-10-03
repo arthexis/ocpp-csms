@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Iterable
 
 from ocpp_csms.transaction_query import TransactionView
@@ -18,6 +19,15 @@ def _timestamp(value: object | None) -> str:
 
 def _age_key(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _archive_path(view: TransactionView) -> str:
+    parts = view.path.parts
+    try:
+        index = parts.index("transactions")
+    except ValueError:
+        return str(view.path)
+    return str(Path(*parts[index:]))
 
 
 def format_transactions(views: Iterable[TransactionView]) -> str:
@@ -66,7 +76,7 @@ def format_transaction(view: TransactionView) -> str:
         f"Stopped:      {_timestamp(stop.get('timestamp'))}",
         f"Last update:  {_age_key(view.updated_at)}",
         f"MeterValues:  {len(record.get('meter_values') or [])}",
-        f"Archive:      {view.path}",
+        f"Archive:      {_archive_path(view)}",
     ]
     if view.unresolved:
         lines.extend(("", f"Warnings:     {len(view.unresolved)} unresolved transaction evidence record(s)"))
