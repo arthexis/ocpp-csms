@@ -67,6 +67,54 @@ python -m field.harness rollback /path/to/run --reason operator_requested
 
 Rollback is idempotent, disarms the watchdog, and uses only the configured services and listener values.
 
+## Updating an already-running candidate and retesting
+
+The harness intentionally does **not** update source code, install packages, or restart services. Those remain operator/agent deployment steps. This keeps field safety policy separate from deployment mechanics.
+
+When the configured candidate CSMS is already serving the charger and a newer repo/package version needs to be validated, use this sequence:
+
+1. confirm the charger is idle;
+2. disable the field watchdog before deliberately interrupting or restarting the candidate:
+
+   ```sh
+   python -m field.watchdog disable /path/to/run
+   ```
+
+3. update the repository/package by the host's normal deployment method;
+4. restart the configured candidate CSMS service and leave the configured legacy service stopped;
+5. wait for the candidate listener and control socket to return;
+6. re-baseline the existing field run:
+
+   ```sh
+   python -m field.harness refresh /path/to/run
+   ```
+
+`refresh` does not stop or start either configured service. It requires the candidate service, listener, and control socket to be healthy; requires legacy to remain inactive; requires the charger to be connected, have Heartbeat evidence, and have no active transaction; then moves the run back to phase `baseline` so `reboot-config` performs a real new test.
+
+Before replacing current phase evidence, `refresh` archives the previous attempt under a numbered directory such as:
+
+```text
+attempts/001/
+  baseline.json
+  reboot.json
+  configuration.json
+  config/
+  soak.json
+  handoff.json
+  result.json
+```
+
+Only files that exist are archived. The SQLite event store is not copied or rewritten; it remains the continuous raw evidence source. Subsequent refreshes use `attempts/002/`, `attempts/003/`, and so on.
+
+After refresh, rerun the protocol normally:
+
+```sh
+python -m field.harness reboot-config /path/to/run
+python -m field.harness soak /path/to/run
+```
+
+Entering `soak` arms watchdog state again; the watchdog supervisor process must still be running or be launched by the operator as described below.
+
 ## Reboot and GetConfiguration
 
 After the run reaches `baseline`, execute:
@@ -104,7 +152,7 @@ python -m field.harness reboot-config /path/to/run \
 
 The control socket location comes from `state.json`; the harness does not assume that it is `<data-dir>/control.sock`.
 
-Evidence written by this phase includes `reboot.json`, `config/all.json`, `config/selected.json`, `config/repeat.json`, and `configuration.json`. Unknown configuration keys are evidence, not failure. This protocol never sends `force=true` and never performs configuration writes.
+Evidence written by this phase includes `reboot.json`, `config/all.json`, `config/selected.json`, `config/repeat.json`, and `configuration.json`. Unknown configuration keys are evidence, not failure. Shareable configuration JSON preserves every key and metadata while replacing only sensitive values with `[REDACTED]`; the raw OCPP evidence remains in SQLite. This protocol never sends `force=true` and never performs configuration writes.
 
 Successful completion leaves the run in phase `configuration`.
 
@@ -176,7 +224,7 @@ Generate a structured summary at any time with:
 python -m field.harness report /path/to/run
 ```
 
-The report is printed and stored as `result.json`. It includes phase results, current configured-service state, watchdog state, collected evidence references, and whether protocol #44 reached the intentional handoff state. `protocol_44_complete` is true only after successful preflight, takeover, baseline, reboot, configuration, soak, and handoff evidence are all present and successful with the watchdog disabled.
+The report is printed and stored as `result.json`. It includes phase results, current configured-service state, watchdog state, collected evidence references, archived attempt identifiers, and whether protocol #44 reached the intentional handoff state. `protocol_44_complete` is true only after successful preflight, takeover, baseline, reboot, configuration, soak, and handoff evidence are all present and successful with the watchdog disabled.
 
 Inspect stored harness state at any point with:
 
