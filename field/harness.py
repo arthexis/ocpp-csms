@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from field.evidence import baseline_observation
 from field.state import FieldConfig, FieldState, load_state, save_state, state_path
 from field.system import LocalSystemProbe, SystemProbe
 
@@ -25,6 +27,18 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--csms-data-dir", required=True)
     start.add_argument("--control-socket", required=True)
     start.add_argument("--idle-confirmed", action="store_true")
+
+    takeover = commands.add_parser("takeover", help="Switch configured services and require an idle Heartbeat baseline")
+    takeover.add_argument("run_dir")
+    takeover.add_argument("--service-timeout", type=float, default=30.0)
+    takeover.add_argument("--baseline-timeout", type=float, default=90.0)
+    takeover.add_argument("--poll-interval", type=float, default=1.0)
+
+    rollback_parser = commands.add_parser("rollback", help="Restore the configured legacy service")
+    rollback_parser.add_argument("run_dir")
+    rollback_parser.add_argument("--reason", default="operator_requested")
+    rollback_parser.add_argument("--service-timeout", type=float, default=30.0)
+    rollback_parser.add_argument("--poll-interval", type=float, default=1.0)
 
     status = commands.add_parser("status", help="Show stored field-run state")
     status.add_argument("run_dir")
@@ -48,6 +62,7 @@ def preflight(config: FieldConfig, *, idle_confirmed: bool, probe: SystemProbe) 
     checks = {
         "idle_confirmed": idle_confirmed,
         "legacy_service_exists": probe.service_exists(config.legacy_service),
+        "csms_service_exists": probe.service_exists(config.csms_service),
         "ocpp_command_exists": probe.executable_exists(config.ocpp_command),
         "csms_data_dir_ready": probe.directory_ready(config.csms_data_dir),
         "control_socket_parent_ready": probe.directory_ready(str(Path(config.control_socket).expanduser().parent)),
@@ -59,6 +74,16 @@ def preflight(config: FieldConfig, *, idle_confirmed: bool, probe: SystemProbe) 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def _wait(predicate, *, timeout: float, interval: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
 
 
 def start_run(args: argparse.Namespace, probe: SystemProbe) -> int:
@@ -82,12 +107,174 @@ def start_run(args: argparse.Namespace, probe: SystemProbe) -> int:
     return 0
 
 
+def rollback(
+    run_dir: Path,
+    probe: SystemProbe,
+    *,
+    reason: str,
+    service_timeout: float,
+    poll_interval: float,
+) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    actions: list[dict[str, Any]] = []
+
+    if probe.service_active(config.csms_service):
+        actions.append({"stop_csms": probe.service_stop(config.csms_service)})
+    else:
+        actions.append({"stop_csms": "already_stopped"})
+
+    port_free = _wait(
+        lambda: not probe.port_listening(config.listener_host, config.listener_port),
+        timeout=service_timeout,
+        interval=poll_interval,
+    )
+    actions.append({"port_free": port_free})
+
+    legacy_started = False
+    legacy_active = probe.service_active(config.legacy_service)
+    if port_free:
+        if legacy_active:
+            legacy_started = True
+            actions.append({"start_legacy": "already_active"})
+        else:
+            legacy_started = probe.service_start(config.legacy_service)
+            actions.append({"start_legacy": legacy_started})
+
+    legacy_ready = False
+    if port_free and legacy_started:
+        legacy_ready = _wait(
+            lambda: probe.service_active(config.legacy_service)
+            and probe.port_listening(config.listener_host, config.listener_port),
+            timeout=service_timeout,
+            interval=poll_interval,
+        )
+
+    ok = bool(port_free and legacy_started and legacy_ready)
+    result = {"ok": ok, "reason": reason, "actions": actions, "legacy_ready": legacy_ready}
+    _write_json(run_dir / "rollback.json", result)
+    save_state(run_dir, replace(state, phase="rolled_back" if ok else "rollback_failed"))
+    return 0 if ok else 1
+
+
+def takeover(
+    run_dir: Path,
+    probe: SystemProbe,
+    *,
+    service_timeout: float,
+    baseline_timeout: float,
+    poll_interval: float,
+) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    if state.phase not in {"preflight", "baseline"}:
+        raise ValueError(f"takeover requires preflight state, got {state.phase}")
+    if state.phase == "baseline":
+        return 0
+
+    if not probe.service_active(config.legacy_service):
+        _write_json(run_dir / "takeover.json", {"ok": False, "error": "legacy_not_active"})
+        return 1
+
+    save_state(run_dir, replace(state, phase="takeover"))
+    if not probe.service_stop(config.legacy_service):
+        return rollback(
+            run_dir,
+            probe,
+            reason="legacy_stop_failed",
+            service_timeout=service_timeout,
+            poll_interval=poll_interval,
+        )
+
+    if not _wait(
+        lambda: not probe.service_active(config.legacy_service)
+        and not probe.port_listening(config.listener_host, config.listener_port),
+        timeout=service_timeout,
+        interval=poll_interval,
+    ):
+        return rollback(
+            run_dir,
+            probe,
+            reason="legacy_did_not_release_listener",
+            service_timeout=service_timeout,
+            poll_interval=poll_interval,
+        )
+
+    if not probe.service_start(config.csms_service):
+        return rollback(
+            run_dir,
+            probe,
+            reason="csms_start_failed",
+            service_timeout=service_timeout,
+            poll_interval=poll_interval,
+        )
+
+    service_ready = _wait(
+        lambda: probe.service_active(config.csms_service)
+        and probe.port_listening(config.listener_host, config.listener_port)
+        and probe.socket_exists(config.control_socket),
+        timeout=service_timeout,
+        interval=poll_interval,
+    )
+    if not service_ready:
+        return rollback(
+            run_dir,
+            probe,
+            reason="csms_not_ready",
+            service_timeout=service_timeout,
+            poll_interval=poll_interval,
+        )
+
+    observation: dict[str, Any] = {}
+
+    def baseline_ready() -> bool:
+        nonlocal observation
+        observation = baseline_observation(config.csms_data_dir, config.charger)
+        return bool(
+            observation["connected"]
+            and observation["heartbeat_count"] > 0
+            and not observation["active_transactions"]
+        )
+
+    if not _wait(baseline_ready, timeout=baseline_timeout, interval=poll_interval):
+        _write_json(run_dir / "baseline.json", {"ok": False, "observation": observation})
+        return rollback(
+            run_dir,
+            probe,
+            reason="baseline_not_established",
+            service_timeout=service_timeout,
+            poll_interval=poll_interval,
+        )
+
+    _write_json(run_dir / "baseline.json", {"ok": True, "observation": observation})
+    _write_json(run_dir / "takeover.json", {"ok": True})
+    save_state(run_dir, replace(load_state(run_dir), phase="baseline"))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    probe = LocalSystemProbe()
     if args.command == "status":
         print(json.dumps(load_state(Path(args.run_dir).expanduser()).to_dict(), indent=2, sort_keys=True))
         return 0
-    return start_run(args, LocalSystemProbe())
+    if args.command == "takeover":
+        return takeover(
+            Path(args.run_dir).expanduser(),
+            probe,
+            service_timeout=args.service_timeout,
+            baseline_timeout=args.baseline_timeout,
+            poll_interval=args.poll_interval,
+        )
+    if args.command == "rollback":
+        return rollback(
+            Path(args.run_dir).expanduser(),
+            probe,
+            reason=args.reason,
+            service_timeout=args.service_timeout,
+            poll_interval=args.poll_interval,
+        )
+    return start_run(args, probe)
 
 
 if __name__ == "__main__":
