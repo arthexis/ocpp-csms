@@ -25,6 +25,14 @@ class SessionRegistry(Protocol):
 
     def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
 
+    def record_control_event(
+        self,
+        event: str,
+        *,
+        charger_id: str,
+        details: dict[str, Any] | None = None,
+    ) -> None: ...
+
 
 def control_socket_path(data_dir: str | Path) -> Path:
     return Path(data_dir) / CONTROL_SOCKET_FILENAME
@@ -109,11 +117,22 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_force"}
             active_transactions = registry.active_transaction_ids(charger)
             if active_transactions and not force:
+                registry.record_control_event(
+                    "configuration_query_blocked",
+                    charger_id=charger,
+                    details={"transactions": active_transactions},
+                )
                 return {
                     "error": "active_transaction",
                     "charger": charger,
                     "transactions": active_transactions,
                 }
+            if active_transactions and force:
+                registry.record_control_event(
+                    "configuration_query_forced",
+                    charger_id=charger,
+                    details={"transactions": active_transactions},
+                )
             response = await session.get_configuration(keys)
         else:
             return {"error": "unknown_command", "command": command}
