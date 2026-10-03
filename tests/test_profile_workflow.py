@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 import ocpp_csms.app as app
@@ -11,7 +13,7 @@ class SmartChargingSession:
 
     async def set_charging_profile(self, connector_id, profile):
         self.profile = (connector_id, profile)
-        return type("Response", (), {"status": "Accepted"})()
+        return SimpleNamespace(status="Accepted")
 
     async def clear_charging_profile(
         self,
@@ -22,23 +24,19 @@ class SmartChargingSession:
         stack_level=None,
     ):
         self.profile = None
-        return type("Response", (), {"status": "Accepted"})()
+        return SimpleNamespace(status="Accepted")
 
     async def get_composite_schedule(self, connector_id, duration, charging_rate_unit=None):
         if self.profile is None:
-            return type("Response", (), {"status": "Rejected"})()
+            return SimpleNamespace(status="Rejected")
         _, profile = self.profile
         schedule = profile["chargingSchedule"]
-        return type(
-            "Response",
-            (),
-            {
-                "status": "Accepted",
-                "connector_id": connector_id,
-                "schedule_start": "2026-10-03T20:00:00Z",
-                "charging_schedule": schedule,
-            },
-        )()
+        return SimpleNamespace(
+            status="Accepted",
+            connector_id=connector_id,
+            schedule_start="2026-10-03T20:00:00Z",
+            charging_schedule=schedule,
+        )
 
 
 class Registry:
