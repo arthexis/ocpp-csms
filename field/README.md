@@ -114,4 +114,4 @@ Inspect stored state at any point with:
 python -m field.harness status /path/to/run
 ```
 
-The independent unattended watchdog remains for chunk 4.
+The independent unattended watchdog, soak transition, and handoff remain for the following chunks.
