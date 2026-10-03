@@ -1,10 +1,21 @@
 from argparse import Namespace
+from dataclasses import replace
 
 import pytest
 
 import field.harness as harness_module
-from field.harness import config_from_args, preflight, reboot_and_configure, rollback, start_run, takeover
-from field.state import FieldConfig, load_state
+from field.harness import (
+    build_report,
+    config_from_args,
+    enter_soak,
+    handoff,
+    preflight,
+    reboot_and_configure,
+    rollback,
+    start_run,
+    takeover,
+)
+from field.state import FieldConfig, load_state, save_state
 
 
 class Probe:
@@ -155,6 +166,7 @@ def test_rollback_is_idempotent_when_candidate_is_already_stopped(tmp_path):
     assert rollback(run_dir, probe, reason="test", service_timeout=0, poll_interval=0) == 0
     assert rollback(run_dir, probe, reason="test_again", service_timeout=0, poll_interval=0) == 0
     assert probe.active["legacy-example.service"] is True
+    assert load_state(run_dir).watchdog == "disabled"
 
 
 def test_reboot_config_uses_one_hard_fallback_and_structured_configuration(tmp_path, monkeypatch):
@@ -187,3 +199,56 @@ def test_reboot_config_uses_one_hard_fallback_and_structured_configuration(tmp_p
     assert load_state(run_dir).phase == "configuration"
     assert (run_dir / "config" / "all.json").exists()
     assert (run_dir / "configuration.json").exists()
+
+
+def test_soak_arms_watchdog_only_after_idle_candidate_checks(tmp_path, monkeypatch):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.active["candidate-example.service"] = True
+    probe.listener = True
+    probe.socket = True
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="configuration"))
+    monkeypatch.setattr(harness_module, "baseline_observation", lambda *a: {"connected": True, "heartbeat_count": 3, "last_heartbeat": "now", "active_transactions": []})
+
+    assert enter_soak(run_dir, probe) == 0
+
+    state = load_state(run_dir)
+    assert state.phase == "idle_soak"
+    assert state.watchdog == "enabled"
+    assert probe.actions == []
+
+
+def test_handoff_disarms_watchdog_without_switching_services(tmp_path):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.active["candidate-example.service"] = True
+    probe.listener = True
+    probe.socket = True
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="idle_soak", watchdog="enabled"))
+
+    assert handoff(run_dir, probe) == 0
+
+    state = load_state(run_dir)
+    assert state.phase == "handed_off"
+    assert state.watchdog == "disabled"
+    assert probe.actions == []
+
+
+def test_report_marks_protocol_complete_only_after_successful_handoff(tmp_path):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.active["candidate-example.service"] = True
+    probe.listener = True
+    probe.socket = True
+    for name in ("preflight", "takeover", "baseline", "reboot", "configuration", "soak", "handoff"):
+        (run_dir / f"{name}.json").write_text('{"ok": true}\n')
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="handed_off", watchdog="disabled"))
+
+    report = build_report(run_dir, probe)
+
+    assert report["protocol_44_complete"] is True
+    assert report["next_protocol"] == 45
+    assert (run_dir / "result.json").exists()
