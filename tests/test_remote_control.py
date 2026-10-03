@@ -83,27 +83,21 @@ async def test_reset_sends_requested_reset_type(tmp_path, reset_type):
 
 
 @pytest.mark.asyncio
-async def test_get_configuration_without_keys_requests_all_configuration(tmp_path):
+@pytest.mark.parametrize(
+    ("keys", "expected_keys"),
+    [
+        (None, None),
+        (["HeartbeatInterval", "GetConfigurationMaxKeys"], ["HeartbeatInterval", "GetConfigurationMaxKeys"]),
+    ],
+)
+async def test_get_configuration_preserves_key_selection(tmp_path, keys, expected_keys):
     session = make_session(tmp_path)
     returned = SimpleNamespace(configuration_key=[], unknown_key=[])
     sent = capture_calls(session, response=returned)
 
-    response = await session.get_configuration()
+    response = await session.get_configuration(keys)
 
     assert response is returned
     assert len(sent) == 1
     assert isinstance(sent[0], call.GetConfigurationPayload)
-    assert sent[0].key is None
-
-
-@pytest.mark.asyncio
-async def test_get_configuration_preserves_requested_keys(tmp_path):
-    session = make_session(tmp_path)
-    returned = SimpleNamespace(configuration_key=[], unknown_key=[])
-    sent = capture_calls(session, response=returned)
-
-    await session.get_configuration(["HeartbeatInterval", "GetConfigurationMaxKeys"])
-
-    assert len(sent) == 1
-    assert isinstance(sent[0], call.GetConfigurationPayload)
-    assert sent[0].key == ["HeartbeatInterval", "GetConfigurationMaxKeys"]
+    assert sent[0].key == expected_keys
