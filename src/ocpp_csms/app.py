@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from typing import Any
 
 from ocpp_csms.control import send_control
 from ocpp_csms.diagnostics import events_between, explain, format_events, transaction_events
@@ -44,16 +43,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(reboot, "charger", help="Charge point ID")
     add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
-    config = subcommands.add_parser("config", help="Read live charger configuration")
+    config = subcommands.add_parser("config", help="Read charger configuration")
     add(config, "charger", help="Charge point ID")
-    add(config, "keys", nargs="*", metavar="KEY", help="Configuration keys; omit to request all available keys")
-    add(
-        config,
-        "-f",
-        "--force",
-        action="store_true",
-        help="Query configuration even while the charger has an active transaction",
-    )
+    add(config, "keys", nargs="*", metavar="KEY", help="Optional OCPP configuration keys")
+    add(config, "-f", "--force", action="store_true", help="Query even with an active transaction")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
@@ -91,19 +84,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    topics = (
-        "init",
-        "serve",
-        "start",
-        "stop",
-        "reboot",
-        "config",
-        "status",
-        "transactions",
-        "txn",
-        "events",
-        "explain",
-    )
+    topics = ("init", "serve", "start", "stop", "reboot", "config", "status", "transactions", "txn", "events", "explain")
     add(help_parser, "topic", nargs="?", choices=topics)
     commands = {
         "init": init,
@@ -161,11 +142,17 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
         request["transaction"] = args.transaction
     elif args.command == "reboot":
         request["type"] = "Hard" if args.hard else "Soft"
-    elif args.command == "config":
-        if args.keys:
-            request["keys"] = list(args.keys)
-        if args.force:
-            request["force"] = True
+    return request
+
+
+def configuration_request(args: argparse.Namespace) -> dict[str, object]:
+    request: dict[str, object] = {
+        "command": "config",
+        "charger": args.charger,
+        "force": bool(args.force),
+    }
+    if args.keys:
+        request["keys"] = list(args.keys)
     return request
 
 
@@ -198,56 +185,57 @@ def run_control(args: argparse.Namespace) -> int:
     return 0 if status == "Accepted" else 1
 
 
-def _configuration_field(entry: Any, field: str) -> Any:
-    if isinstance(entry, dict):
-        return entry.get(field)
-    return getattr(entry, field, None)
+def _format_configuration(payload: dict[str, object]) -> str:
+    rows = payload.get("configuration_key")
+    unknown = payload.get("unknown_key")
+    if rows is None:
+        rows = []
+    if unknown is None:
+        unknown = []
+    if not isinstance(rows, list) or not isinstance(unknown, list):
+        raise ValueError("invalid configuration response")
 
+    lines = ["KEY\tACCESS\tVALUE"]
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("invalid configuration response")
+        key = row.get("key")
+        readonly = row.get("readonly")
+        value = row.get("value")
+        if not isinstance(key, str) or not isinstance(readonly, bool):
+            raise ValueError("invalid configuration response")
+        if value is not None and not isinstance(value, str):
+            raise ValueError("invalid configuration response")
+        lines.append(f"{key}\t{'R' if readonly else 'RW'}\t{value or ''}")
 
-def format_configuration(payload: dict[str, Any]) -> str:
-    entries = payload.get("configuration_key") or []
-    unknown = payload.get("unknown_key") or []
-    lines: list[str] = []
-    if entries:
-        lines.append("KEY  ACCESS  VALUE")
-        for entry in entries:
-            key = _configuration_field(entry, "key") or "-"
-            readonly = bool(_configuration_field(entry, "readonly"))
-            value = _configuration_field(entry, "value")
-            lines.append(f"{key}  {'R' if readonly else 'RW'}  {value if value is not None else '-'}")
-    if unknown:
-        if lines:
-            lines.append("")
-        lines.append("Unknown: " + ", ".join(str(key) for key in unknown))
-    if not lines:
-        return "No configuration returned."
+    for key in unknown:
+        if not isinstance(key, str):
+            raise ValueError("invalid configuration response")
+        lines.append(f"Unknown: {key}")
     return "\n".join(lines)
 
 
 def run_configuration(args: argparse.Namespace) -> int:
     try:
-        response = asyncio.run(send_control(args.data_dir, control_request(args)))
+        response = asyncio.run(send_control(args.data_dir, configuration_request(args)))
     except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"error: control unavailable: {exc}")
         return 1
 
     error = response.get("error")
     if error:
-        if error == "active_transaction":
-            transactions = response.get("transactions") or []
-            suffix = f" ({', '.join(str(value) for value in transactions)})" if transactions else ""
-            print(f"error: active transaction{suffix}; use --force to override")
-        else:
-            detail = response.get("detail") or response.get("charger") or response.get("command")
-            suffix = f": {detail}" if detail is not None else ""
-            print(f"error: {error}{suffix}")
+        detail = response.get("detail") or response.get("charger")
+        suffix = f": {detail}" if detail is not None else ""
+        print(f"error: {error}{suffix}")
         return 1
 
     payload = response.get("response")
     if not isinstance(payload, dict):
-        print("error: invalid configuration response")
         return 1
-    print(format_configuration(payload))
+    try:
+        print(_format_configuration(payload))
+    except ValueError:
+        return 1
     return 0
 
 
