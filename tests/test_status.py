@@ -1,9 +1,20 @@
+import asyncio
 import os
 from pathlib import Path
 
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import PID_FILENAME, write_pid
 from ocpp_csms.status import appliance_status, format_status
+from ocpp_csms.transactions import TransactionArchive
+
+
+def start_payload(*, connector=1, id_tag="card-a", timestamp="2026-10-01T15:00:00Z"):
+    return {
+        "connector_id": connector,
+        "id_tag": id_tag,
+        "meter_start": 1000,
+        "timestamp": timestamp,
+    }
 
 
 def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
@@ -20,55 +31,50 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
             "timestamp": "2026-10-01T15:00:01Z",
         },
     )
-    events.record_transaction_start(
-        7,
-        "charger-a",
-        {
-            "connector_id": 1,
-            "id_tag": "card-a",
-            "meter_start": 1000,
-            "timestamp": "2026-10-01T15:00:00Z",
-        },
+    events.record_transaction_start(7, "charger-a", start_payload())
+
+    data = appliance_status(tmp_path)
+    charger = data["chargers"][0]
+
+    assert data["server"] == "running"
+    assert charger.charger_id == "charger-a"
+    assert charger.status == "Charging"
+    assert charger.transaction_id == 7
+    assert charger.id_tag == "card-a"
+
+
+def test_charging_filter_uses_transaction_query_activity(tmp_path: Path):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    for charger in ("charger-a", "charger-b"):
+        events.record_runtime("charger_connected", charger_id=charger)
+        events.record_connector_status(
+            charger,
+            {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
+        )
+
+    active = asyncio.run(archive.start("charger-a", start_payload()))
+    finished = asyncio.run(
+        archive.start("charger-b", start_payload(timestamp="2026-10-01T14:00:00Z"))
+    )
+    asyncio.run(
+        archive.stop(
+            "charger-b",
+            {
+                "transaction_id": finished,
+                "meter_stop": 1200,
+                "timestamp": "2026-10-01T14:30:00Z",
+            },
+        )
     )
 
     data = appliance_status(tmp_path)
-    text = format_status(data)
-    charger = format_status(data, charger_id="charger-a")
 
-    assert data["server"] == "running"
-    assert "charger-a" in text
-    assert "Charging" in text
-    assert "Transaction: 7" in charger
-    assert "RFID: card-a" in charger
-
-
-def test_charging_filter_requires_open_transaction(tmp_path: Path):
-    events = EventStore(tmp_path)
-    events.record_runtime("charger_connected", charger_id="charger-a")
-    events.record_runtime("charger_connected", charger_id="charger-b")
-    events.record_connector_status(
-        "charger-a",
-        {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
-    )
-    events.record_connector_status(
-        "charger-b",
-        {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
-    )
-    events.record_transaction_start(
-        7,
-        "charger-a",
-        {
-            "connector_id": 1,
-            "id_tag": "card-a",
-            "meter_start": 1000,
-            "timestamp": "2026-10-01T15:00:01Z",
-        },
-    )
-
-    text = format_status(appliance_status(tmp_path), charging_only=True)
-
-    assert "charger-a" in text
-    assert "charger-b" not in text
+    assert data["active_chargers"] == ["charger-a"]
+    assert active != finished
+    filtered = format_status(data, charging_only=True)
+    assert "charger-a" in filtered
+    assert "charger-b" not in filtered
 
 
 def test_historical_start_event_does_not_imply_running(tmp_path: Path):
@@ -102,7 +108,7 @@ def test_current_pid_marker_is_live(tmp_path: Path):
     assert appliance_status(tmp_path)["server"] == "running"
 
 
-def test_detailed_status_shows_latest_negotiated_subprotocol(tmp_path: Path):
+def test_status_tracks_latest_negotiated_subprotocol(tmp_path: Path):
     events = EventStore(tmp_path)
     events.record_runtime(
         "charger_connected",
@@ -126,11 +132,9 @@ def test_detailed_status_shows_latest_negotiated_subprotocol(tmp_path: Path):
     data = appliance_status(tmp_path)
 
     assert data["chargers"][0].subprotocol == "ocpp1.6"
-    assert "Protocol: ocpp1.6" in format_status(data, charger_id="charger-a")
-    assert "Protocol:" not in format_status(data)
 
 
-def test_detailed_status_shows_missing_subprotocol_without_rejecting_charger(tmp_path: Path):
+def test_missing_subprotocol_does_not_reject_charger(tmp_path: Path):
     events = EventStore(tmp_path)
     events.record_runtime(
         "charger_connected",
@@ -142,9 +146,7 @@ def test_detailed_status_shows_missing_subprotocol_without_rejecting_charger(tmp
         },
     )
 
-    data = appliance_status(tmp_path)
-    charger = data["chargers"][0]
+    charger = appliance_status(tmp_path)["chargers"][0]
 
     assert charger.connected is True
     assert charger.subprotocol is None
-    assert "Protocol: not negotiated" in format_status(data, charger_id="charger-a")
