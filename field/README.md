@@ -65,7 +65,7 @@ Any takeover failure after switching begins uses the common rollback primitive. 
 python -m field.harness rollback /path/to/run --reason operator_requested
 ```
 
-Rollback is idempotent and uses only the configured services and listener values.
+Rollback is idempotent, disarms the watchdog, and uses only the configured services and listener values.
 
 ## Reboot and GetConfiguration
 
@@ -150,10 +150,36 @@ python -m field.watchdog run /path/to/run --once
 
 The watchdog contains no hardcoded field service names, paths, hosts, ports, or socket locations.
 
+## Idle soak and Monday handoff
+
+After successful configuration validation, enter the unattended soak with:
+
+```sh
+python -m field.harness soak /path/to/run
+```
+
+`soak` re-verifies that the configured candidate CSMS is active, the configured legacy service is inactive, the configured listener and control socket are available, and the charger is connected, has Heartbeat evidence, and has no active transaction. Only after those checks pass does the harness set phase `idle_soak` and arm the watchdog. The command itself does not start a watchdog supervisor; the separate `field.watchdog run` process must already be supervised or launched by the operator.
+
+The soak remains protected until either the watchdog rolls back or an operator deliberately hands control to the next field protocol. There is no time-based automatic expiry.
+
+For the Monday transition to issue #45, use:
+
+```sh
+python -m field.harness handoff /path/to/run
+```
+
+`handoff` is intentionally non-mutating with respect to the configured CSMS services. It verifies that the candidate CSMS is still active, legacy remains inactive, and the configured listener/control socket are available; then it disables the watchdog and records `handoff.json`. It does **not** stop the candidate CSMS or start legacy. Successful handoff leaves the run in phase `handed_off`, ready for production-style startup configuration and active-charge testing under #45.
+
+Generate a structured summary at any time with:
+
+```sh
+python -m field.harness report /path/to/run
+```
+
+The report is printed and stored as `result.json`. It includes phase results, current configured-service state, watchdog state, collected evidence references, and whether protocol #44 reached the intentional handoff state. `protocol_44_complete` is true only after successful preflight, takeover, baseline, reboot, configuration, soak, and handoff evidence are all present and successful with the watchdog disabled.
+
 Inspect stored harness state at any point with:
 
 ```sh
 python -m field.harness status /path/to/run
 ```
-
-The soak transition and explicit Monday handoff remain for chunk 5.
