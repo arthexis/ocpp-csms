@@ -54,6 +54,15 @@ class CSMSServer:
             for view in TransactionQuery(self.transactions.data_dir).active(charger=charge_point_id)
         ]
 
+    def record_control_event(
+        self,
+        event: str,
+        *,
+        charger_id: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._record_runtime(event, charger_id=charger_id, details=details)
+
     def _record_runtime(
         self,
         event: str,
