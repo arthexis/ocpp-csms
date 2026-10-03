@@ -48,6 +48,9 @@ class CSMSServer:
     def session(self, charge_point_id: str) -> ChargePointSession | None:
         return self._active_sessions.get(charge_point_id)
 
+    def connected_chargers(self) -> list[str]:
+        return sorted(self._active_sessions)
+
     def active_transaction_ids(self, charge_point_id: str) -> list[int]:
         return [
             view.transaction_id

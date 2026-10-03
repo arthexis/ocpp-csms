@@ -31,20 +31,23 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(serve, "--log-level", default="INFO")
 
     start = subcommands.add_parser("start", help="Request remote transaction start")
-    add(start, "charger", help="Charge point ID")
+    add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
+    add(start, "--charger", dest="charger_option", help="Explicit charge point ID")
     add(start, "--connector", "--cp", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
-    add(stop, "charger", help="Charge point ID")
+    add(stop, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
+    add(stop, "--charger", dest="charger_option", help="Explicit charge point ID")
     add(stop, "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
 
     reboot = subcommands.add_parser("reboot", help="Request charger reset")
-    add(reboot, "charger", help="Charge point ID")
+    add(reboot, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
+    add(reboot, "--charger", dest="charger_option", help="Explicit charge point ID")
     add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
     config = subcommands.add_parser("config", help="Read charger configuration")
-    add(config, "charger", help="Charge point ID")
+    add(config, "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(config, "keys", nargs="*", metavar="KEY", help="Optional OCPP configuration keys")
     add(config, "-f", "--force", action="store_true", help="Query even with an active transaction")
 
@@ -132,8 +135,19 @@ def initialize_storage(data_dir: str) -> None:
     EventStore(data_dir)
 
 
+def _requested_charger(args: argparse.Namespace) -> str | None:
+    positional = getattr(args, "charger", None)
+    option = getattr(args, "charger_option", None)
+    if positional and option:
+        raise ValueError("charger may be provided either positionally or with --charger, not both")
+    return option or positional
+
+
 def control_request(args: argparse.Namespace) -> dict[str, object]:
-    request: dict[str, object] = {"command": args.command, "charger": args.charger}
+    request: dict[str, object] = {"command": args.command}
+    charger = _requested_charger(args)
+    if charger is not None:
+        request["charger"] = charger
     if args.command == "start":
         request["id_tag"] = args.id_tag
         if args.connector is not None:
@@ -148,9 +162,10 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
 def configuration_request(args: argparse.Namespace) -> dict[str, object]:
     request: dict[str, object] = {
         "command": "config",
-        "charger": args.charger,
         "force": bool(args.force),
     }
+    if args.charger is not None:
+        request["charger"] = args.charger
     if args.keys:
         request["keys"] = list(args.keys)
     return request
