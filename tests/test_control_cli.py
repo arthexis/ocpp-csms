@@ -1,7 +1,7 @@
 import pytest
 
 import ocpp_csms.app as app_module
-from ocpp_csms.app import build_parser, control_request, run_control
+from ocpp_csms.app import build_parser, configuration_request, control_request, run_configuration, run_control
 
 
 def parse(*args):
@@ -45,6 +45,26 @@ def test_reboot_defaults_to_soft_and_supports_hard():
     }
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected_keys", "expected_force"),
+    [
+        (("config", "charger-a"), None, False),
+        (("config", "charger-a", "HeartbeatInterval", "GetConfigurationMaxKeys"), ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
+        (("config", "charger-a", "-f"), None, True),
+        (("config", "-f", "charger-a"), None, True),
+        (("config", "charger-a", "HeartbeatInterval", "--force"), ["HeartbeatInterval"], True),
+        (("config", "--force", "charger-a", "HeartbeatInterval"), ["HeartbeatInterval"], True),
+    ],
+)
+def test_config_request_preserves_keys_and_force_regardless_of_option_position(argv, expected_keys, expected_force):
+    request = configuration_request(parse(*argv))
+
+    assert request["command"] == "config"
+    assert request["charger"] == "charger-a"
+    assert request["force"] is expected_force
+    assert request.get("keys") == expected_keys
+
+
 def install_control_response(monkeypatch, response=None, exc=None):
     async def fake_send(data_dir, request):
         assert data_dir
@@ -81,6 +101,31 @@ def test_missing_control_socket_returns_one(monkeypatch):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
 
     assert run_control(parse("reboot", "charger-a")) == 1
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_code"),
+    [
+        (
+            {
+                "ok": True,
+                "response": {
+                    "configuration_key": [
+                        {"key": "HeartbeatInterval", "readonly": False, "value": "300"}
+                    ],
+                    "unknown_key": ["VendorThing"],
+                },
+            },
+            0,
+        ),
+        ({"error": "active_transaction", "charger": "charger-a", "transactions": [17]}, 1),
+        ({"ok": True, "response": {"configuration_key": "bad"}}, 1),
+    ],
+)
+def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
+    install_control_response(monkeypatch, response)
+
+    assert run_configuration(parse("config", "charger-a")) == expected_code
 
 
 @pytest.mark.parametrize(

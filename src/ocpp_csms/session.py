@@ -73,6 +73,18 @@ class ChargePointSession(OcppChargePoint):
         self._record("Reset", dict(response.__dict__), direction="in")
         return response
 
+    async def get_configuration(
+        self,
+        keys: list[str] | None = None,
+    ) -> call_result.GetConfigurationPayload:
+        payload: dict[str, Any] = {}
+        if keys:
+            payload["key"] = list(keys)
+        self._record("GetConfiguration", payload, direction="out")
+        response = await self.call(call.GetConfigurationPayload(key=keys))
+        self._record("GetConfiguration", dict(response.__dict__), direction="in")
+        return response
+
     def _record(
         self,
         action: str,

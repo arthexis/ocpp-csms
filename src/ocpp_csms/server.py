@@ -12,6 +12,7 @@ from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
+from ocpp_csms.transaction_query import TransactionQuery
 from ocpp_csms.transactions import TransactionArchive
 
 LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,21 @@ class CSMSServer:
 
     def session(self, charge_point_id: str) -> ChargePointSession | None:
         return self._active_sessions.get(charge_point_id)
+
+    def active_transaction_ids(self, charge_point_id: str) -> list[int]:
+        return [
+            view.transaction_id
+            for view in TransactionQuery(self.transactions.data_dir).active(charger=charge_point_id)
+        ]
+
+    def record_control_event(
+        self,
+        event: str,
+        *,
+        charger_id: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._record_runtime(event, charger_id=charger_id, details=details)
 
     def _record_runtime(
         self,

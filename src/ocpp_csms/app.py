@@ -43,6 +43,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(reboot, "charger", help="Charge point ID")
     add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
+    config = subcommands.add_parser("config", help="Read charger configuration")
+    add(config, "charger", help="Charge point ID")
+    add(config, "keys", nargs="*", metavar="KEY", help="Optional OCPP configuration keys")
+    add(config, "-f", "--force", action="store_true", help="Query even with an active transaction")
+
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
     add(status, "--charging", action="store_true", help="Show only charging chargers")
@@ -79,7 +84,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    topics = ("init", "serve", "start", "stop", "reboot", "status", "transactions", "txn", "events", "explain")
+    topics = ("init", "serve", "start", "stop", "reboot", "config", "status", "transactions", "txn", "events", "explain")
     add(help_parser, "topic", nargs="?", choices=topics)
     commands = {
         "init": init,
@@ -87,6 +92,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "start": start,
         "stop": stop,
         "reboot": reboot,
+        "config": config,
         "status": status,
         "transactions": transactions,
         "txn": transactions,
@@ -139,6 +145,17 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
+def configuration_request(args: argparse.Namespace) -> dict[str, object]:
+    request: dict[str, object] = {
+        "command": "config",
+        "charger": args.charger,
+        "force": bool(args.force),
+    }
+    if args.keys:
+        request["keys"] = list(args.keys)
+    return request
+
+
 def run_control(args: argparse.Namespace) -> int:
     if args.command == "start" and args.connector is not None and args.connector < 0:
         raise ValueError("--connector must be zero or greater")
@@ -166,6 +183,60 @@ def run_control(args: argparse.Namespace) -> int:
 
     print(status)
     return 0 if status == "Accepted" else 1
+
+
+def _format_configuration(payload: dict[str, object]) -> str:
+    rows = payload.get("configuration_key")
+    unknown = payload.get("unknown_key")
+    if rows is None:
+        rows = []
+    if unknown is None:
+        unknown = []
+    if not isinstance(rows, list) or not isinstance(unknown, list):
+        raise ValueError("invalid configuration response")
+
+    lines = ["KEY\tACCESS\tVALUE"]
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("invalid configuration response")
+        key = row.get("key")
+        readonly = row.get("readonly")
+        value = row.get("value")
+        if not isinstance(key, str) or not isinstance(readonly, bool):
+            raise ValueError("invalid configuration response")
+        if value is not None and not isinstance(value, str):
+            raise ValueError("invalid configuration response")
+        lines.append(f"{key}\t{'R' if readonly else 'RW'}\t{value or ''}")
+
+    for key in unknown:
+        if not isinstance(key, str):
+            raise ValueError("invalid configuration response")
+        lines.append(f"Unknown: {key}")
+    return "\n".join(lines)
+
+
+def run_configuration(args: argparse.Namespace) -> int:
+    try:
+        response = asyncio.run(send_control(args.data_dir, configuration_request(args)))
+    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        print(f"error: control unavailable: {exc}")
+        return 1
+
+    error = response.get("error")
+    if error:
+        detail = response.get("detail") or response.get("charger")
+        suffix = f": {detail}" if detail is not None else ""
+        print(f"error: {error}{suffix}")
+        return 1
+
+    payload = response.get("response")
+    if not isinstance(payload, dict):
+        return 1
+    try:
+        print(_format_configuration(payload))
+    except ValueError:
+        return 1
+    return 0
 
 
 def run_transactions(args: argparse.Namespace) -> str:
@@ -229,6 +300,8 @@ def main() -> int:
             return run_control(args)
         except ValueError as exc:
             parser.error(str(exc))
+    if args.command == "config":
+        return run_configuration(args)
     if args.command == "status":
         print(format_status(appliance_status(args.data_dir), charger_id=args.charger, charging_only=args.charging))
         return 0

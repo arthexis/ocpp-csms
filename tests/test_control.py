@@ -23,13 +23,28 @@ class Session:
         self.calls.append(("reboot", reset_type))
         return SimpleNamespace(status="Accepted")
 
+    async def get_configuration(self, keys=None):
+        self.calls.append(("config", keys))
+        return SimpleNamespace(
+            configuration_key=[{"key": "HeartbeatInterval", "readonly": False, "value": "300"}],
+            unknown_key=[],
+        )
+
 
 class Registry:
-    def __init__(self, session=None):
+    def __init__(self, session=None, active=None):
         self.current = session
+        self.active = active or {}
+        self.events = []
 
     def session(self, charge_point_id):
         return self.current if charge_point_id == "charger-a" else None
+
+    def active_transaction_ids(self, charge_point_id):
+        return list(self.active.get(charge_point_id, []))
+
+    def record_control_event(self, event, *, charger_id, details=None):
+        self.events.append({"event": event, "charger_id": charger_id, "details": details or {}})
 
 
 @pytest.mark.asyncio
@@ -55,6 +70,46 @@ async def test_dispatches_supported_commands(control_request, expected_call):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("active", "force", "keys", "expected_call", "expected_error", "records_decision"),
+    [
+        ({}, False, ["HeartbeatInterval"], ("config", ["HeartbeatInterval"]), None, False),
+        ({"charger-a": [17]}, False, None, None, "active_transaction", True),
+        ({"charger-a": [17]}, True, None, ("config", None), None, True),
+        ({"charger-b": [88]}, False, None, ("config", None), None, False),
+    ],
+)
+async def test_configuration_dispatch_respects_active_transaction_policy(
+    active,
+    force,
+    keys,
+    expected_call,
+    expected_error,
+    records_decision,
+):
+    session = Session()
+    registry = Registry(session, active=active)
+    request = {"command": "config", "charger": "charger-a", "force": force}
+    if keys is not None:
+        request["keys"] = keys
+
+    response = await dispatch_control(registry, request)
+
+    if expected_error is None:
+        assert response["ok"] is True
+        assert session.calls == [expected_call]
+    else:
+        assert response["error"] == expected_error
+        assert response["transactions"] == [17]
+        assert session.calls == []
+
+    assert bool(registry.events) is records_decision
+    if records_decision:
+        assert registry.events[0]["charger_id"] == "charger-a"
+        assert registry.events[0]["details"]["transactions"] == [17]
+
+
+@pytest.mark.asyncio
 async def test_disconnected_charger_is_not_queued():
     response = await dispatch_control(
         Registry(),
@@ -77,6 +132,8 @@ async def test_disconnected_charger_is_not_queued():
         ),
         ({"command": "stop", "charger": "charger-a"}, "invalid_transaction"),
         ({"command": "reboot", "charger": "charger-a", "type": "Warm"}, "invalid_reset_type"),
+        ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
+        ({"command": "config", "charger": "charger-a", "force": "yes"}, "invalid_force"),
         ({"command": "unknown", "charger": "charger-a"}, "unknown_command"),
     ],
 )

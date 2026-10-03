@@ -17,11 +17,13 @@ def make_session(tmp_path):
     )
 
 
-def capture_calls(session, status="Accepted"):
+def capture_calls(session, response=None, status="Accepted"):
     sent = []
 
     async def send(payload):
         sent.append(payload)
+        if response is not None:
+            return response
         return SimpleNamespace(status=status)
 
     session.call = send
@@ -78,3 +80,24 @@ async def test_reset_sends_requested_reset_type(tmp_path, reset_type):
     assert len(sent) == 1
     assert isinstance(sent[0], call.ResetPayload)
     assert sent[0].type == reset_type
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("keys", "expected_keys"),
+    [
+        (None, None),
+        (["HeartbeatInterval", "GetConfigurationMaxKeys"], ["HeartbeatInterval", "GetConfigurationMaxKeys"]),
+    ],
+)
+async def test_get_configuration_preserves_key_selection(tmp_path, keys, expected_keys):
+    session = make_session(tmp_path)
+    returned = SimpleNamespace(configuration_key=[], unknown_key=[])
+    sent = capture_calls(session, response=returned)
+
+    response = await session.get_configuration(keys)
+
+    assert response is returned
+    assert len(sent) == 1
+    assert isinstance(sent[0], call.GetConfigurationPayload)
+    assert sent[0].key == expected_keys
