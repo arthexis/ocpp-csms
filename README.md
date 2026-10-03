@@ -21,7 +21,6 @@ Useful commands:
 ```bash
 ocpp-csms status
 ocpp-csms status --charging
-ocpp-csms transactions
 ocpp-csms txn --active
 ocpp-csms txn --last
 ocpp-csms events
