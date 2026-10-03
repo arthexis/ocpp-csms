@@ -7,6 +7,11 @@ import logging
 from ocpp_csms.control import send_control
 from ocpp_csms.diagnostics import events_between, explain, format_events, transaction_events
 from ocpp_csms.events import EventStore
+from ocpp_csms.profile_templates import (
+    format_profile_template_help,
+    format_profile_template_list,
+    get_profile_template,
+)
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.transaction_cli import format_transaction, format_transactions
@@ -50,6 +55,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(config, "items", nargs="*", metavar="KEY", help="Keys to read, or: set KEY VALUE")
     add(config, "-f", "--force", action="store_true", help="Operate even with an active transaction")
 
+    profile = subcommands.add_parser("profile", help="Inspect and apply Smart Charging profiles")
+    profile_subcommands = profile.add_subparsers(dest="profile_command")
+    profile_subcommands.add_parser("list", help="List built-in profile templates")
+    profile_help = profile_subcommands.add_parser("help", help="Explain a built-in profile template")
+    add(profile_help, "template", help="Built-in profile template name")
+
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
     add(status, "--charging", action="store_true", help="Show only charging chargers")
@@ -82,9 +93,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
-    topics = ("init", "serve", "start", "stop", "reboot", "config", "status", "transactions", "txn", "events", "explain")
+    topics = ("init", "serve", "start", "stop", "reboot", "config", "profile", "status", "transactions", "txn", "events", "explain")
     add(help_parser, "topic", nargs="?", choices=topics)
-    commands = {"init": init, "serve": serve, "start": start, "stop": stop, "reboot": reboot, "config": config, "status": status, "transactions": transactions, "txn": transactions, "events": events, "explain": explain_parser}
+    commands = {"init": init, "serve": serve, "start": start, "stop": stop, "reboot": reboot, "config": config, "profile": profile, "status": status, "transactions": transactions, "txn": transactions, "events": events, "explain": explain_parser}
     return parser, commands
 
 
@@ -239,6 +250,20 @@ def run_configuration(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_profile(args: argparse.Namespace) -> int:
+    if args.profile_command == "list":
+        print(format_profile_template_list())
+        return 0
+    if args.profile_command == "help":
+        template = get_profile_template(args.template)
+        if template is None:
+            print(f"error: unknown profile template: {args.template}")
+            return 1
+        print(format_profile_template_help(template))
+        return 0
+    raise ValueError("profile requires a subcommand")
+
+
 def run_transactions(args: argparse.Namespace) -> str:
     if args.transaction_id is not None and args.transaction_id < 0:
         raise ValueError("transaction ID must be zero or greater")
@@ -290,6 +315,11 @@ def main() -> int:
     if args.command == "config":
         try:
             return run_configuration(args)
+        except ValueError as exc:
+            parser.error(str(exc))
+    if args.command == "profile":
+        try:
+            return run_profile(args)
         except ValueError as exc:
             parser.error(str(exc))
     if args.command == "status":
