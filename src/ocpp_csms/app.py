@@ -32,12 +32,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 
     start = subcommands.add_parser("start", help="Request remote transaction start")
     add(start, "charger", help="Charge point ID")
-    add(start, "--connector", type=int, help="Connector ID")
+    add(start, "--connector", "--cp", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
     add(stop, "charger", help="Charge point ID")
-    add(stop, "--transaction", type=int, required=True, help="OCPP transaction ID")
+    add(stop, "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
 
     reboot = subcommands.add_parser("reboot", help="Request charger reset")
     add(reboot, "charger", help="Charge point ID")
