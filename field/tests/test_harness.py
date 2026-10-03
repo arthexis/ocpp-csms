@@ -11,6 +11,7 @@ from field.harness import (
     handoff,
     preflight,
     reboot_and_configure,
+    refresh,
     rollback,
     start_run,
     takeover,
@@ -167,6 +168,61 @@ def test_rollback_is_idempotent_when_candidate_is_already_stopped(tmp_path):
     assert rollback(run_dir, probe, reason="test_again", service_timeout=0, poll_interval=0) == 0
     assert probe.active["legacy-example.service"] is True
     assert load_state(run_dir).watchdog == "disabled"
+
+
+def test_refresh_rebaselines_running_candidate_and_archives_previous_attempt(tmp_path, monkeypatch):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.active["candidate-example.service"] = True
+    probe.listener = True
+    probe.socket = True
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="idle_soak", watchdog="disabled"))
+    (run_dir / "baseline.json").write_text('{"ok": true, "old": true}\n')
+    (run_dir / "configuration.json").write_text('{"ok": true}\n')
+    config_dir = run_dir / "config"
+    config_dir.mkdir()
+    (config_dir / "all.json").write_text('{"configuration_key": []}\n')
+    monkeypatch.setattr(
+        harness_module,
+        "baseline_observation",
+        lambda *a: {"connected": True, "heartbeat_count": 4, "last_heartbeat": "new", "active_transactions": []},
+    )
+
+    assert refresh(run_dir, probe, baseline_timeout=0, poll_interval=0) == 0
+
+    state = load_state(run_dir)
+    assert state.phase == "baseline"
+    assert state.watchdog == "disabled"
+    assert (run_dir / "attempts" / "001" / "baseline.json").exists()
+    assert (run_dir / "attempts" / "001" / "configuration.json").exists()
+    assert (run_dir / "attempts" / "001" / "config" / "all.json").exists()
+    assert (run_dir / "baseline.json").exists()
+    assert '"source": "refresh"' in (run_dir / "baseline.json").read_text()
+    assert (run_dir / "refresh.json").exists()
+    assert probe.actions == []
+
+
+def test_refresh_requires_watchdog_disabled(tmp_path):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.active["candidate-example.service"] = True
+    probe.socket = True
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="idle_soak", watchdog="enabled"))
+
+    with pytest.raises(ValueError, match="watchdog"):
+        refresh(run_dir, probe, baseline_timeout=0, poll_interval=0)
+
+
+def test_refresh_refuses_unhealthy_or_legacy_served_state(tmp_path):
+    run_dir, probe = initialized_run(tmp_path)
+    state = load_state(run_dir)
+    save_state(run_dir, replace(state, phase="configuration", watchdog="disabled"))
+
+    assert refresh(run_dir, probe, baseline_timeout=0, poll_interval=0) == 1
+    assert load_state(run_dir).phase == "configuration"
+    assert (run_dir / "refresh.json").exists()
 
 
 def test_reboot_config_uses_one_hard_fallback_and_structured_configuration(tmp_path, monkeypatch):
