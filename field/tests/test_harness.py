@@ -2,7 +2,8 @@ from argparse import Namespace
 
 import pytest
 
-from field.harness import config_from_args, preflight, start_run
+import field.harness as harness_module
+from field.harness import config_from_args, preflight, rollback, start_run, takeover
 from field.state import FieldConfig, load_state
 
 
@@ -11,6 +12,13 @@ class Probe:
         self.service = service
         self.executable = executable
         self.directory = directory
+        self.active = {
+            "legacy-example.service": True,
+            "candidate-example.service": False,
+        }
+        self.listener = True
+        self.socket = False
+        self.actions = []
 
     def executable_exists(self, command):
         return self.executable
@@ -18,8 +26,33 @@ class Probe:
     def service_exists(self, service):
         return self.service
 
+    def service_active(self, service):
+        return self.active.get(service, False)
+
+    def service_start(self, service):
+        self.actions.append(("start", service))
+        self.active[service] = True
+        if service == "candidate-example.service":
+            self.socket = True
+        self.listener = True
+        return True
+
+    def service_stop(self, service):
+        self.actions.append(("stop", service))
+        self.active[service] = False
+        self.listener = any(self.active.values())
+        if service == "candidate-example.service":
+            self.socket = False
+        return True
+
     def directory_ready(self, path):
         return self.directory
+
+    def port_listening(self, host, port):
+        return self.listener
+
+    def socket_exists(self, path):
+        return self.socket
 
 
 def args(tmp_path, **overrides):
@@ -37,6 +70,12 @@ def args(tmp_path, **overrides):
     }
     values.update(overrides)
     return Namespace(**values)
+
+
+def initialized_run(tmp_path, probe=None):
+    probe = probe or Probe()
+    assert start_run(args(tmp_path), probe) == 0
+    return tmp_path / "run", probe
 
 
 def test_operational_values_come_from_arguments(tmp_path):
@@ -61,6 +100,7 @@ def test_operational_values_come_from_arguments(tmp_path):
     [
         ({"idle_confirmed": False}, Probe(), "idle_confirmed"),
         ({}, Probe(service=False), "legacy_service_exists"),
+        ({}, Probe(service=False), "csms_service_exists"),
         ({}, Probe(executable=False), "ocpp_command_exists"),
         ({}, Probe(directory=False), "csms_data_dir_ready"),
         ({"listener_port": 0}, Probe(), "listener_port_valid"),
@@ -90,3 +130,72 @@ def test_existing_run_refuses_configuration_change(tmp_path):
 
     with pytest.raises(ValueError):
         start_run(args(tmp_path, listener_port=54321), Probe())
+
+
+def test_takeover_switches_configured_services_and_records_baseline(tmp_path, monkeypatch):
+    run_dir, probe = initialized_run(tmp_path)
+    monkeypatch.setattr(
+        harness_module,
+        "baseline_observation",
+        lambda data_dir, charger: {
+            "connected": True,
+            "heartbeat_count": 2,
+            "last_heartbeat": "now",
+            "active_transactions": [],
+        },
+    )
+
+    assert takeover(run_dir, probe, service_timeout=0, baseline_timeout=0, poll_interval=0) == 0
+
+    assert probe.actions == [
+        ("stop", "legacy-example.service"),
+        ("start", "candidate-example.service"),
+    ]
+    assert load_state(run_dir).phase == "baseline"
+    assert (run_dir / "baseline.json").exists()
+
+
+def test_failed_baseline_uses_common_rollback(tmp_path, monkeypatch):
+    run_dir, probe = initialized_run(tmp_path)
+    monkeypatch.setattr(
+        harness_module,
+        "baseline_observation",
+        lambda data_dir, charger: {
+            "connected": True,
+            "heartbeat_count": 0,
+            "last_heartbeat": None,
+            "active_transactions": [],
+        },
+    )
+
+    assert takeover(run_dir, probe, service_timeout=0, baseline_timeout=0, poll_interval=0) == 0
+
+    assert probe.actions == [
+        ("stop", "legacy-example.service"),
+        ("start", "candidate-example.service"),
+        ("stop", "candidate-example.service"),
+        ("start", "legacy-example.service"),
+    ]
+    assert load_state(run_dir).phase == "rolled_back"
+
+
+def test_rollback_is_idempotent_when_candidate_is_already_stopped(tmp_path):
+    run_dir, probe = initialized_run(tmp_path)
+    probe.active["legacy-example.service"] = False
+    probe.listener = False
+
+    assert rollback(
+        run_dir,
+        probe,
+        reason="test",
+        service_timeout=0,
+        poll_interval=0,
+    ) == 0
+    assert rollback(
+        run_dir,
+        probe,
+        reason="test_again",
+        service_timeout=0,
+        poll_interval=0,
+    ) == 0
+    assert probe.active["legacy-example.service"] is True
