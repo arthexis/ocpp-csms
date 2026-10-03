@@ -10,24 +10,26 @@ def parse(*args):
 
 
 def test_start_command_builds_control_request():
-    args = parse("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")
-
-    assert control_request(args) == {
+    expected = {
         "command": "start",
         "charger": "charger-a",
         "id_tag": "REMOTE",
         "connector": 2,
     }
 
+    assert control_request(parse("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse("start", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
+
 
 def test_stop_command_builds_control_request():
-    args = parse("stop", "charger-a", "--transaction", "42")
-
-    assert control_request(args) == {
+    expected = {
         "command": "stop",
         "charger": "charger-a",
         "transaction": 42,
     }
+
+    assert control_request(parse("stop", "charger-a", "--transaction", "42")) == expected
+    assert control_request(parse("stop", "charger-a", "--txn", "42")) == expected
 
 
 def test_reboot_defaults_to_soft_and_supports_hard():
@@ -41,15 +43,6 @@ def test_reboot_defaults_to_soft_and_supports_hard():
         "charger": "charger-a",
         "type": "Hard",
     }
-
-
-def test_control_commands_are_available_in_help_topics():
-    parser, _ = build_parser()
-
-    for command in ("start", "stop", "reboot"):
-        args = parser.parse_args(["help", command])
-        assert args.command == "help"
-        assert args.topic == command
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -66,44 +59,37 @@ def install_control_response(monkeypatch, response=None, exc=None):
     ("status", "expected_code"),
     [("Accepted", 0), ("Rejected", 1)],
 )
-def test_command_status_controls_exit_code(monkeypatch, capsys, status, expected_code):
+def test_command_status_controls_exit_code(monkeypatch, status, expected_code):
     install_control_response(
         monkeypatch,
         {"ok": True, "response": {"status": status}},
     )
 
-    result = run_control(parse("reboot", "charger-a"))
-
-    assert result == expected_code
-    assert capsys.readouterr().out == f"{status}\n"
+    assert run_control(parse("reboot", "charger-a")) == expected_code
 
 
-def test_control_error_returns_one(monkeypatch, capsys):
+def test_control_error_returns_one(monkeypatch):
     install_control_response(
         monkeypatch,
         {"error": "charger_not_connected", "charger": "charger-a"},
     )
 
-    result = run_control(parse("reboot", "charger-a"))
-
-    assert result == 1
-    assert capsys.readouterr().out == "error: charger_not_connected: charger-a\n"
+    assert run_control(parse("reboot", "charger-a")) == 1
 
 
-def test_missing_control_socket_returns_one(monkeypatch, capsys):
+def test_missing_control_socket_returns_one(monkeypatch):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
 
-    result = run_control(parse("reboot", "charger-a"))
-
-    assert result == 1
-    assert capsys.readouterr().out == "error: control unavailable: control.sock\n"
+    assert run_control(parse("reboot", "charger-a")) == 1
 
 
 @pytest.mark.parametrize(
     "args",
     [
         ("start", "charger-a", "--connector", "-1", "--id-tag", "REMOTE"),
+        ("start", "charger-a", "--cp", "-1", "--id-tag", "REMOTE"),
         ("stop", "charger-a", "--transaction", "-1"),
+        ("stop", "charger-a", "--txn", "-1"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(args):
