@@ -3,7 +3,7 @@ from argparse import Namespace
 import pytest
 
 import field.harness as harness_module
-from field.harness import config_from_args, preflight, rollback, start_run, takeover
+from field.harness import config_from_args, preflight, reboot_and_configure, rollback, start_run, takeover
 from field.state import FieldConfig, load_state
 
 
@@ -80,9 +80,7 @@ def initialized_run(tmp_path, probe=None):
 
 def test_operational_values_come_from_arguments(tmp_path):
     parsed = args(tmp_path)
-
     config = config_from_args(parsed)
-
     assert config == FieldConfig(
         charger="charger-a",
         legacy_service="legacy-example.service",
@@ -109,16 +107,13 @@ def test_operational_values_come_from_arguments(tmp_path):
 )
 def test_preflight_reports_failed_invariants(tmp_path, overrides, probe, failed_check):
     parsed = args(tmp_path, **overrides)
-
     result = preflight(config_from_args(parsed), idle_confirmed=parsed.idle_confirmed, probe=probe)
-
     assert result["ok"] is False
     assert result["checks"][failed_check] is False
 
 
 def test_successful_start_records_preflight_state(tmp_path):
     parsed = args(tmp_path)
-
     assert start_run(parsed, Probe()) == 0
     state = load_state(tmp_path / "run")
     assert state.phase == "preflight"
@@ -127,49 +122,23 @@ def test_successful_start_records_preflight_state(tmp_path):
 
 def test_existing_run_refuses_configuration_change(tmp_path):
     assert start_run(args(tmp_path), Probe()) == 0
-
     with pytest.raises(ValueError):
         start_run(args(tmp_path, listener_port=54321), Probe())
 
 
 def test_takeover_switches_configured_services_and_records_baseline(tmp_path, monkeypatch):
     run_dir, probe = initialized_run(tmp_path)
-    monkeypatch.setattr(
-        harness_module,
-        "baseline_observation",
-        lambda data_dir, charger: {
-            "connected": True,
-            "heartbeat_count": 2,
-            "last_heartbeat": "now",
-            "active_transactions": [],
-        },
-    )
-
+    monkeypatch.setattr(harness_module, "baseline_observation", lambda data_dir, charger: {"connected": True, "heartbeat_count": 2, "last_heartbeat": "now", "active_transactions": []})
     assert takeover(run_dir, probe, service_timeout=0, baseline_timeout=0, poll_interval=0) == 0
-
-    assert probe.actions == [
-        ("stop", "legacy-example.service"),
-        ("start", "candidate-example.service"),
-    ]
+    assert probe.actions == [("stop", "legacy-example.service"), ("start", "candidate-example.service")]
     assert load_state(run_dir).phase == "baseline"
     assert (run_dir / "baseline.json").exists()
 
 
 def test_failed_baseline_uses_common_rollback(tmp_path, monkeypatch):
     run_dir, probe = initialized_run(tmp_path)
-    monkeypatch.setattr(
-        harness_module,
-        "baseline_observation",
-        lambda data_dir, charger: {
-            "connected": True,
-            "heartbeat_count": 0,
-            "last_heartbeat": None,
-            "active_transactions": [],
-        },
-    )
-
+    monkeypatch.setattr(harness_module, "baseline_observation", lambda data_dir, charger: {"connected": True, "heartbeat_count": 0, "last_heartbeat": None, "active_transactions": []})
     assert takeover(run_dir, probe, service_timeout=0, baseline_timeout=0, poll_interval=0) == 0
-
     assert probe.actions == [
         ("stop", "legacy-example.service"),
         ("start", "candidate-example.service"),
@@ -183,19 +152,38 @@ def test_rollback_is_idempotent_when_candidate_is_already_stopped(tmp_path):
     run_dir, probe = initialized_run(tmp_path)
     probe.active["legacy-example.service"] = False
     probe.listener = False
-
-    assert rollback(
-        run_dir,
-        probe,
-        reason="test",
-        service_timeout=0,
-        poll_interval=0,
-    ) == 0
-    assert rollback(
-        run_dir,
-        probe,
-        reason="test_again",
-        service_timeout=0,
-        poll_interval=0,
-    ) == 0
+    assert rollback(run_dir, probe, reason="test", service_timeout=0, poll_interval=0) == 0
+    assert rollback(run_dir, probe, reason="test_again", service_timeout=0, poll_interval=0) == 0
     assert probe.active["legacy-example.service"] is True
+
+
+def test_reboot_config_uses_one_hard_fallback_and_structured_configuration(tmp_path, monkeypatch):
+    run_dir, probe = initialized_run(tmp_path)
+    monkeypatch.setattr(harness_module, "baseline_observation", lambda *a: {"connected": True, "heartbeat_count": 2, "last_heartbeat": "now", "active_transactions": []})
+    assert takeover(run_dir, probe, service_timeout=0, baseline_timeout=0, poll_interval=0) == 0
+    config = load_state(run_dir).config
+
+    calls = []
+    responses = iter([
+        {"ok": True, "response": {"status": "Accepted"}},
+        {"ok": True, "response": {"status": "Accepted"}},
+        {"ok": True, "response": {"configuration_key": [], "unknown_key": []}},
+        {"ok": True, "response": {"configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "300"}], "unknown_key": []}},
+        {"ok": True, "response": {"configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "300"}], "unknown_key": []}},
+    ])
+    monkeypatch.setattr(harness_module, "evidence_checkpoint", lambda data_dir: (10, 20))
+    monkeypatch.setattr(harness_module, "send_control", lambda path, request: calls.append((path, request)) or next(responses))
+    observations = iter([
+        {"disconnect_seen": False, "reconnect_seen": False, "boot_notification": False, "heartbeat": False, "actions": []},
+        {"disconnect_seen": True, "reconnect_seen": True, "boot_notification": True, "heartbeat": True, "actions": ["BootNotification", "Heartbeat"]},
+    ])
+    monkeypatch.setattr(harness_module, "reboot_observation", lambda *a, **k: next(observations))
+    monkeypatch.setattr(harness_module, "_wait", lambda predicate, **kwargs: predicate())
+
+    assert reboot_and_configure(run_dir, reboot_timeout=0, post_boot_timeout=0, repeat_delay=0, poll_interval=0, keys=["HeartbeatInterval"]) == 0
+    reboot_requests = [request for _, request in calls if request.get("command") == "reboot"]
+    assert [request["type"] for request in reboot_requests] == ["Soft", "Hard"]
+    assert all(path == config.control_socket for path, _ in calls)
+    assert load_state(run_dir).phase == "configuration"
+    assert (run_dir / "config" / "all.json").exists()
+    assert (run_dir / "configuration.json").exists()
