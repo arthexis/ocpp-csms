@@ -29,5 +29,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Test
+      - name: CSMS tests
         run: python -m pytest
+
+      - name: Field harness tests
+        run: python -m pytest field/tests
