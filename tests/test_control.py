@@ -23,13 +23,24 @@ class Session:
         self.calls.append(("reboot", reset_type))
         return SimpleNamespace(status="Accepted")
 
+    async def get_configuration(self, keys=None):
+        self.calls.append(("config", keys))
+        return SimpleNamespace(
+            configuration_key=[{"key": "HeartbeatInterval", "readonly": False, "value": "300"}],
+            unknown_key=[],
+        )
+
 
 class Registry:
-    def __init__(self, session=None):
+    def __init__(self, session=None, active=None):
         self.current = session
+        self.active = active or {}
 
     def session(self, charge_point_id):
         return self.current if charge_point_id == "charger-a" else None
+
+    def active_transaction_ids(self, charge_point_id):
+        return list(self.active.get(charge_point_id, []))
 
 
 @pytest.mark.asyncio
@@ -55,6 +66,62 @@ async def test_dispatches_supported_commands(control_request, expected_call):
 
 
 @pytest.mark.asyncio
+async def test_get_configuration_is_sent_when_idle():
+    session = Session()
+
+    response = await dispatch_control(
+        Registry(session),
+        {"command": "config", "charger": "charger-a", "keys": ["HeartbeatInterval"]},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("config", ["HeartbeatInterval"])]
+
+
+@pytest.mark.asyncio
+async def test_get_configuration_is_blocked_during_active_transaction():
+    session = Session()
+
+    response = await dispatch_control(
+        Registry(session, active={"charger-a": [17]}),
+        {"command": "config", "charger": "charger-a"},
+    )
+
+    assert response == {
+        "error": "active_transaction",
+        "charger": "charger-a",
+        "transactions": [17],
+    }
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_forced_get_configuration_bypasses_active_transaction_guard():
+    session = Session()
+
+    response = await dispatch_control(
+        Registry(session, active={"charger-a": [17]}),
+        {"command": "config", "charger": "charger-a", "force": True},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("config", None)]
+
+
+@pytest.mark.asyncio
+async def test_other_charger_transaction_does_not_block_configuration():
+    session = Session()
+
+    response = await dispatch_control(
+        Registry(session, active={"charger-b": [88]}),
+        {"command": "config", "charger": "charger-a"},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("config", None)]
+
+
+@pytest.mark.asyncio
 async def test_disconnected_charger_is_not_queued():
     response = await dispatch_control(
         Registry(),
@@ -77,6 +144,8 @@ async def test_disconnected_charger_is_not_queued():
         ),
         ({"command": "stop", "charger": "charger-a"}, "invalid_transaction"),
         ({"command": "reboot", "charger": "charger-a", "type": "Warm"}, "invalid_reset_type"),
+        ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
+        ({"command": "config", "charger": "charger-a", "force": "yes"}, "invalid_force"),
         ({"command": "unknown", "charger": "charger-a"}, "unknown_command"),
     ],
 )
