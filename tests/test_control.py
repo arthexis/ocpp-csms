@@ -35,12 +35,16 @@ class Registry:
     def __init__(self, session=None, active=None):
         self.current = session
         self.active = active or {}
+        self.events = []
 
     def session(self, charge_point_id):
         return self.current if charge_point_id == "charger-a" else None
 
     def active_transaction_ids(self, charge_point_id):
         return list(self.active.get(charge_point_id, []))
+
+    def record_control_event(self, event, *, charger_id, details=None):
+        self.events.append((event, charger_id, details))
 
 
 @pytest.mark.asyncio
@@ -68,22 +72,25 @@ async def test_dispatches_supported_commands(control_request, expected_call):
 @pytest.mark.asyncio
 async def test_get_configuration_is_sent_when_idle():
     session = Session()
+    registry = Registry(session)
 
     response = await dispatch_control(
-        Registry(session),
+        registry,
         {"command": "config", "charger": "charger-a", "keys": ["HeartbeatInterval"]},
     )
 
     assert response["ok"] is True
     assert session.calls == [("config", ["HeartbeatInterval"])]
+    assert registry.events == []
 
 
 @pytest.mark.asyncio
 async def test_get_configuration_is_blocked_during_active_transaction():
     session = Session()
+    registry = Registry(session, active={"charger-a": [17]})
 
     response = await dispatch_control(
-        Registry(session, active={"charger-a": [17]}),
+        registry,
         {"command": "config", "charger": "charger-a"},
     )
 
@@ -93,32 +100,41 @@ async def test_get_configuration_is_blocked_during_active_transaction():
         "transactions": [17],
     }
     assert session.calls == []
+    assert registry.events == [
+        ("configuration_query_blocked", "charger-a", {"transactions": [17]})
+    ]
 
 
 @pytest.mark.asyncio
 async def test_forced_get_configuration_bypasses_active_transaction_guard():
     session = Session()
+    registry = Registry(session, active={"charger-a": [17]})
 
     response = await dispatch_control(
-        Registry(session, active={"charger-a": [17]}),
+        registry,
         {"command": "config", "charger": "charger-a", "force": True},
     )
 
     assert response["ok"] is True
     assert session.calls == [("config", None)]
+    assert registry.events == [
+        ("configuration_query_forced", "charger-a", {"transactions": [17]})
+    ]
 
 
 @pytest.mark.asyncio
 async def test_other_charger_transaction_does_not_block_configuration():
     session = Session()
+    registry = Registry(session, active={"charger-b": [88]})
 
     response = await dispatch_control(
-        Registry(session, active={"charger-b": [88]}),
+        registry,
         {"command": "config", "charger": "charger-a"},
     )
 
     assert response["ok"] is True
     assert session.calls == [("config", None)]
+    assert registry.events == []
 
 
 @pytest.mark.asyncio
