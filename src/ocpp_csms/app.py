@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from ocpp_csms.control import send_control
-from ocpp_csms.diagnostics import events_between, explain, format_events
+from ocpp_csms.diagnostics import events_between, explain, format_events, transaction_events
 from ocpp_csms.events import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.status import appliance_status, format_status
@@ -63,6 +63,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(transactions, "--since", help="ISO-8601 lower timestamp bound")
     add(transactions, "--until", help="ISO-8601 upper timestamp bound")
     add(transactions, "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
+    add(transactions, "--events", action="store_true", help="Show OCPP timeline for a transaction ID")
 
     events = subcommands.add_parser("events", help="Show recorded events")
     add(events, "charger", nargs="?", help="Optional charge point ID")
@@ -176,13 +177,24 @@ def run_transactions(args: argparse.Namespace) -> str:
         raise ValueError("--limit must be at least 1")
 
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until))
+    if args.events and args.transaction_id is None:
+        raise ValueError("--events requires a transaction ID")
     if args.transaction_id is not None and (args.active or args.last or filtered or args.limit != 20):
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
 
     query = TransactionQuery(args.data_dir)
     if args.transaction_id is not None:
         view = query.get(args.transaction_id)
-        return format_transaction(view) if view is not None else f"Transaction {args.transaction_id} not found."
+        if view is None:
+            return f"Transaction {args.transaction_id} not found."
+        detail = format_transaction(view)
+        if not args.events:
+            return detail
+        timeline = format_events(
+            transaction_events(args.data_dir, args.transaction_id),
+            heading=f"Transaction {args.transaction_id} OCPP events",
+        )
+        return f"{detail}\n\n{timeline}"
 
     filters = {
         "charger": args.charger,
