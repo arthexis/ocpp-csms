@@ -53,13 +53,48 @@ def _id_tag(record: dict[str, Any]) -> str | None:
     return None
 
 
-def _updated_at(record: dict[str, Any]) -> datetime:
-    for value in (
-        record.get("updated_at"),
-        (record.get("stop") or {}).get("timestamp") if isinstance(record.get("stop"), dict) else None,
-        (record.get("start") or {}).get("timestamp") if isinstance(record.get("start"), dict) else None,
-        record.get("created_at"),
-    ):
+def _meter_times(record: dict[str, Any]) -> list[datetime]:
+    times: list[datetime] = []
+    payloads = record.get("meter_values")
+    if not isinstance(payloads, list):
+        return times
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        meter_values = payload.get("meter_value")
+        if not isinstance(meter_values, list):
+            continue
+        for entry in meter_values:
+            if not isinstance(entry, dict):
+                continue
+            parsed = _parse_time(entry.get("timestamp"))
+            if parsed is not None:
+                times.append(parsed)
+    return times
+
+
+def _activity_at(record: dict[str, Any]) -> datetime:
+    """Return the newest charger/OCPP evidence time for this transaction."""
+    candidates: list[datetime] = []
+
+    stop = record.get("stop")
+    if isinstance(stop, dict):
+        parsed = _parse_time(stop.get("timestamp"))
+        if parsed is not None:
+            candidates.append(parsed)
+
+    candidates.extend(_meter_times(record))
+
+    start = record.get("start")
+    if isinstance(start, dict):
+        parsed = _parse_time(start.get("timestamp"))
+        if parsed is not None:
+            candidates.append(parsed)
+
+    if candidates:
+        return max(candidates)
+
+    for value in (record.get("updated_at"), record.get("created_at")):
         parsed = _parse_time(value)
         if parsed is not None:
             return parsed
@@ -95,8 +130,8 @@ class TransactionView:
         return _id_tag(self.record)
 
     @property
-    def updated_at(self) -> datetime:
-        return _updated_at(self.record)
+    def activity_at(self) -> datetime:
+        return _activity_at(self.record)
 
     @property
     def active(self) -> bool:
@@ -137,10 +172,10 @@ class TransactionQuery:
             and (connector is None or view.connector_id == connector)
             and (id_tag is None or view.id_tag == id_tag)
             and (active is None or view.active is active)
-            and (since_time is None or view.updated_at >= since_time)
-            and (until_time is None or view.updated_at <= until_time)
+            and (since_time is None or view.activity_at >= since_time)
+            and (until_time is None or view.activity_at <= until_time)
         ]
-        matches.sort(key=lambda view: (view.updated_at, view.transaction_id), reverse=True)
+        matches.sort(key=lambda view: (view.activity_at, view.transaction_id), reverse=True)
         if limit is not None:
             return matches[: max(limit, 0)]
         return matches
