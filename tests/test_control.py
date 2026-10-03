@@ -32,13 +32,21 @@ class Session:
 
 
 class Registry:
-    def __init__(self, session=None, active=None):
-        self.current = session
+    def __init__(self, session=None, active=None, sessions=None):
+        if sessions is not None:
+            self.sessions = dict(sessions)
+        elif session is not None:
+            self.sessions = {"charger-a": session}
+        else:
+            self.sessions = {}
         self.active = active or {}
         self.events = []
 
     def session(self, charge_point_id):
-        return self.current if charge_point_id == "charger-a" else None
+        return self.sessions.get(charge_point_id)
+
+    def connected_chargers(self):
+        return sorted(self.sessions)
 
     def active_transaction_ids(self, charge_point_id):
         return list(self.active.get(charge_point_id, []))
@@ -67,6 +75,58 @@ async def test_dispatches_supported_commands(control_request, expected_call):
 
     assert response == {"ok": True, "response": {"status": "Accepted"}}
     assert session.calls == [expected_call]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("control_request", "expected_call"),
+    [
+        ({"command": "start", "id_tag": "REMOTE", "connector": 2}, ("start", "REMOTE", 2)),
+        ({"command": "stop", "transaction": 42}, ("stop", 42)),
+        ({"command": "reboot"}, ("reboot", "Soft")),
+        ({"command": "config", "keys": ["HeartbeatInterval"]}, ("config", ["HeartbeatInterval"])),
+    ],
+)
+async def test_single_connected_charger_is_inferred(control_request, expected_call):
+    session = Session()
+
+    response = await dispatch_control(Registry(session), control_request)
+
+    assert response["ok"] is True
+    assert session.calls == [expected_call]
+
+
+@pytest.mark.asyncio
+async def test_missing_charger_fails_when_none_are_connected():
+    response = await dispatch_control(Registry(), {"command": "reboot"})
+
+    assert response == {"error": "no_charger_connected"}
+
+
+@pytest.mark.asyncio
+async def test_missing_charger_requires_selector_when_multiple_are_connected():
+    response = await dispatch_control(
+        Registry(sessions={"charger-a": Session(), "charger-b": Session()}),
+        {"command": "reboot"},
+    )
+
+    assert response == {
+        "error": "charger_required",
+        "chargers": ["charger-a", "charger-b"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_config_positional_charger_is_recognized():
+    session = Session()
+
+    response = await dispatch_control(
+        Registry(session),
+        {"command": "config", "keys": ["charger-a", "HeartbeatInterval"]},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("config", ["HeartbeatInterval"])]
 
 
 @pytest.mark.asyncio
@@ -110,7 +170,7 @@ async def test_configuration_dispatch_respects_active_transaction_policy(
 
 
 @pytest.mark.asyncio
-async def test_disconnected_charger_is_not_queued():
+async def test_disconnected_explicit_charger_is_not_queued():
     response = await dispatch_control(
         Registry(),
         {"command": "reboot", "charger": "charger-a"},
@@ -124,7 +184,8 @@ async def test_disconnected_charger_is_not_queued():
     ("control_request", "error"),
     [
         ({"charger": "charger-a"}, "missing_command"),
-        ({"command": "start"}, "missing_charger"),
+        ({"command": "start"}, "missing_id_tag"),
+        ({"command": "start", "charger": ""}, "invalid_charger"),
         ({"command": "start", "charger": "charger-a"}, "missing_id_tag"),
         (
             {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": -1},
@@ -165,7 +226,7 @@ async def test_unix_socket_accepts_one_json_request(tmp_path):
     async with ControlServer(Registry(session), path):
         reader, writer = await asyncio.open_unix_connection(str(path))
         writer.write(
-            json.dumps({"command": "stop", "charger": "charger-a", "transaction": 9}).encode()
+            json.dumps({"command": "stop", "transaction": 9}).encode()
             + b"\n"
         )
         await writer.drain()
