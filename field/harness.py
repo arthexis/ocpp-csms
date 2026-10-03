@@ -4,6 +4,7 @@ import argparse
 import json
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,10 @@ DEFAULT_CONFIG_KEYS = [
     "HeartbeatInterval",
     "MeterValueSampleInterval",
 ]
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +60,15 @@ def build_parser() -> argparse.ArgumentParser:
     protocol.add_argument("--repeat-delay", type=float, default=30.0)
     protocol.add_argument("--poll-interval", type=float, default=1.0)
     protocol.add_argument("--key", action="append", dest="keys")
+
+    soak_parser = commands.add_parser("soak", help="Enter unattended idle soak with watchdog protection")
+    soak_parser.add_argument("run_dir")
+
+    handoff_parser = commands.add_parser("handoff", help="End unattended protection and leave candidate CSMS active for the next field protocol")
+    handoff_parser.add_argument("run_dir")
+
+    report_parser = commands.add_parser("report", help="Write and print a structured field-run result")
+    report_parser.add_argument("run_dir")
 
     rollback_parser = commands.add_parser("rollback", help="Restore the configured legacy service")
     rollback_parser.add_argument("run_dir")
@@ -99,6 +113,13 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    value = json.loads(path.read_text())
+    return value if isinstance(value, dict) else None
+
+
 def _wait(predicate, *, timeout: float, interval: float) -> bool:
     deadline = time.monotonic() + timeout
     while True:
@@ -139,7 +160,7 @@ def rollback(run_dir: Path, probe: SystemProbe, *, reason: str, service_timeout:
     ):
         result = {"ok": True, "reason": reason, "actions": [{"restore": "already_restored"}], "legacy_ready": True}
         _write_json(run_dir / "rollback.json", result)
-        save_state(run_dir, replace(state, phase="rolled_back"))
+        save_state(run_dir, replace(state, phase="rolled_back", watchdog="disabled"))
         return 0
 
     if probe.service_active(config.csms_service):
@@ -161,7 +182,7 @@ def rollback(run_dir: Path, probe: SystemProbe, *, reason: str, service_timeout:
         legacy_ready = _wait(lambda: probe.service_active(config.legacy_service) and probe.port_listening(config.listener_host, config.listener_port), timeout=service_timeout, interval=poll_interval)
     ok = bool(port_free and legacy_started and legacy_ready)
     _write_json(run_dir / "rollback.json", {"ok": ok, "reason": reason, "actions": actions, "legacy_ready": legacy_ready})
-    save_state(run_dir, replace(state, phase="rolled_back" if ok else "rollback_failed"))
+    save_state(run_dir, replace(state, phase="rolled_back" if ok else "rollback_failed", watchdog="disabled"))
     return 0 if ok else 1
 
 
@@ -265,18 +286,118 @@ def reboot_and_configure(run_dir: Path, *, reboot_timeout: float, post_boot_time
     return 0
 
 
+def enter_soak(run_dir: Path, probe: SystemProbe) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    if state.phase not in {"configuration", "idle_soak"}:
+        raise ValueError(f"soak requires configuration state, got {state.phase}")
+    checks = {
+        "csms_service_active": probe.service_active(config.csms_service),
+        "legacy_service_inactive": not probe.service_active(config.legacy_service),
+        "listener_available": probe.port_listening(config.listener_host, config.listener_port),
+        "control_socket_available": probe.socket_exists(config.control_socket),
+    }
+    observation = baseline_observation(config.csms_data_dir, config.charger)
+    checks.update({
+        "charger_connected": bool(observation["connected"]),
+        "heartbeat_seen": bool(observation["heartbeat_count"] > 0),
+        "charger_idle": not observation["active_transactions"],
+    })
+    ok = all(checks.values())
+    result = {"ok": ok, "timestamp": utc_now(), "checks": checks, "observation": observation}
+    _write_json(run_dir / "soak.json", result)
+    if not ok:
+        return 1
+    save_state(run_dir, replace(state, phase="idle_soak", watchdog="enabled"))
+    return 0
+
+
+def handoff(run_dir: Path, probe: SystemProbe) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    if state.phase not in {"idle_soak", "handed_off"}:
+        raise ValueError(f"handoff requires idle_soak state, got {state.phase}")
+    checks = {
+        "csms_service_active": probe.service_active(config.csms_service),
+        "legacy_service_inactive": not probe.service_active(config.legacy_service),
+        "listener_available": probe.port_listening(config.listener_host, config.listener_port),
+        "control_socket_available": probe.socket_exists(config.control_socket),
+    }
+    ok = all(checks.values())
+    result = {
+        "ok": ok,
+        "timestamp": utc_now(),
+        "checks": checks,
+        "watchdog": "disabled",
+        "next_protocol": 45,
+    }
+    _write_json(run_dir / "handoff.json", result)
+    if not ok:
+        return 1
+    save_state(run_dir, replace(state, phase="handed_off", watchdog="disabled"))
+    return 0
+
+
+def build_report(run_dir: Path, probe: SystemProbe) -> dict[str, Any]:
+    state = load_state(run_dir)
+    config = state.config
+    phases = {
+        "preflight": _read_json(run_dir / "preflight.json"),
+        "takeover": _read_json(run_dir / "takeover.json"),
+        "baseline": _read_json(run_dir / "baseline.json"),
+        "reboot": _read_json(run_dir / "reboot.json"),
+        "configuration": _read_json(run_dir / "configuration.json"),
+        "soak": _read_json(run_dir / "soak.json"),
+        "handoff": _read_json(run_dir / "handoff.json"),
+        "rollback": _read_json(run_dir / "rollback.json"),
+        "watchdog_latest": _read_json(run_dir / "watchdog-latest.json"),
+    }
+    successful = {
+        name: bool(value and value.get("ok") is True)
+        for name, value in phases.items()
+        if name in {"preflight", "takeover", "baseline", "reboot", "configuration", "soak", "handoff"}
+    }
+    report = {
+        "generated_at": utc_now(),
+        "charger": config.charger,
+        "phase": state.phase,
+        "watchdog": state.watchdog,
+        "protocol_44_complete": state.phase == "handed_off" and state.watchdog == "disabled" and all(successful.values()),
+        "phase_results": successful,
+        "current_services": {
+            "csms_active": probe.service_active(config.csms_service),
+            "legacy_active": probe.service_active(config.legacy_service),
+            "listener_available": probe.port_listening(config.listener_host, config.listener_port),
+            "control_socket_available": probe.socket_exists(config.control_socket),
+        },
+        "evidence": phases,
+        "next_protocol": 45 if state.phase == "handed_off" else None,
+    }
+    _write_json(run_dir / "result.json", report)
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     probe = LocalSystemProbe()
+    run_dir = Path(getattr(args, "run_dir", "")).expanduser()
     if args.command == "status":
-        print(json.dumps(load_state(Path(args.run_dir).expanduser()).to_dict(), indent=2, sort_keys=True))
+        print(json.dumps(load_state(run_dir).to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "takeover":
-        return takeover(Path(args.run_dir).expanduser(), probe, service_timeout=args.service_timeout, baseline_timeout=args.baseline_timeout, poll_interval=args.poll_interval)
+        return takeover(run_dir, probe, service_timeout=args.service_timeout, baseline_timeout=args.baseline_timeout, poll_interval=args.poll_interval)
     if args.command == "reboot-config":
-        return reboot_and_configure(Path(args.run_dir).expanduser(), reboot_timeout=args.reboot_timeout, post_boot_timeout=args.post_boot_timeout, repeat_delay=args.repeat_delay, poll_interval=args.poll_interval, keys=args.keys)
+        return reboot_and_configure(run_dir, reboot_timeout=args.reboot_timeout, post_boot_timeout=args.post_boot_timeout, repeat_delay=args.repeat_delay, poll_interval=args.poll_interval, keys=args.keys)
+    if args.command == "soak":
+        return enter_soak(run_dir, probe)
+    if args.command == "handoff":
+        return handoff(run_dir, probe)
+    if args.command == "report":
+        report = build_report(run_dir, probe)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
     if args.command == "rollback":
-        return rollback(Path(args.run_dir).expanduser(), probe, reason=args.reason, service_timeout=args.service_timeout, poll_interval=args.poll_interval)
+        return rollback(run_dir, probe, reason=args.reason, service_timeout=args.service_timeout, poll_interval=args.poll_interval)
     return start_run(args, probe)
 
 
