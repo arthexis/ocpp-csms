@@ -79,9 +79,9 @@ class ChargePointSession(OcppChargePoint):
     ) -> call_result.GetConfigurationPayload:
         payload: dict[str, Any] = {}
         if keys:
-            payload["key"] = keys
+            payload["key"] = list(keys)
         self._record("GetConfiguration", payload, direction="out")
-        response = await self.call(call.GetConfigurationPayload(key=keys or None))
+        response = await self.call(call.GetConfigurationPayload(key=keys))
         self._record("GetConfiguration", dict(response.__dict__), direction="in")
         return response
 
