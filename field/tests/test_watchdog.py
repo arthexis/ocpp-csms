@@ -1,7 +1,7 @@
 import json
 
 import field.watchdog as watchdog_module
-from field.state import FieldConfig, FieldState, load_state, save_state
+from field.state import load_state
 from field.watchdog import health_snapshot, run_watchdog, set_enabled
 
 
@@ -21,53 +21,33 @@ class Probe:
         return self.socket
 
 
-def make_run(tmp_path, *, watchdog="disabled"):
-    run_dir = tmp_path / "run"
-    save_state(
-        run_dir,
-        FieldState(
-            config=FieldConfig(
-                charger="charger-a",
-                legacy_service="legacy.service",
-                csms_service="candidate.service",
-                ocpp_command="ocpp-csms",
-                listener_host="127.0.0.1",
-                listener_port=12345,
-                csms_data_dir=str(tmp_path / "data"),
-                control_socket=str(tmp_path / "data" / "control.sock"),
-            ),
-            phase="configuration",
-            watchdog=watchdog,
-        ),
-    )
-    return run_dir
+def observation(*, connected=True, heartbeat_count=1):
+    return {
+        "connected": connected,
+        "last_heartbeat": "now" if heartbeat_count else None,
+        "heartbeat_count": heartbeat_count,
+        "active_transactions": [],
+    }
 
 
-def test_enable_and_disable_only_change_watchdog_state(tmp_path):
-    run_dir = make_run(tmp_path)
+def test_enable_and_disable_only_change_watchdog_state(field_run):
+    run_dir = field_run()
 
     set_enabled(run_dir, True)
-    assert load_state(run_dir).watchdog == "enabled"
-    assert load_state(run_dir).phase == "configuration"
+    enabled = load_state(run_dir)
+    assert enabled.watchdog == "enabled"
+    assert enabled.phase == "configuration"
 
     set_enabled(run_dir, False)
-    assert load_state(run_dir).watchdog == "disabled"
-    assert load_state(run_dir).phase == "configuration"
+    disabled = load_state(run_dir)
+    assert disabled.watchdog == "disabled"
+    assert disabled.phase == "configuration"
     assert len((run_dir / "watchdog-state.jsonl").read_text().splitlines()) == 2
 
 
-def test_charger_disconnect_is_diagnostic_not_strong_failure(tmp_path, monkeypatch):
-    run_dir = make_run(tmp_path, watchdog="enabled")
-    monkeypatch.setattr(
-        watchdog_module,
-        "baseline_observation",
-        lambda data_dir, charger: {
-            "connected": False,
-            "last_heartbeat": "earlier",
-            "heartbeat_count": 4,
-            "active_transactions": [],
-        },
-    )
+def test_charger_disconnect_is_diagnostic_not_strong_failure(field_run, monkeypatch):
+    run_dir = field_run(watchdog="enabled")
+    monkeypatch.setattr(watchdog_module, "baseline_observation", lambda *args: observation(connected=False, heartbeat_count=4))
 
     snapshot = health_snapshot(run_dir, Probe())
 
@@ -75,18 +55,9 @@ def test_charger_disconnect_is_diagnostic_not_strong_failure(tmp_path, monkeypat
     assert snapshot["charger"]["connected"] is False
 
 
-def test_strong_failures_are_debounced_before_rollback(tmp_path, monkeypatch):
-    run_dir = make_run(tmp_path, watchdog="enabled")
-    monkeypatch.setattr(
-        watchdog_module,
-        "baseline_observation",
-        lambda data_dir, charger: {
-            "connected": True,
-            "last_heartbeat": "now",
-            "heartbeat_count": 4,
-            "active_transactions": [],
-        },
-    )
+def test_strong_failures_are_debounced_before_rollback(field_run, monkeypatch):
+    run_dir = field_run(watchdog="enabled")
+    monkeypatch.setattr(watchdog_module, "baseline_observation", lambda *args: observation(heartbeat_count=4))
     calls = []
 
     def fake_rollback(run_dir, probe, **kwargs):
@@ -110,18 +81,9 @@ def test_strong_failures_are_debounced_before_rollback(tmp_path, monkeypatch):
     assert [item["consecutive_strong_failures"] for item in snapshots] == [1, 2]
 
 
-def test_healthy_check_resets_failure_count_and_once_does_not_rollback(tmp_path, monkeypatch):
-    run_dir = make_run(tmp_path, watchdog="enabled")
-    monkeypatch.setattr(
-        watchdog_module,
-        "baseline_observation",
-        lambda data_dir, charger: {
-            "connected": True,
-            "last_heartbeat": "now",
-            "heartbeat_count": 1,
-            "active_transactions": [],
-        },
-    )
+def test_healthy_check_resets_failure_count_and_once_does_not_rollback(field_run, monkeypatch):
+    run_dir = field_run(watchdog="enabled")
+    monkeypatch.setattr(watchdog_module, "baseline_observation", lambda *args: observation())
     monkeypatch.setattr(watchdog_module, "rollback", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("rollback")))
 
     assert run_watchdog(
