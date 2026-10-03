@@ -38,12 +38,7 @@ Both service names must identify existing service units. How those units are ins
 
 `--idle-confirmed` is an explicit operator assertion for the pre-takeover state. The harness does not infer transaction state from a legacy backend with an unrelated storage model.
 
-A successful preflight records:
-
-- `state.json`: authoritative field-run configuration and phase;
-- `preflight.json`: individual preflight decisions.
-
-Reusing a run directory with different operational configuration is rejected.
+A successful preflight records `state.json` and `preflight.json`. Reusing a run directory with different operational configuration is rejected.
 
 ## Chunk 2: takeover, baseline, and rollback
 
@@ -53,17 +48,7 @@ After successful preflight, switch from the configured legacy service to the con
 python -m field.harness takeover /path/to/run
 ```
 
-The takeover requires, in order:
-
-1. the configured legacy service is active;
-2. it stops and releases the configured listener;
-3. the configured CSMS service starts;
-4. that service is active, the configured listener is reachable, and the configured control socket exists;
-5. the configured charger is recorded as connected;
-6. at least one inbound `Heartbeat` is present in the configured CSMS data directory;
-7. no active transaction is recorded for that charger.
-
-The baseline evidence is read directly and read-only from the candidate CSMS SQLite evidence store. Human-readable CLI output is not parsed.
+The takeover requires, in order, the configured legacy service, listener release, configured CSMS service/listener/control socket, charger connection, at least one inbound `Heartbeat`, and no active transaction. Evidence is read directly and read-only from the configured CSMS SQLite store; human-readable CLI output is not parsed.
 
 Timeouts are caller-configurable:
 
@@ -74,15 +59,69 @@ python -m field.harness takeover /path/to/run \
   --poll-interval 1
 ```
 
-Any takeover failure after service switching uses the common rollback primitive. Rollback can also be requested explicitly:
+Any takeover failure after switching begins uses the common rollback primitive. Rollback can also be requested explicitly:
 
 ```sh
 python -m field.harness rollback /path/to/run --reason operator_requested
 ```
 
-Rollback is idempotent. It stops the configured candidate service if needed, waits for the configured listener to become free, starts the configured legacy service, verifies that service and listener, and preserves the field-run evidence. Results are written to `rollback.json`.
+Rollback is idempotent and uses only the configured services and listener values.
 
-Successful takeover records `takeover.json` and `baseline.json` and leaves the run in phase `baseline`.
+## Chunk 3: reboot and GetConfiguration
+
+After the run reaches `baseline`, execute:
+
+```sh
+python -m field.harness reboot-config /path/to/run
+```
+
+The reboot protocol checkpoints the candidate CSMS evidence store immediately before issuing `Reset`. Historical disconnects, `BootNotification`, or Heartbeats from before that checkpoint cannot satisfy the protocol.
+
+The sequence is:
+
+1. send one Soft reset through the configured control socket;
+2. require an Accepted confirmation;
+3. wait for a charger disconnect for the configurable reboot interval;
+4. if no disconnect occurs, send exactly one Hard reset and require Accepted;
+5. require post-checkpoint disconnect, reconnect, `BootNotification`, and inbound `Heartbeat`;
+6. query all configuration keys;
+7. query a selected key set;
+8. repeat the selected query after a configurable delay;
+9. record semantic differences without treating a changed charger-reported value as an automatic protocol failure;
+10. require the charger to remain connected and idle.
+
+Default selected keys are:
+
+- `SupportedFeatureProfiles`
+- `GetConfigurationMaxKeys`
+- `HeartbeatInterval`
+- `MeterValueSampleInterval`
+
+Override/add the selected set by repeating `--key`:
+
+```sh
+python -m field.harness reboot-config /path/to/run \
+  --key HeartbeatInterval \
+  --key SupportedFeatureProfiles \
+  --reboot-timeout 60 \
+  --post-boot-timeout 120 \
+  --repeat-delay 30 \
+  --poll-interval 1
+```
+
+The control socket location comes from `state.json`; the harness does not assume that it is `<data-dir>/control.sock`.
+
+Evidence written by this phase includes:
+
+- `reboot.json`: reset attempts plus post-checkpoint reboot evidence;
+- `config/all.json`: the full charger-reported configuration response;
+- `config/selected.json`: selected-key response;
+- `config/repeat.json`: repeated selected-key response;
+- `configuration.json`: comparison, unknown keys, and final idle/connection observation.
+
+Unknown configuration keys are evidence, not failure. This protocol never sends `force=true` and never performs configuration writes.
+
+Successful completion leaves the run in phase `configuration`.
 
 Inspect stored state at any point with:
 
@@ -90,4 +129,4 @@ Inspect stored state at any point with:
 python -m field.harness status /path/to/run
 ```
 
-Reboot and `GetConfiguration` protocol behavior remain for chunk 3.
+The independent unattended watchdog remains for chunk 4.
