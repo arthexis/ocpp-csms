@@ -1,205 +1,87 @@
-import asyncio
-
-import pytest
-
-from ocpp_csms.app import build_parser, run_transactions
+from ocpp_csms.diagnostics import transaction_events
 from ocpp_csms.events import EventStore
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transaction_cli import _duration, _energy_wh, _meter_summary
 
 
-def parse(tmp_path, *argv: str):
-    parser, _ = build_parser()
-    return parser.parse_args(["--data-dir", str(tmp_path), *argv])
+def test_duration_and_energy_are_derived_from_transaction_evidence():
+    start = {"meter_start": 1000, "timestamp": "2026-10-03T10:00:00Z"}
+    stop = {"meter_stop": 1600, "timestamp": "2026-10-03T10:10:30Z"}
+
+    assert _duration(start["timestamp"], stop["timestamp"]) == "10m 30s"
+    assert _energy_wh(start, stop) == 600
 
 
-def test_detail_summarizes_duration_energy_and_meter_values(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = asyncio.run(
-        archive.start(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "id_tag": "card-a",
-                "meter_start": 1000,
-                "timestamp": "2026-10-03T10:00:00Z",
-            },
-        )
-    )
-    asyncio.run(
-        archive.meter_values(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "transaction_id": transaction_id,
-                "meter_value": [
-                    {
-                        "timestamp": "2026-10-03T10:05:00Z",
-                        "sampled_value": [
-                            {
-                                "value": "1250",
-                                "measurand": "Energy.Active.Import.Register",
-                                "unit": "Wh",
-                            },
-                            {
-                                "value": "6900",
-                                "measurand": "Power.Active.Import",
-                                "unit": "W",
-                            },
-                        ],
-                    }
-                ],
-            },
-        )
-    )
-    asyncio.run(
-        archive.stop(
-            "charger-a",
-            {
-                "transaction_id": transaction_id,
-                "meter_stop": 1600,
-                "timestamp": "2026-10-03T10:10:30Z",
-            },
-        )
+def test_invalid_or_regressive_energy_is_not_derived():
+    assert _energy_wh({}, {}) is None
+    assert _energy_wh({"meter_start": 1000}, {"meter_stop": 900}) is None
+    assert _duration("2026-10-03T10:10:00Z", "2026-10-03T10:00:00Z") is None
+
+
+def test_meter_summary_uses_only_explicit_measurand_and_unit_semantics():
+    summary = _meter_summary(
+        {
+            "meter_values": [
+                {
+                    "meter_value": [
+                        {
+                            "timestamp": "2026-10-03T10:05:00Z",
+                            "sampled_value": [
+                                {
+                                    "value": "1250",
+                                    "measurand": "Energy.Active.Import.Register",
+                                    "unit": "Wh",
+                                },
+                                {
+                                    "value": "6900",
+                                    "measurand": "Power.Active.Import",
+                                    "unit": "W",
+                                },
+                                {"value": "42"},
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
     )
 
-    text = run_transactions(parse(tmp_path, "txn", str(transaction_id)))
-
-    assert "Duration:     10m 30s" in text
-    assert "Meter start:  1000" in text
-    assert "Meter stop:   1600" in text
-    assert "Energy:       600 Wh" in text
-    assert "messages:   1" in text
-    assert "samples:    2" in text
-    assert "first:      2026-10-03T10:05:00Z" in text
-    assert "last:       2026-10-03T10:05:00Z" in text
-    assert "latest energy: 1250 Wh" in text
-    assert "latest power: 6900 W" in text
+    assert summary["messages"] == 1
+    assert summary["samples"] == 3
+    assert summary["first"] == "2026-10-03T10:05:00Z"
+    assert summary["last"] == "2026-10-03T10:05:00Z"
+    assert summary["latest_energy"] == ("1250", "Wh")
+    assert summary["latest_power"] == ("6900", "W")
 
 
-def test_detail_does_not_label_ambiguous_sample_values(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = asyncio.run(
-        archive.start(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "id_tag": "card-a",
-                "meter_start": 1000,
-                "timestamp": "2026-10-03T10:00:00Z",
-            },
-        )
-    )
-    asyncio.run(
-        archive.meter_values(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "transaction_id": transaction_id,
-                "meter_value": [
-                    {
-                        "timestamp": "2026-10-03T10:05:00Z",
-                        "sampled_value": [{"value": "1250"}],
-                    }
-                ],
-            },
-        )
+def test_ambiguous_meter_samples_are_counted_but_not_interpreted():
+    summary = _meter_summary(
+        {
+            "meter_values": [
+                {
+                    "meter_value": [
+                        {
+                            "timestamp": "2026-10-03T10:05:00Z",
+                            "sampled_value": [{"value": "1250"}],
+                        }
+                    ]
+                }
+            ]
+        }
     )
 
-    text = run_transactions(parse(tmp_path, "txn", str(transaction_id)))
-
-    assert "samples:    1" in text
-    assert "latest energy:" not in text
-    assert "latest power:" not in text
+    assert summary["samples"] == 1
+    assert summary["latest_energy"] is None
+    assert summary["latest_power"] is None
 
 
-def test_recovered_detail_explains_missing_start(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    asyncio.run(
-        archive.stop(
-            "charger-a",
-            {
-                "transaction_id": 225,
-                "meter_stop": 1800,
-                "timestamp": "2026-10-03T10:10:00Z",
-            },
-        )
-    )
-
-    text = run_transactions(parse(tmp_path, "txn", "225"))
-
-    assert "Origin:       recovered" in text
-    assert "Recovery:" in text
-    assert "start:      unknown" in text
-    assert "recovered:  StopTransaction" in text
-
-
-def test_detail_lists_collision_reason(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = asyncio.run(
-        archive.start(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "id_tag": "card-a",
-                "meter_start": 100,
-                "timestamp": "2026-10-03T10:00:00Z",
-            },
-        )
-    )
-    asyncio.run(
-        archive.stop(
-            "charger-a",
-            {
-                "transaction_id": transaction_id,
-                "meter_stop": 50,
-                "timestamp": "2026-10-03T09:00:00Z",
-            },
-        )
-    )
-
-    text = run_transactions(parse(tmp_path, "txn", str(transaction_id)))
-
-    assert "Warnings:" in text
-    assert "unresolved StopTransaction: message_predates_local_start" in text
-
-
-def test_events_requires_transaction_id(tmp_path):
-    with pytest.raises(ValueError, match="requires a transaction ID"):
-        run_transactions(parse(tmp_path, "txn", "--events"))
-
-
-def test_events_appends_transaction_scoped_ocpp_timeline(tmp_path):
-    archive = TransactionArchive(tmp_path)
+def test_transaction_events_returns_only_events_for_requested_transaction(tmp_path):
     store = EventStore(tmp_path)
-    transaction_id = asyncio.run(
-        archive.start(
-            "charger-a",
-            {
-                "connector_id": 1,
-                "id_tag": "card-a",
-                "meter_start": 100,
-                "timestamp": "2026-10-03T10:00:00Z",
-            },
-        )
-    )
-    store.record_ocpp(
-        "charger-a",
-        "StartTransaction",
-        {"connector_id": 1, "id_tag": "card-a", "meter_start": 100},
-        transaction_id=transaction_id,
-    )
-    store.record_ocpp(
-        "charger-a",
-        "StartTransaction",
-        {"idTagInfo": {"status": "Accepted"}, "transaction_id": transaction_id},
-        direction="out",
-        transaction_id=transaction_id,
-    )
+    store.record_ocpp("charger-a", "StartTransaction", {}, transaction_id=7)
+    store.record_ocpp("charger-a", "MeterValues", {}, transaction_id=7)
     store.record_ocpp("charger-a", "Heartbeat", {}, transaction_id=None)
+    store.record_ocpp("charger-a", "StopTransaction", {}, transaction_id=8)
 
-    text = run_transactions(parse(tmp_path, "txn", str(transaction_id), "--events"))
+    rows = transaction_events(tmp_path, 7)
 
-    assert f"Transaction {transaction_id} OCPP events" in text
-    assert "StartTransaction RFID card-a" in text
-    assert "→ StartTransaction Accepted" in text
-    assert "Heartbeat" not in text
+    assert [row["action"] for row in rows] == ["StartTransaction", "MeterValues"]
+    assert {row["transaction_id"] for row in rows} == {7}
