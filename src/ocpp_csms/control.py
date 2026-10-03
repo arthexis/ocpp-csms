@@ -17,9 +17,13 @@ class Session(Protocol):
 
     async def reset(self, reset_type: str = "Soft") -> Any: ...
 
+    async def get_configuration(self, keys: list[str] | None = None) -> Any: ...
+
 
 class SessionRegistry(Protocol):
     def session(self, charge_point_id: str) -> Session | None: ...
+
+    def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
 
 
 def control_socket_path(data_dir: str | Path) -> Path:
@@ -49,6 +53,20 @@ async def send_control(data_dir: str | Path, request: dict[str, Any]) -> dict[st
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+def _configuration_keys(request: dict[str, Any]) -> list[str] | None | object:
+    keys = request.get("keys")
+    if keys is None or keys == []:
+        return None
+    if not isinstance(keys, list):
+        return _INVALID
+    if any(not isinstance(key, str) or not key for key in keys):
+        return _INVALID
+    return keys
+
+
+_INVALID = object()
 
 
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
@@ -82,6 +100,21 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             if reset_type not in {"Soft", "Hard"}:
                 return {"error": "invalid_reset_type"}
             response = await session.reset(reset_type)
+        elif command == "config":
+            keys = _configuration_keys(request)
+            if keys is _INVALID:
+                return {"error": "invalid_keys"}
+            force = request.get("force", False)
+            if not isinstance(force, bool):
+                return {"error": "invalid_force"}
+            active_transactions = registry.active_transaction_ids(charger)
+            if active_transactions and not force:
+                return {
+                    "error": "active_transaction",
+                    "charger": charger,
+                    "transactions": active_transactions,
+                }
+            response = await session.get_configuration(keys)
         else:
             return {"error": "unknown_command", "command": command}
     except Exception as exc:
