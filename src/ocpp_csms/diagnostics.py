@@ -63,6 +63,35 @@ def events_between(
     return rows
 
 
+def transaction_events(
+    data_dir: str | Path,
+    transaction_id: int,
+    *,
+    limit: int = 1000,
+) -> list[sqlite3.Row]:
+    """Return OCPP evidence explicitly associated with one transaction."""
+    database = Path(data_dir).expanduser() / DATABASE_FILENAME
+    if not database.exists():
+        return []
+
+    connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
+    try:
+        return connection.execute(
+            """
+            SELECT received_at AS occurred_at, charger_id, 'ocpp' AS kind,
+                   action, direction, transaction_id, id_tag, payload_json AS payload
+            FROM events
+            WHERE transaction_id = ?
+            ORDER BY occurred_at ASC, id ASC
+            LIMIT ?
+            """,
+            (int(transaction_id), limit),
+        ).fetchall()
+    finally:
+        connection.close()
+
+
 def _summary(row: sqlite3.Row) -> str:
     if row["kind"] == "runtime":
         return row["action"].replace("_", " ")
