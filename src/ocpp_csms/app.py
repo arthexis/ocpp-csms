@@ -22,6 +22,7 @@ from ocpp_csms.transactions import TransactionArchive, default_data_dir
 
 
 CONTROL_COMMANDS = ("start", "stop", "reboot")
+PROFILE_PURPOSES = ("ChargePointMaxProfile", "TxDefaultProfile", "TxProfile")
 
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
@@ -71,6 +72,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     add(profile_composite, "--connector", "--cp", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
     add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
     add(profile_composite, "--json", action="store_true", help="Print the OCPP response as JSON")
+    profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
+    add(profile_clear, "--charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
+    add(profile_clear, "--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
+    add(profile_clear, "--purpose", choices=PROFILE_PURPOSES, help="Filter by charging profile purpose")
+    add(profile_clear, "--stack-level", type=int, help="Filter by stack level")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
@@ -288,6 +295,27 @@ def _profile_composite_request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
+def _profile_clear_request(args: argparse.Namespace) -> dict[str, object]:
+    if args.profile_id is not None and args.profile_id < 0:
+        raise ValueError("--id must be zero or greater")
+    if args.connector is not None and args.connector < 0:
+        raise ValueError("--connector/--cp must be zero or greater")
+    if args.stack_level is not None and args.stack_level < 0:
+        raise ValueError("--stack-level must be zero or greater")
+    request: dict[str, object] = {"command": "clear_charging_profile"}
+    if args.charger is not None:
+        request["charger"] = args.charger
+    if args.profile_id is not None:
+        request["id"] = args.profile_id
+    if args.connector is not None:
+        request["connector"] = args.connector
+    if args.purpose is not None:
+        request["purpose"] = args.purpose
+    if args.stack_level is not None:
+        request["stack_level"] = args.stack_level
+    return request
+
+
 def _schedule_value(mapping: dict[str, object], snake: str, camel: str) -> object:
     return mapping.get(snake, mapping.get(camel))
 
@@ -319,6 +347,24 @@ def _format_composite_schedule(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _send_profile_request(args: argparse.Namespace, request: dict[str, object]) -> tuple[int, dict[str, object] | None]:
+    try:
+        response = asyncio.run(send_control(args.data_dir, request))
+    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        print(f"error: {exc}")
+        return 1, None
+    error = response.get("error")
+    if error:
+        detail = response.get("detail") or response.get("charger")
+        suffix = f": {detail}" if detail is not None else ""
+        print(f"error: {error}{suffix}")
+        return 1, None
+    payload = response.get("response")
+    if not isinstance(payload, dict):
+        return 1, None
+    return 0, payload
+
+
 def run_profile(args: argparse.Namespace) -> int:
     if args.profile_command == "list":
         print(format_profile_template_list())
@@ -333,35 +379,23 @@ def run_profile(args: argparse.Namespace) -> int:
     if args.profile_command == "set":
         try:
             request = _profile_set_request(args)
-            response = asyncio.run(send_control(args.data_dir, request))
-        except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        except ValueError as exc:
             print(f"error: {exc}")
             return 1
-        error = response.get("error")
-        if error:
-            detail = response.get("detail") or response.get("charger")
-            suffix = f": {detail}" if detail is not None else ""
-            print(f"error: {error}{suffix}")
+        code, payload = _send_profile_request(args, request)
+        if code or payload is None:
             return 1
-        payload = response.get("response")
-        status = payload.get("status") if isinstance(payload, dict) else None
+        status = payload.get("status")
         print(status or "Unknown")
         return 0 if status == "Accepted" else 1
     if args.profile_command == "composite":
         try:
             request = _profile_composite_request(args)
-            response = asyncio.run(send_control(args.data_dir, request))
-        except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        except ValueError as exc:
             print(f"error: {exc}")
             return 1
-        error = response.get("error")
-        if error:
-            detail = response.get("detail") or response.get("charger")
-            suffix = f": {detail}" if detail is not None else ""
-            print(f"error: {error}{suffix}")
-            return 1
-        payload = response.get("response")
-        if not isinstance(payload, dict):
+        code, payload = _send_profile_request(args, request)
+        if code or payload is None:
             return 1
         if args.json:
             print(json.dumps(payload, sort_keys=True))
@@ -372,6 +406,18 @@ def run_profile(args: argparse.Namespace) -> int:
                 print(f"error: {exc}")
                 return 1
         return 0 if payload.get("status") == "Accepted" else 1
+    if args.profile_command == "clear":
+        try:
+            request = _profile_clear_request(args)
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 1
+        code, payload = _send_profile_request(args, request)
+        if code or payload is None:
+            return 1
+        status = payload.get("status")
+        print(status or "Unknown")
+        return 0 if status == "Accepted" else 1
     raise ValueError("profile requires a subcommand")
 
 
