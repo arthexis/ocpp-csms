@@ -48,12 +48,7 @@ def reboot_observation(
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
     with sqlite3.connect(database) as connection:
         rows = connection.execute(
-            """
-            SELECT action, direction
-            FROM events
-            WHERE charger_id = ? AND id > ?
-            ORDER BY id
-            """,
+            "SELECT action, direction FROM events WHERE charger_id = ? AND id > ? ORDER BY id",
             (charger, after_event_id),
         ).fetchall()
         runtime = connection.execute(
@@ -104,7 +99,4 @@ def configuration_payload(response: dict[str, Any]) -> dict[str, Any]:
 
 
 def configuration_map(payload: dict[str, Any]) -> dict[str, tuple[bool, str | None]]:
-    return {
-        row["key"]: (row["readonly"], row.get("value"))
-        for row in payload.get("configuration_key", [])
-    }
+    return {row["key"]: (row["readonly"], row.get("value")) for row in payload.get("configuration_key", [])}
