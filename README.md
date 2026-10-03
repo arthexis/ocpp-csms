@@ -23,9 +23,10 @@ ocpp-csms status
 ocpp-csms status --charging
 ocpp-csms txn --active
 ocpp-csms txn --last
+ocpp-csms txn 42 --events
 ocpp-csms events
-ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
-ocpp-csms stop charger-01 --transaction 42
+ocpp-csms start charger-01 --cp 1 --id-tag REMOTE
+ocpp-csms stop charger-01 --txn 42
 ocpp-csms reboot charger-01
 sudo systemctl status ocpp-csms
 sudo systemctl restart ocpp-csms
@@ -82,10 +83,10 @@ ocpp-csms init
 ocpp-csms serve [--host HOST] [--port PORT] [--log-level LEVEL]
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
-ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N]
-ocpp-csms txn [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N]
-ocpp-csms start CHARGER [--connector N] --id-tag TAG
-ocpp-csms stop CHARGER --transaction ID
+ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
+ocpp-csms txn [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
+ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG
+ocpp-csms stop CHARGER --transaction ID|--txn ID
 ocpp-csms reboot CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
@@ -94,7 +95,11 @@ ocpp-csms explain CHARGER --since TIME --until TIME
 
 `init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. It never starts, stops, closes, repairs, or deletes a transaction. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
 
-Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction, so an active transaction and `--last` are never the same record. A positional transaction ID opens a detailed read-only view. List filters include `--charger`, `--connector` / `--cp`, `--id-tag`, `--since`, `--until`, and `--limit`.
+Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction, so an active transaction and `--last` are never the same record. A positional transaction ID opens a detailed read-only view. List filters include `--charger`, `--connector` / `--cp`, `--id-tag`, `--since`, `--until`, and `--limit`. Add `--events` to a transaction ID to append its transaction-scoped OCPP timeline.
+
+`status --charging` uses the same archived transaction activity model as `txn --active`, so both commands agree on which chargers have unfinished transactions. SQLite remains the source for live connector/status detail.
+
+The lowercase control aliases are equivalent to their long forms: `--cp` is an alias for `--connector`, and `--txn` is an alias for `--transaction`.
 
 Examples:
 
@@ -105,8 +110,9 @@ ocpp-csms txn --last
 ocpp-csms txn --charger charger-01 --last
 ocpp-csms txn --cp 1 --active
 ocpp-csms txn 17
-ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
-ocpp-csms stop charger-01 --transaction 42
+ocpp-csms txn 17 --events
+ocpp-csms start charger-01 --cp 1 --id-tag REMOTE
+ocpp-csms stop charger-01 --txn 42
 ocpp-csms reboot charger-01
 ocpp-csms reboot charger-01 --hard
 ocpp-csms events charger-01 --since 2026-10-01T20:00:00Z --until 2026-10-01T21:00:00Z
@@ -224,14 +230,16 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
+Pytest reports the 10 slowest test phases taking at least 10 ms on every run. This applies locally and in CI, so test-duration regressions remain visible without changing the test command.
+
 CI exercises the project on the appliance target and a newer compatibility target:
 
 - Debian 12 Bookworm / Python 3.11 / ARM64;
 - Debian 13 / Python 3.13 / ARM64.
 
-Tests are organized by behavior rather than framework layer where practical. Recovery tests deliberately cover both archive-level invariants and session/SQLite integration so restart, collision, and synthetic-session regressions remain visible.
+Tests are organized around behavior and state invariants rather than exact human-readable wording. Recovery tests deliberately cover both archive-level invariants and session/SQLite integration so restart, collision, and synthetic-session regressions remain visible.
 
-Remote-control tests cover the outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
+Remote-control tests cover outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
 
 ## Source layout
 
