@@ -1,7 +1,7 @@
 import pytest
 
 import ocpp_csms.app as app_module
-from ocpp_csms.app import build_parser, control_request, run_configuration, run_control
+from ocpp_csms.app import build_parser, configuration_request, control_request, run_configuration, run_control
 
 
 def parse(*args):
@@ -45,27 +45,29 @@ def test_reboot_defaults_to_soft_and_supports_hard():
     }
 
 
-def test_config_command_requests_all_or_selected_keys():
-    assert control_request(parse("config", "charger-a")) == {
+def test_config_builds_all_keys_and_selected_keys_requests():
+    assert configuration_request(parse("config", "charger-a")) == {
         "command": "config",
         "charger": "charger-a",
+        "force": False,
     }
-    assert control_request(parse("config", "charger-a", "HeartbeatInterval", "NumberOfConnectors")) == {
+    assert configuration_request(parse("config", "charger-a", "HeartbeatInterval", "GetConfigurationMaxKeys")) == {
         "command": "config",
         "charger": "charger-a",
-        "keys": ["HeartbeatInterval", "NumberOfConnectors"],
+        "force": False,
+        "keys": ["HeartbeatInterval", "GetConfigurationMaxKeys"],
     }
 
 
-def test_config_force_aliases_set_override():
+def test_config_force_aliases_are_equivalent():
     expected = {
         "command": "config",
         "charger": "charger-a",
         "force": True,
     }
 
-    assert control_request(parse("config", "charger-a", "--force")) == expected
-    assert control_request(parse("config", "charger-a", "-f")) == expected
+    assert configuration_request(parse("config", "charger-a", "--force")) == expected
+    assert configuration_request(parse("config", "charger-a", "-f")) == expected
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -106,30 +108,34 @@ def test_missing_control_socket_returns_one(monkeypatch):
     assert run_control(parse("reboot", "charger-a")) == 1
 
 
-def test_config_success_and_blocked_request_have_distinct_exit_codes(monkeypatch):
+def test_configuration_success_returns_zero(monkeypatch):
     install_control_response(
         monkeypatch,
         {
             "ok": True,
             "response": {
                 "configuration_key": [
-                    {"key": "HeartbeatInterval", "readonly": False, "value": "300"},
+                    {"key": "HeartbeatInterval", "readonly": False, "value": "300"}
                 ],
-                "unknown_key": [],
+                "unknown_key": ["VendorThing"],
             },
         },
     )
+
     assert run_configuration(parse("config", "charger-a")) == 0
 
+
+def test_configuration_blocked_returns_one(monkeypatch):
     install_control_response(
         monkeypatch,
-        {"error": "active_transaction", "charger": "charger-a", "transactions": [7]},
+        {"error": "active_transaction", "charger": "charger-a", "transactions": [17]},
     )
+
     assert run_configuration(parse("config", "charger-a")) == 1
 
 
-def test_config_rejects_invalid_control_response(monkeypatch):
-    install_control_response(monkeypatch, {"ok": True, "response": None})
+def test_configuration_rejects_invalid_response(monkeypatch):
+    install_control_response(monkeypatch, {"ok": True, "response": {"configuration_key": "bad"}})
 
     assert run_configuration(parse("config", "charger-a")) == 1
 
