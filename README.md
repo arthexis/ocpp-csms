@@ -21,6 +21,9 @@ Useful commands:
 ```bash
 ocpp-csms status
 ocpp-csms status --charging
+ocpp-csms transactions
+ocpp-csms txn --active
+ocpp-csms txn --last
 ocpp-csms events
 ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
 ocpp-csms stop charger-01 --transaction 42
@@ -80,6 +83,8 @@ ocpp-csms init
 ocpp-csms serve [--host HOST] [--port PORT] [--log-level LEVEL]
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
+ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N]
+ocpp-csms txn [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N]
 ocpp-csms start CHARGER [--connector N] --id-tag TAG
 ocpp-csms stop CHARGER --transaction ID
 ocpp-csms reboot CHARGER [--hard]
@@ -88,11 +93,19 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-`init` creates the SQLite database and transaction archive. `status` is read-only. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
+`init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
+
+Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction, so an active transaction and `--last` are never the same record. A positional transaction ID opens a detailed read-only view. List filters include `--charger`, `--connector` / `--cp`, `--id-tag`, `--since`, `--until`, and `--limit`.
 
 Examples:
 
 ```bash
+ocpp-csms txn
+ocpp-csms txn --active
+ocpp-csms txn --last
+ocpp-csms txn --charger charger-01 --last
+ocpp-csms txn --cp 1 --active
+ocpp-csms txn 17
 ocpp-csms start charger-01 --connector 1 --id-tag REMOTE
 ocpp-csms stop charger-01 --transaction 42
 ocpp-csms reboot charger-01
@@ -232,6 +245,8 @@ src/ocpp_csms/
   events.py        # SQLite event store and derived state
   diagnostics.py   # direct event queries and formatting
   status.py        # status queries and formatting
+  transaction_query.py # read-only transaction query/model layer
+  transaction_cli.py   # transaction list/detail formatting
   transactions.py  # JSON transaction archive and recovery
   time.py          # timestamp helper
 systemd/
