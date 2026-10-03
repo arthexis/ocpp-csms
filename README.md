@@ -147,7 +147,7 @@ The supported OCPP 1.6J mappings are:
 
 Commands are only sent to a charger that is currently connected. They are not queued for later delivery.
 
-A remote command confirmation and an actual transaction state change are deliberately treated as different facts. `RemoteStartTransaction.conf(status=Accepted)` means the charger accepted the request; it does **not** create a local transaction. The transaction is created only when the charger later sends `StartTransaction`. Likewise, `RemoteStopTransaction.conf(status=Accepted)` does **not** mark a transaction stopped; the transaction becomes stopped only when the charger later sends `StopTransaction`.
+A remote command confirmation and an actual transaction state change are deliberately treated as different facts. `RemoteStartTransaction.conf(status=Accepted)` means the charger accepted the request; it does **not** create a local transaction. The transaction is created only when the charger later sends `StartTransaction`. Likewise, `RemoteStopTransaction.conf(status=Accepted)` does **not** mark the transaction stopped; the transaction becomes stopped only when the charger later sends `StopTransaction`.
 
 The event stream preserves both sides of each remote command. A CSMS-initiated request is recorded as `out`, and the charger's confirmation is recorded as `in`. For example, a successful remote-start sequence can appear as:
 
@@ -238,17 +238,17 @@ Remote-control tests cover the outbound OCPP payloads, live-session replacement,
 
 ```text
 src/ocpp_csms/
-  app.py           # CLI and process startup
-  control.py       # local Unix-socket control protocol and client
-  server.py        # WebSocket accept loop and connection lifecycle
-  session.py       # direct OCPP 1.6J handlers and outbound commands
-  events.py        # SQLite event store and derived state
-  diagnostics.py   # direct event queries and formatting
-  status.py        # status queries and formatting
+  app.py               # CLI and process startup
+  control.py           # local Unix-socket control protocol and client
+  server.py            # WebSocket accept loop and connection lifecycle
+  session.py           # direct OCPP 1.6J handlers and outbound commands
+  events.py            # SQLite event store and derived state
+  diagnostics.py       # direct event queries and formatting
+  status.py            # status queries and formatting
   transaction_query.py # read-only transaction query/model layer
   transaction_cli.py   # transaction list/detail formatting
-  transactions.py  # JSON transaction archive and recovery
-  time.py          # timestamp helper
+  transactions.py      # JSON transaction archive and recovery
+  time.py              # timestamp helper
 systemd/
   ocpp-csms.service.in
 ```
