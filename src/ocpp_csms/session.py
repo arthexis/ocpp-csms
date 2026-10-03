@@ -96,6 +96,71 @@ class ChargePointSession(OcppChargePoint):
         self._record("ChangeConfiguration", dict(response.__dict__), direction="in")
         return response
 
+    async def set_charging_profile(
+        self,
+        connector_id: int,
+        profile: dict[str, Any],
+    ) -> call_result.SetChargingProfilePayload:
+        payload = {"connector_id": connector_id, "cs_charging_profiles": profile}
+        self._record("SetChargingProfile", payload, direction="out")
+        response = await self.call(
+            call.SetChargingProfilePayload(
+                connector_id=connector_id,
+                cs_charging_profiles=profile,
+            )
+        )
+        self._record("SetChargingProfile", dict(response.__dict__), direction="in")
+        return response
+
+    async def clear_charging_profile(
+        self,
+        *,
+        profile_id: int | None = None,
+        connector_id: int | None = None,
+        purpose: str | None = None,
+        stack_level: int | None = None,
+    ) -> call_result.ClearChargingProfilePayload:
+        payload: dict[str, Any] = {}
+        if profile_id is not None:
+            payload["id"] = profile_id
+        if connector_id is not None:
+            payload["connector_id"] = connector_id
+        if purpose is not None:
+            payload["charging_profile_purpose"] = purpose
+        if stack_level is not None:
+            payload["stack_level"] = stack_level
+        self._record("ClearChargingProfile", payload, direction="out")
+        response = await self.call(
+            call.ClearChargingProfilePayload(
+                id=profile_id,
+                connector_id=connector_id,
+                charging_profile_purpose=purpose,
+                stack_level=stack_level,
+            )
+        )
+        self._record("ClearChargingProfile", dict(response.__dict__), direction="in")
+        return response
+
+    async def get_composite_schedule(
+        self,
+        connector_id: int,
+        duration: int,
+        charging_rate_unit: str | None = None,
+    ) -> call_result.GetCompositeSchedulePayload:
+        payload: dict[str, Any] = {"connector_id": connector_id, "duration": duration}
+        if charging_rate_unit is not None:
+            payload["charging_rate_unit"] = charging_rate_unit
+        self._record("GetCompositeSchedule", payload, direction="out")
+        response = await self.call(
+            call.GetCompositeSchedulePayload(
+                connector_id=connector_id,
+                duration=duration,
+                charging_rate_unit=charging_rate_unit,
+            )
+        )
+        self._record("GetCompositeSchedule", dict(response.__dict__), direction="in")
+        return response
+
     def _record(
         self,
         action: str,
