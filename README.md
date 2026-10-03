@@ -213,6 +213,8 @@ ocpp-csms profile clear --purpose ChargePointMaxProfile
 ocpp-csms profile clear --stack-level 2
 ```
 
+The same single-connected-charger inference applies to `set`, `composite`, and `clear`; each accepts `--charger CHARGER` when an explicit target is required.
+
 A simple stateless reconciliation workflow is therefore:
 
 ```bash
