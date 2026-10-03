@@ -107,6 +107,8 @@ def test_transaction_id_shows_detail(tmp_path):
     assert "Charger:      charger-a" in text
     assert "Connector:    2" in text
     assert "RFID:         rfid-7" in text
+    assert "Archive:      transactions/" in text
+    assert str(tmp_path) not in text
 
 
 def test_missing_transaction_has_clear_output(tmp_path):
