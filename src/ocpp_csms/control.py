@@ -12,28 +12,17 @@ CONTROL_SOCKET_FILENAME = "control.sock"
 
 class Session(Protocol):
     async def remote_start(self, *, id_tag: str, connector_id: int | None = None) -> Any: ...
-
     async def remote_stop(self, transaction_id: int) -> Any: ...
-
     async def reset(self, reset_type: str = "Soft") -> Any: ...
-
     async def get_configuration(self, keys: list[str] | None = None) -> Any: ...
+    async def change_configuration(self, key: str, value: str) -> Any: ...
 
 
 class SessionRegistry(Protocol):
     def session(self, charge_point_id: str) -> Session | None: ...
-
     def connected_chargers(self) -> list[str]: ...
-
     def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
-
-    def record_control_event(
-        self,
-        event: str,
-        *,
-        charger_id: str,
-        details: dict[str, Any] | None = None,
-    ) -> None: ...
+    def record_control_event(self, event: str, *, charger_id: str, details: dict[str, Any] | None = None) -> None: ...
 
 
 def control_socket_path(data_dir: str | Path) -> Path:
@@ -76,35 +65,45 @@ def _configuration_keys(request: dict[str, Any]) -> list[str] | None | object:
     return keys
 
 
-def _resolve_charger(
-    registry: SessionRegistry,
-    request: dict[str, Any],
-) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
+def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tuple[str | None, dict[str, Any], dict[str, Any] | None]:
     normalized = dict(request)
     connected = registry.connected_chargers()
     charger = normalized.get("charger")
-
     if charger is not None:
         if not isinstance(charger, str) or not charger:
             return None, normalized, {"error": "invalid_charger"}
         return charger, normalized, None
-
-    # Compatibility for the original `config CHARGER [KEY ...]` syntax.  With
-    # the normalized CLI, config keys are positional and an explicit charger
-    # uses --charger, but an old first positional charger is still recognized
-    # when it names a currently connected session.
     if normalized.get("command") == "config":
         keys = normalized.get("keys")
         if isinstance(keys, list) and keys and isinstance(keys[0], str) and keys[0] in connected:
             charger = keys[0]
             normalized["keys"] = keys[1:]
             return charger, normalized, None
-
     if len(connected) == 1:
         return connected[0], normalized, None
     if not connected:
         return None, normalized, {"error": "no_charger_connected"}
     return None, normalized, {"error": "charger_required", "chargers": connected}
+
+
+def _config_guard(registry: SessionRegistry, charger: str, force: Any, *, change: bool) -> dict[str, Any] | None:
+    if not isinstance(force, bool):
+        return {"error": "invalid_force"}
+    active_transactions = registry.active_transaction_ids(charger)
+    if active_transactions and not force:
+        registry.record_control_event(
+            "configuration_change_blocked" if change else "configuration_query_blocked",
+            charger_id=charger,
+            details={"transactions": active_transactions},
+        )
+        return {"error": "active_transaction", "charger": charger, "transactions": active_transactions}
+    if active_transactions and force:
+        registry.record_control_event(
+            "configuration_change_forced" if change else "configuration_query_forced",
+            charger_id=charger,
+            details={"transactions": active_transactions},
+        )
+    return None
 
 
 _INVALID = object()
@@ -114,12 +113,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     command = request.get("command")
     if not isinstance(command, str) or not command:
         return {"error": "missing_command"}
-
     charger, request, resolution_error = _resolve_charger(registry, request)
     if resolution_error is not None:
         return resolution_error
     assert charger is not None
-
     session = registry.session(charger)
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
@@ -147,28 +144,29 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             keys = _configuration_keys(request)
             if keys is _INVALID:
                 return {"error": "invalid_keys"}
-            force = request.get("force", False)
-            if not isinstance(force, bool):
-                return {"error": "invalid_force"}
-            active_transactions = registry.active_transaction_ids(charger)
-            if active_transactions and not force:
-                registry.record_control_event(
-                    "configuration_query_blocked",
-                    charger_id=charger,
-                    details={"transactions": active_transactions},
-                )
-                return {
-                    "error": "active_transaction",
-                    "charger": charger,
-                    "transactions": active_transactions,
-                }
-            if active_transactions and force:
-                registry.record_control_event(
-                    "configuration_query_forced",
-                    charger_id=charger,
-                    details={"transactions": active_transactions},
-                )
+            guard = _config_guard(registry, charger, request.get("force", False), change=False)
+            if guard is not None:
+                return guard
             response = await session.get_configuration(keys)
+        elif command == "config_set":
+            key = request.get("key")
+            value = request.get("value")
+            if not isinstance(key, str) or not key:
+                return {"error": "invalid_key"}
+            if not isinstance(value, str):
+                return {"error": "invalid_value"}
+            guard = _config_guard(registry, charger, request.get("force", False), change=True)
+            if guard is not None:
+                return guard
+            changed = await session.change_configuration(key, value)
+            readback = await session.get_configuration([key])
+            return {
+                "ok": True,
+                "response": {
+                    "change": _response_payload(changed),
+                    "readback": _response_payload(readback),
+                },
+            }
         else:
             return {"error": "unknown_command", "command": command}
     except Exception as exc:
