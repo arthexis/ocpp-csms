@@ -165,12 +165,14 @@ ocpp-csms profile list
 ocpp-csms profile help max-power
 ```
 
-The initial and currently only built-in template is `max-power`. It creates a station-wide OCPP `ChargePointMaxProfile` on connector `0`, with an absolute schedule in watts:
+The initial and currently only built-in template is `max-power`. It creates a station-wide OCPP `ChargePointMaxProfile` on connector `0`, with a stable charging profile ID and stack level and an absolute schedule in watts:
 
 ```text
 SetChargingProfile
   connectorId: 0
   csChargingProfiles:
+    chargingProfileId: 1
+    stackLevel: 0
     chargingProfilePurpose: ChargePointMaxProfile
     chargingProfileKind: Absolute
     chargingSchedule:
@@ -186,7 +188,7 @@ Apply it with a positive watt value:
 ocpp-csms profile set max-power --watts 60000
 ```
 
-If exactly one charger is connected, it is inferred. Use `--charger CHARGER` when an explicit target is needed. The command sends `SetChargingProfile` immediately and reports the charger's `Accepted` or `Rejected` result. Nothing is stored locally as desired Smart Charging state.
+If exactly one charger is connected, it is inferred. Use `--charger CHARGER` when an explicit target is needed. The command sends `SetChargingProfile` immediately and reports the charger's `Accepted` or `Rejected` result. Nothing is stored locally as desired Smart Charging state. Reapplying `max-power` uses the same OCPP charging profile ID (`1`) rather than inventing a locally named profile instance.
 
 OCPP 1.6 does not provide a general request for enumerating every installed charging profile. `profile composite` therefore uses `GetCompositeSchedule` to ask the charger for the **effective schedule** it currently computes:
 
