@@ -8,8 +8,22 @@ from pathlib import Path
 from typing import Any
 
 from field.evidence import baseline_observation
+from field.protocol import (
+    configuration_map,
+    configuration_payload,
+    evidence_checkpoint,
+    reboot_observation,
+    send_control,
+)
 from field.state import FieldConfig, FieldState, load_state, save_state, state_path
 from field.system import LocalSystemProbe, SystemProbe
+
+DEFAULT_CONFIG_KEYS = [
+    "SupportedFeatureProfiles",
+    "GetConfigurationMaxKeys",
+    "HeartbeatInterval",
+    "MeterValueSampleInterval",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,11 +42,19 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--control-socket", required=True)
     start.add_argument("--idle-confirmed", action="store_true")
 
-    takeover = commands.add_parser("takeover", help="Switch configured services and require an idle Heartbeat baseline")
-    takeover.add_argument("run_dir")
-    takeover.add_argument("--service-timeout", type=float, default=30.0)
-    takeover.add_argument("--baseline-timeout", type=float, default=90.0)
-    takeover.add_argument("--poll-interval", type=float, default=1.0)
+    takeover_parser = commands.add_parser("takeover", help="Switch configured services and require an idle Heartbeat baseline")
+    takeover_parser.add_argument("run_dir")
+    takeover_parser.add_argument("--service-timeout", type=float, default=30.0)
+    takeover_parser.add_argument("--baseline-timeout", type=float, default=90.0)
+    takeover_parser.add_argument("--poll-interval", type=float, default=1.0)
+
+    protocol = commands.add_parser("reboot-config", help="Reboot charger, require post-boot evidence, and collect configuration")
+    protocol.add_argument("run_dir")
+    protocol.add_argument("--reboot-timeout", type=float, default=60.0)
+    protocol.add_argument("--post-boot-timeout", type=float, default=120.0)
+    protocol.add_argument("--repeat-delay", type=float, default=30.0)
+    protocol.add_argument("--poll-interval", type=float, default=1.0)
+    protocol.add_argument("--key", action="append", dest="keys")
 
     rollback_parser = commands.add_parser("rollback", help="Restore the configured legacy service")
     rollback_parser.add_argument("run_dir")
@@ -73,6 +95,7 @@ def preflight(config: FieldConfig, *, idle_confirmed: bool, probe: SystemProbe) 
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
@@ -89,7 +112,6 @@ def _wait(predicate, *, timeout: float, interval: float) -> bool:
 def start_run(args: argparse.Namespace, probe: SystemProbe) -> int:
     run_dir = Path(args.run_dir).expanduser()
     config = config_from_args(args)
-
     if state_path(run_dir).exists():
         state = load_state(run_dir)
         if state.config != config:
@@ -97,158 +119,138 @@ def start_run(args: argparse.Namespace, probe: SystemProbe) -> int:
     else:
         state = FieldState(config=config)
         save_state(run_dir, state)
-
     result = preflight(config, idle_confirmed=args.idle_confirmed, probe=probe)
     _write_json(run_dir / "preflight.json", result)
     if not result["ok"]:
         return 1
-
     save_state(run_dir, replace(state, phase="preflight"))
     return 0
 
 
-def rollback(
-    run_dir: Path,
-    probe: SystemProbe,
-    *,
-    reason: str,
-    service_timeout: float,
-    poll_interval: float,
-) -> int:
+def rollback(run_dir: Path, probe: SystemProbe, *, reason: str, service_timeout: float, poll_interval: float) -> int:
     state = load_state(run_dir)
     config = state.config
     actions: list[dict[str, Any]] = []
-
     if probe.service_active(config.csms_service):
         actions.append({"stop_csms": probe.service_stop(config.csms_service)})
     else:
         actions.append({"stop_csms": "already_stopped"})
-
-    port_free = _wait(
-        lambda: not probe.port_listening(config.listener_host, config.listener_port),
-        timeout=service_timeout,
-        interval=poll_interval,
-    )
+    port_free = _wait(lambda: not probe.port_listening(config.listener_host, config.listener_port), timeout=service_timeout, interval=poll_interval)
     actions.append({"port_free": port_free})
-
     legacy_started = False
-    legacy_active = probe.service_active(config.legacy_service)
     if port_free:
-        if legacy_active:
+        if probe.service_active(config.legacy_service):
             legacy_started = True
             actions.append({"start_legacy": "already_active"})
         else:
             legacy_started = probe.service_start(config.legacy_service)
             actions.append({"start_legacy": legacy_started})
-
     legacy_ready = False
     if port_free and legacy_started:
-        legacy_ready = _wait(
-            lambda: probe.service_active(config.legacy_service)
-            and probe.port_listening(config.listener_host, config.listener_port),
-            timeout=service_timeout,
-            interval=poll_interval,
-        )
-
+        legacy_ready = _wait(lambda: probe.service_active(config.legacy_service) and probe.port_listening(config.listener_host, config.listener_port), timeout=service_timeout, interval=poll_interval)
     ok = bool(port_free and legacy_started and legacy_ready)
-    result = {"ok": ok, "reason": reason, "actions": actions, "legacy_ready": legacy_ready}
-    _write_json(run_dir / "rollback.json", result)
+    _write_json(run_dir / "rollback.json", {"ok": ok, "reason": reason, "actions": actions, "legacy_ready": legacy_ready})
     save_state(run_dir, replace(state, phase="rolled_back" if ok else "rollback_failed"))
     return 0 if ok else 1
 
 
-def takeover(
-    run_dir: Path,
-    probe: SystemProbe,
-    *,
-    service_timeout: float,
-    baseline_timeout: float,
-    poll_interval: float,
-) -> int:
+def takeover(run_dir: Path, probe: SystemProbe, *, service_timeout: float, baseline_timeout: float, poll_interval: float) -> int:
     state = load_state(run_dir)
     config = state.config
     if state.phase not in {"preflight", "baseline"}:
         raise ValueError(f"takeover requires preflight state, got {state.phase}")
     if state.phase == "baseline":
         return 0
-
     if not probe.service_active(config.legacy_service):
         _write_json(run_dir / "takeover.json", {"ok": False, "error": "legacy_not_active"})
         return 1
-
     save_state(run_dir, replace(state, phase="takeover"))
     if not probe.service_stop(config.legacy_service):
-        return rollback(
-            run_dir,
-            probe,
-            reason="legacy_stop_failed",
-            service_timeout=service_timeout,
-            poll_interval=poll_interval,
-        )
-
-    if not _wait(
-        lambda: not probe.service_active(config.legacy_service)
-        and not probe.port_listening(config.listener_host, config.listener_port),
-        timeout=service_timeout,
-        interval=poll_interval,
-    ):
-        return rollback(
-            run_dir,
-            probe,
-            reason="legacy_did_not_release_listener",
-            service_timeout=service_timeout,
-            poll_interval=poll_interval,
-        )
-
+        return rollback(run_dir, probe, reason="legacy_stop_failed", service_timeout=service_timeout, poll_interval=poll_interval)
+    if not _wait(lambda: not probe.service_active(config.legacy_service) and not probe.port_listening(config.listener_host, config.listener_port), timeout=service_timeout, interval=poll_interval):
+        return rollback(run_dir, probe, reason="legacy_did_not_release_listener", service_timeout=service_timeout, poll_interval=poll_interval)
     if not probe.service_start(config.csms_service):
-        return rollback(
-            run_dir,
-            probe,
-            reason="csms_start_failed",
-            service_timeout=service_timeout,
-            poll_interval=poll_interval,
-        )
-
-    service_ready = _wait(
-        lambda: probe.service_active(config.csms_service)
-        and probe.port_listening(config.listener_host, config.listener_port)
-        and probe.socket_exists(config.control_socket),
-        timeout=service_timeout,
-        interval=poll_interval,
-    )
-    if not service_ready:
-        return rollback(
-            run_dir,
-            probe,
-            reason="csms_not_ready",
-            service_timeout=service_timeout,
-            poll_interval=poll_interval,
-        )
+        return rollback(run_dir, probe, reason="csms_start_failed", service_timeout=service_timeout, poll_interval=poll_interval)
+    if not _wait(lambda: probe.service_active(config.csms_service) and probe.port_listening(config.listener_host, config.listener_port) and probe.socket_exists(config.control_socket), timeout=service_timeout, interval=poll_interval):
+        return rollback(run_dir, probe, reason="csms_not_ready", service_timeout=service_timeout, poll_interval=poll_interval)
 
     observation: dict[str, Any] = {}
-
     def baseline_ready() -> bool:
         nonlocal observation
         observation = baseline_observation(config.csms_data_dir, config.charger)
-        return bool(
-            observation["connected"]
-            and observation["heartbeat_count"] > 0
-            and not observation["active_transactions"]
-        )
-
+        return bool(observation["connected"] and observation["heartbeat_count"] > 0 and not observation["active_transactions"])
     if not _wait(baseline_ready, timeout=baseline_timeout, interval=poll_interval):
         _write_json(run_dir / "baseline.json", {"ok": False, "observation": observation})
-        return rollback(
-            run_dir,
-            probe,
-            reason="baseline_not_established",
-            service_timeout=service_timeout,
-            poll_interval=poll_interval,
-        )
-
+        return rollback(run_dir, probe, reason="baseline_not_established", service_timeout=service_timeout, poll_interval=poll_interval)
     _write_json(run_dir / "baseline.json", {"ok": True, "observation": observation})
     _write_json(run_dir / "takeover.json", {"ok": True})
     save_state(run_dir, replace(load_state(run_dir), phase="baseline"))
+    return 0
+
+
+def _accepted(response: dict[str, Any]) -> bool:
+    payload = response.get("response")
+    return response.get("ok") is True and isinstance(payload, dict) and payload.get("status") == "Accepted"
+
+
+def reboot_and_configure(run_dir: Path, *, reboot_timeout: float, post_boot_timeout: float, repeat_delay: float, poll_interval: float, keys: list[str] | None) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    if state.phase not in {"baseline", "configuration"}:
+        raise ValueError(f"reboot-config requires baseline state, got {state.phase}")
+    if state.phase == "configuration":
+        return 0
+
+    event_id, runtime_id = evidence_checkpoint(config.csms_data_dir)
+    soft = send_control(config.control_socket, {"command": "reboot", "charger": config.charger, "type": "Soft"})
+    attempts = [{"type": "Soft", "response": soft}]
+    if not _accepted(soft):
+        _write_json(run_dir / "reboot.json", {"ok": False, "attempts": attempts, "error": "soft_reset_not_accepted"})
+        return 1
+
+    observation: dict[str, Any] = {}
+    def reboot_started() -> bool:
+        nonlocal observation
+        observation = reboot_observation(config.csms_data_dir, config.charger, after_event_id=event_id, after_runtime_id=runtime_id)
+        return bool(observation["disconnect_seen"])
+    if not _wait(reboot_started, timeout=reboot_timeout, interval=poll_interval):
+        hard = send_control(config.control_socket, {"command": "reboot", "charger": config.charger, "type": "Hard"})
+        attempts.append({"type": "Hard", "response": hard})
+        if not _accepted(hard):
+            _write_json(run_dir / "reboot.json", {"ok": False, "attempts": attempts, "error": "hard_reset_not_accepted"})
+            return 1
+
+    def post_boot_ready() -> bool:
+        nonlocal observation
+        observation = reboot_observation(config.csms_data_dir, config.charger, after_event_id=event_id, after_runtime_id=runtime_id)
+        return bool(observation["disconnect_seen"] and observation["reconnect_seen"] and observation["boot_notification"] and observation["heartbeat"])
+    if not _wait(post_boot_ready, timeout=post_boot_timeout, interval=poll_interval):
+        _write_json(run_dir / "reboot.json", {"ok": False, "attempts": attempts, "observation": observation, "error": "post_boot_evidence_incomplete"})
+        return 1
+
+    _write_json(run_dir / "reboot.json", {"ok": True, "attempts": attempts, "observation": observation})
+    save_state(run_dir, replace(state, phase="post_boot"))
+
+    selected_keys = keys or DEFAULT_CONFIG_KEYS
+    config_dir = run_dir / "config"
+    all_payload = configuration_payload(send_control(config.control_socket, {"command": "config", "charger": config.charger}))
+    selected_payload = configuration_payload(send_control(config.control_socket, {"command": "config", "charger": config.charger, "keys": selected_keys}))
+    _write_json(config_dir / "all.json", all_payload)
+    _write_json(config_dir / "selected.json", selected_payload)
+    if repeat_delay > 0:
+        time.sleep(repeat_delay)
+    repeated_payload = configuration_payload(send_control(config.control_socket, {"command": "config", "charger": config.charger, "keys": selected_keys}))
+    _write_json(config_dir / "repeat.json", repeated_payload)
+
+    before = configuration_map(selected_payload)
+    after = configuration_map(repeated_payload)
+    changed = {key: {"before": before.get(key), "after": after.get(key)} for key in sorted(set(before) | set(after)) if before.get(key) != after.get(key)}
+    baseline = baseline_observation(config.csms_data_dir, config.charger)
+    ok = bool(baseline["connected"] and baseline["heartbeat_count"] > 0 and not baseline["active_transactions"])
+    _write_json(run_dir / "configuration.json", {"ok": ok, "keys": selected_keys, "changed": changed, "unknown": repeated_payload.get("unknown_key", []), "observation": baseline})
+    if not ok:
+        return 1
+    save_state(run_dir, replace(load_state(run_dir), phase="configuration"))
     return 0
 
 
@@ -259,21 +261,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(load_state(Path(args.run_dir).expanduser()).to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "takeover":
-        return takeover(
-            Path(args.run_dir).expanduser(),
-            probe,
-            service_timeout=args.service_timeout,
-            baseline_timeout=args.baseline_timeout,
-            poll_interval=args.poll_interval,
-        )
+        return takeover(Path(args.run_dir).expanduser(), probe, service_timeout=args.service_timeout, baseline_timeout=args.baseline_timeout, poll_interval=args.poll_interval)
+    if args.command == "reboot-config":
+        return reboot_and_configure(Path(args.run_dir).expanduser(), reboot_timeout=args.reboot_timeout, post_boot_timeout=args.post_boot_timeout, repeat_delay=args.repeat_delay, poll_interval=args.poll_interval, keys=args.keys)
     if args.command == "rollback":
-        return rollback(
-            Path(args.run_dir).expanduser(),
-            probe,
-            reason=args.reason,
-            service_timeout=args.service_timeout,
-            poll_interval=args.poll_interval,
-        )
+        return rollback(Path(args.run_dir).expanduser(), probe, reason=args.reason, service_timeout=args.service_timeout, poll_interval=args.poll_interval)
     return start_run(args, probe)
 
 
