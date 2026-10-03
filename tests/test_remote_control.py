@@ -17,11 +17,13 @@ def make_session(tmp_path):
     )
 
 
-def capture_calls(session, status="Accepted"):
+def capture_calls(session, response=None, status="Accepted"):
     sent = []
 
     async def send(payload):
         sent.append(payload)
+        if response is not None:
+            return response
         return SimpleNamespace(status=status)
 
     session.call = send
@@ -81,24 +83,27 @@ async def test_reset_sends_requested_reset_type(tmp_path, reset_type):
 
 
 @pytest.mark.asyncio
-async def test_get_configuration_sends_requested_keys(tmp_path):
+async def test_get_configuration_without_keys_requests_all_configuration(tmp_path):
     session = make_session(tmp_path)
-    sent = capture_calls(session)
+    returned = SimpleNamespace(configuration_key=[], unknown_key=[])
+    sent = capture_calls(session, response=returned)
 
-    await session.get_configuration(["HeartbeatInterval", "SupportedFeatureProfiles"])
+    response = await session.get_configuration()
 
-    assert len(sent) == 1
-    assert isinstance(sent[0], call.GetConfigurationPayload)
-    assert sent[0].key == ["HeartbeatInterval", "SupportedFeatureProfiles"]
-
-
-@pytest.mark.asyncio
-async def test_get_configuration_without_keys_requests_all(tmp_path):
-    session = make_session(tmp_path)
-    sent = capture_calls(session)
-
-    await session.get_configuration()
-
+    assert response is returned
     assert len(sent) == 1
     assert isinstance(sent[0], call.GetConfigurationPayload)
     assert sent[0].key is None
+
+
+@pytest.mark.asyncio
+async def test_get_configuration_preserves_requested_keys(tmp_path):
+    session = make_session(tmp_path)
+    returned = SimpleNamespace(configuration_key=[], unknown_key=[])
+    sent = capture_calls(session, response=returned)
+
+    await session.get_configuration(["HeartbeatInterval", "GetConfigurationMaxKeys"])
+
+    assert len(sent) == 1
+    assert isinstance(sent[0], call.GetConfigurationPayload)
+    assert sent[0].key == ["HeartbeatInterval", "GetConfigurationMaxKeys"]
