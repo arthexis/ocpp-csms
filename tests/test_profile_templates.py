@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import ocpp_csms.app as app
@@ -136,3 +138,106 @@ def test_profile_set_propagates_rejected_status(monkeypatch, capsys):
 
     assert run_profile(args) == 1
     assert capsys.readouterr().out.strip() == "Rejected"
+
+
+def composite_response(periods=None):
+    return {
+        "ok": True,
+        "response": {
+            "status": "Accepted",
+            "connector_id": 0,
+            "schedule_start": "2026-10-03T20:00:00Z",
+            "charging_schedule": {
+                "chargingRateUnit": "W",
+                "chargingSchedulePeriod": periods or [{"startPeriod": 0, "limit": 60000}],
+            },
+        },
+    }
+
+
+def test_profile_composite_uses_bounded_defaults_and_renders_schedule(monkeypatch, capsys):
+    sent = []
+
+    async def fake_send_control(data_dir, request):
+        sent.append(request)
+        return composite_response()
+
+    monkeypatch.setattr(app, "send_control", fake_send_control)
+    parser, _ = build_parser()
+    args = parser.parse_args(["profile", "composite"])
+
+    assert run_profile(args) == 0
+    assert sent == [{"command": "get_composite_schedule", "connector": 0, "duration": 3600}]
+    output = capsys.readouterr().out
+    assert "Connector: 0" in output
+    assert "Rate unit: W" in output
+    assert "60000 W" in output
+
+
+def test_profile_composite_preserves_multiple_periods_and_overrides(monkeypatch, capsys):
+    sent = []
+    periods = [
+        {"startPeriod": 0, "limit": 60000},
+        {"startPeriod": 1800, "limit": 40000, "numberPhases": 3},
+    ]
+
+    async def fake_send_control(data_dir, request):
+        sent.append(request)
+        return composite_response(periods)
+
+    monkeypatch.setattr(app, "send_control", fake_send_control)
+    parser, _ = build_parser()
+    args = parser.parse_args([
+        "profile",
+        "composite",
+        "--charger",
+        "charger-a",
+        "--connector",
+        "1",
+        "--duration",
+        "7200",
+    ])
+
+    assert run_profile(args) == 0
+    assert sent[0] == {
+        "command": "get_composite_schedule",
+        "charger": "charger-a",
+        "connector": 1,
+        "duration": 7200,
+    }
+    output = capsys.readouterr().out
+    assert "+0s" in output and "60000 W" in output
+    assert "+1800s" in output and "40000 W" in output and "3 phase(s)" in output
+
+
+def test_profile_composite_json_outputs_machine_usable_response(monkeypatch, capsys):
+    async def fake_send_control(data_dir, request):
+        return composite_response()
+
+    monkeypatch.setattr(app, "send_control", fake_send_control)
+    parser, _ = build_parser()
+    args = parser.parse_args(["profile", "composite", "--json"])
+
+    assert run_profile(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "Accepted"
+    assert payload["charging_schedule"]["chargingSchedulePeriod"][0]["limit"] == 60000
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["profile", "composite", "--connector", "-1"],
+        ["profile", "composite", "--duration", "0"],
+    ],
+)
+def test_profile_composite_rejects_invalid_bounds_without_contacting_control(monkeypatch, capsys, argv):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("control should not be contacted")
+
+    monkeypatch.setattr(app, "send_control", fail_if_called)
+    parser, _ = build_parser()
+    args = parser.parse_args(argv)
+
+    assert run_profile(args) == 1
+    assert "error:" in capsys.readouterr().out
