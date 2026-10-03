@@ -8,6 +8,7 @@ from ocpp_csms.control import send_control
 from ocpp_csms.diagnostics import events_between, explain, format_events, transaction_events
 from ocpp_csms.events import EventStore
 from ocpp_csms.profile_templates import (
+    build_profile,
     format_profile_template_help,
     format_profile_template_list,
     get_profile_template,
@@ -60,6 +61,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     profile_subcommands.add_parser("list", help="List built-in profile templates")
     profile_help = profile_subcommands.add_parser("help", help="Explain a built-in profile template")
     add(profile_help, "template", help="Built-in profile template name")
+    profile_set = profile_subcommands.add_parser("set", help="Apply a built-in profile template")
+    add(profile_set, "template", help="Built-in profile template name")
+    add(profile_set, "--charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_set, "--watts", type=int, required=True, help="Maximum charging power in watts")
 
     status = subcommands.add_parser("status", help="Show appliance or charger status")
     add(status, "charger", nargs="?", help="Charge point ID")
@@ -250,6 +255,18 @@ def run_configuration(args: argparse.Namespace) -> int:
     return 0
 
 
+def _profile_set_request(args: argparse.Namespace) -> dict[str, object]:
+    connector, profile = build_profile(args.template, watts=args.watts)
+    request: dict[str, object] = {
+        "command": "set_charging_profile",
+        "connector": connector,
+        "profile": profile,
+    }
+    if args.charger is not None:
+        request["charger"] = args.charger
+    return request
+
+
 def run_profile(args: argparse.Namespace) -> int:
     if args.profile_command == "list":
         print(format_profile_template_list())
@@ -261,6 +278,23 @@ def run_profile(args: argparse.Namespace) -> int:
             return 1
         print(format_profile_template_help(template))
         return 0
+    if args.profile_command == "set":
+        try:
+            request = _profile_set_request(args)
+            response = asyncio.run(send_control(args.data_dir, request))
+        except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+            print(f"error: {exc}")
+            return 1
+        error = response.get("error")
+        if error:
+            detail = response.get("detail") or response.get("charger")
+            suffix = f": {detail}" if detail is not None else ""
+            print(f"error: {error}{suffix}")
+            return 1
+        payload = response.get("response")
+        status = payload.get("status") if isinstance(payload, dict) else None
+        print(status or "Unknown")
+        return 0 if status == "Accepted" else 1
     raise ValueError("profile requires a subcommand")
 
 
