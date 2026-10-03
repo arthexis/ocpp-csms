@@ -131,6 +131,17 @@ def rollback(run_dir: Path, probe: SystemProbe, *, reason: str, service_timeout:
     state = load_state(run_dir)
     config = state.config
     actions: list[dict[str, Any]] = []
+
+    if (
+        not probe.service_active(config.csms_service)
+        and probe.service_active(config.legacy_service)
+        and probe.port_listening(config.listener_host, config.listener_port)
+    ):
+        result = {"ok": True, "reason": reason, "actions": [{"restore": "already_restored"}], "legacy_ready": True}
+        _write_json(run_dir / "rollback.json", result)
+        save_state(run_dir, replace(state, phase="rolled_back"))
+        return 0
+
     if probe.service_active(config.csms_service):
         actions.append({"stop_csms": probe.service_stop(config.csms_service)})
     else:
