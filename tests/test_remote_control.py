@@ -78,3 +78,27 @@ async def test_reset_sends_requested_reset_type(tmp_path, reset_type):
     assert len(sent) == 1
     assert isinstance(sent[0], call.ResetPayload)
     assert sent[0].type == reset_type
+
+
+@pytest.mark.asyncio
+async def test_get_configuration_sends_requested_keys(tmp_path):
+    session = make_session(tmp_path)
+    sent = capture_calls(session)
+
+    await session.get_configuration(["HeartbeatInterval", "SupportedFeatureProfiles"])
+
+    assert len(sent) == 1
+    assert isinstance(sent[0], call.GetConfigurationPayload)
+    assert sent[0].key == ["HeartbeatInterval", "SupportedFeatureProfiles"]
+
+
+@pytest.mark.asyncio
+async def test_get_configuration_without_keys_requests_all(tmp_path):
+    session = make_session(tmp_path)
+    sent = capture_calls(session)
+
+    await session.get_configuration()
+
+    assert len(sent) == 1
+    assert isinstance(sent[0], call.GetConfigurationPayload)
+    assert sent[0].key is None
