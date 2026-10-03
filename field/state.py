@@ -12,6 +12,7 @@ class FieldConfig:
     charger: str
     legacy_service: str
     csms_service: str
+    ocpp_command: str
     listener_host: str
     listener_port: int
     csms_data_dir: str
