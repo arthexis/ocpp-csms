@@ -127,7 +127,7 @@ async def test_clear_all_profiles_passes_empty_filter_set():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("request", "error"),
+    ("control_request", "error"),
     [
         ({"command": "set_charging_profile", "connector": -1, "profile": {}}, "invalid_connector"),
         ({"command": "set_charging_profile", "connector": 0, "profile": []}, "invalid_profile"),
@@ -142,8 +142,8 @@ async def test_clear_all_profiles_passes_empty_filter_set():
         ),
     ],
 )
-async def test_control_rejects_invalid_smart_charging_arguments(request, error):
-    response = await dispatch_control(Registry({"charger-a": ControlSession()}), request)
+async def test_control_rejects_invalid_smart_charging_arguments(control_request, error):
+    response = await dispatch_control(Registry({"charger-a": ControlSession()}), control_request)
     assert response["error"] == error
 
 
