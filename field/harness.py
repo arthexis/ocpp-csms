@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -25,6 +26,17 @@ DEFAULT_CONFIG_KEYS = [
     "HeartbeatInterval",
     "MeterValueSampleInterval",
 ]
+
+_ATTEMPT_EVIDENCE = (
+    "refresh.json",
+    "baseline.json",
+    "reboot.json",
+    "configuration.json",
+    "soak.json",
+    "handoff.json",
+    "result.json",
+    "config",
+)
 
 
 def utc_now() -> str:
@@ -52,6 +64,14 @@ def build_parser() -> argparse.ArgumentParser:
     takeover_parser.add_argument("--service-timeout", type=float, default=30.0)
     takeover_parser.add_argument("--baseline-timeout", type=float, default=90.0)
     takeover_parser.add_argument("--poll-interval", type=float, default=1.0)
+
+    refresh_parser = commands.add_parser(
+        "refresh",
+        help="Re-baseline an already-running candidate after an operator-managed update",
+    )
+    refresh_parser.add_argument("run_dir")
+    refresh_parser.add_argument("--baseline-timeout", type=float, default=90.0)
+    refresh_parser.add_argument("--poll-interval", type=float, default=1.0)
 
     protocol = commands.add_parser("reboot-config", help="Reboot charger, require post-boot evidence, and collect configuration")
     protocol.add_argument("run_dir")
@@ -128,6 +148,25 @@ def _wait(predicate, *, timeout: float, interval: float) -> bool:
         if time.monotonic() >= deadline:
             return False
         time.sleep(interval)
+
+
+def _next_attempt_dir(run_dir: Path) -> Path:
+    attempts_dir = run_dir / "attempts"
+    attempts_dir.mkdir(parents=True, exist_ok=True)
+    numbers = [int(path.name) for path in attempts_dir.iterdir() if path.is_dir() and path.name.isdigit()]
+    return attempts_dir / f"{max(numbers, default=0) + 1:03d}"
+
+
+def _archive_attempt_evidence(run_dir: Path) -> Path | None:
+    existing = [run_dir / name for name in _ATTEMPT_EVIDENCE if (run_dir / name).exists()]
+    if not existing:
+        return None
+    destination = _next_attempt_dir(run_dir)
+    destination.mkdir(parents=True, exist_ok=False)
+    for source in existing:
+        shutil.move(str(source), str(destination / source.name))
+    _write_json(destination / "archive.json", {"archived_at": utc_now()})
+    return destination
 
 
 def start_run(args: argparse.Namespace, probe: SystemProbe) -> int:
@@ -207,16 +246,61 @@ def takeover(run_dir: Path, probe: SystemProbe, *, service_timeout: float, basel
         return rollback(run_dir, probe, reason="csms_not_ready", service_timeout=service_timeout, poll_interval=poll_interval)
 
     observation: dict[str, Any] = {}
+
     def baseline_ready() -> bool:
         nonlocal observation
         observation = baseline_observation(config.csms_data_dir, config.charger)
         return bool(observation["connected"] and observation["heartbeat_count"] > 0 and not observation["active_transactions"])
+
     if not _wait(baseline_ready, timeout=baseline_timeout, interval=poll_interval):
         _write_json(run_dir / "baseline.json", {"ok": False, "observation": observation})
         return rollback(run_dir, probe, reason="baseline_not_established", service_timeout=service_timeout, poll_interval=poll_interval)
     _write_json(run_dir / "baseline.json", {"ok": True, "observation": observation})
     _write_json(run_dir / "takeover.json", {"ok": True})
     save_state(run_dir, replace(load_state(run_dir), phase="baseline"))
+    return 0
+
+
+def refresh(run_dir: Path, probe: SystemProbe, *, baseline_timeout: float, poll_interval: float) -> int:
+    state = load_state(run_dir)
+    config = state.config
+    if state.watchdog != "disabled":
+        raise ValueError("refresh requires the watchdog to be disabled before the candidate is updated or restarted")
+
+    checks = {
+        "csms_service_active": probe.service_active(config.csms_service),
+        "legacy_service_inactive": not probe.service_active(config.legacy_service),
+        "listener_available": probe.port_listening(config.listener_host, config.listener_port),
+        "control_socket_available": probe.socket_exists(config.control_socket),
+    }
+    if not all(checks.values()):
+        _write_json(run_dir / "refresh.json", {"ok": False, "checks": checks})
+        return 1
+
+    observation: dict[str, Any] = {}
+
+    def baseline_ready() -> bool:
+        nonlocal observation
+        observation = baseline_observation(config.csms_data_dir, config.charger)
+        return bool(observation["connected"] and observation["heartbeat_count"] > 0 and not observation["active_transactions"])
+
+    if not _wait(baseline_ready, timeout=baseline_timeout, interval=poll_interval):
+        _write_json(run_dir / "refresh.json", {"ok": False, "checks": checks, "observation": observation})
+        return 1
+
+    archived = _archive_attempt_evidence(run_dir)
+    _write_json(run_dir / "baseline.json", {"ok": True, "observation": observation, "source": "refresh"})
+    _write_json(
+        run_dir / "refresh.json",
+        {
+            "ok": True,
+            "timestamp": utc_now(),
+            "checks": checks,
+            "observation": observation,
+            "archived_attempt": str(archived.relative_to(run_dir)) if archived is not None else None,
+        },
+    )
+    save_state(run_dir, replace(state, phase="baseline", watchdog="disabled"))
     return 0
 
 
@@ -241,10 +325,12 @@ def reboot_and_configure(run_dir: Path, *, reboot_timeout: float, post_boot_time
         return 1
 
     observation: dict[str, Any] = {}
+
     def reboot_started() -> bool:
         nonlocal observation
         observation = reboot_observation(config.csms_data_dir, config.charger, after_event_id=event_id, after_runtime_id=runtime_id)
         return bool(observation["disconnect_seen"])
+
     if not _wait(reboot_started, timeout=reboot_timeout, interval=poll_interval):
         hard = send_control(config.control_socket, {"command": "reboot", "charger": config.charger, "type": "Hard"})
         attempts.append({"type": "Hard", "response": hard})
@@ -256,6 +342,7 @@ def reboot_and_configure(run_dir: Path, *, reboot_timeout: float, post_boot_time
         nonlocal observation
         observation = reboot_observation(config.csms_data_dir, config.charger, after_event_id=event_id, after_runtime_id=runtime_id)
         return bool(observation["disconnect_seen"] and observation["reconnect_seen"] and observation["boot_notification"] and observation["heartbeat"])
+
     if not _wait(post_boot_ready, timeout=post_boot_timeout, interval=poll_interval):
         _write_json(run_dir / "reboot.json", {"ok": False, "attempts": attempts, "observation": observation, "error": "post_boot_evidence_incomplete"})
         return 1
@@ -344,6 +431,7 @@ def build_report(run_dir: Path, probe: SystemProbe) -> dict[str, Any]:
     phases = {
         "preflight": _read_json(run_dir / "preflight.json"),
         "takeover": _read_json(run_dir / "takeover.json"),
+        "refresh": _read_json(run_dir / "refresh.json"),
         "baseline": _read_json(run_dir / "baseline.json"),
         "reboot": _read_json(run_dir / "reboot.json"),
         "configuration": _read_json(run_dir / "configuration.json"),
@@ -371,6 +459,7 @@ def build_report(run_dir: Path, probe: SystemProbe) -> dict[str, Any]:
             "control_socket_available": probe.socket_exists(config.control_socket),
         },
         "evidence": phases,
+        "attempts": sorted(path.name for path in (run_dir / "attempts").iterdir()) if (run_dir / "attempts").exists() else [],
         "next_protocol": 45 if state.phase == "handed_off" else None,
     }
     _write_json(run_dir / "result.json", report)
@@ -386,6 +475,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "takeover":
         return takeover(run_dir, probe, service_timeout=args.service_timeout, baseline_timeout=args.baseline_timeout, poll_interval=args.poll_interval)
+    if args.command == "refresh":
+        return refresh(run_dir, probe, baseline_timeout=args.baseline_timeout, poll_interval=args.poll_interval)
     if args.command == "reboot-config":
         return reboot_and_configure(run_dir, reboot_timeout=args.reboot_timeout, post_boot_timeout=args.post_boot_timeout, repeat_delay=args.repeat_delay, poll_interval=args.poll_interval, keys=args.keys)
     if args.command == "soak":
