@@ -9,60 +9,84 @@ def parse(*args):
     return parser.parse_args(list(args))
 
 
-def test_start_command_builds_control_request():
+def test_start_command_builds_control_request_with_or_without_charger():
+    assert control_request(parse("start", "--connector", "2", "--id-tag", "REMOTE")) == {
+        "command": "start",
+        "id_tag": "REMOTE",
+        "connector": 2,
+    }
+
     expected = {
         "command": "start",
         "charger": "charger-a",
         "id_tag": "REMOTE",
         "connector": 2,
     }
-
     assert control_request(parse("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
-    assert control_request(parse("start", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse("start", "--charger", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
 
 
-def test_stop_command_builds_control_request():
+def test_stop_command_builds_control_request_with_or_without_charger():
+    assert control_request(parse("stop", "--transaction", "42")) == {
+        "command": "stop",
+        "transaction": 42,
+    }
+
     expected = {
         "command": "stop",
         "charger": "charger-a",
         "transaction": 42,
     }
-
     assert control_request(parse("stop", "charger-a", "--transaction", "42")) == expected
-    assert control_request(parse("stop", "charger-a", "--txn", "42")) == expected
+    assert control_request(parse("stop", "--charger", "charger-a", "--txn", "42")) == expected
 
 
-def test_reboot_defaults_to_soft_and_supports_hard():
-    assert control_request(parse("reboot", "charger-a")) == {
+def test_reboot_defaults_to_soft_and_supports_explicit_charger():
+    assert control_request(parse("reboot")) == {
+        "command": "reboot",
+        "type": "Soft",
+    }
+    assert control_request(parse("reboot", "--hard")) == {
+        "command": "reboot",
+        "type": "Hard",
+    }
+    assert control_request(parse("reboot", "--charger", "charger-a")) == {
         "command": "reboot",
         "charger": "charger-a",
         "type": "Soft",
     }
-    assert control_request(parse("reboot", "charger-a", "--hard")) == {
-        "command": "reboot",
-        "charger": "charger-a",
-        "type": "Hard",
-    }
+
+
+def test_control_rejects_two_charger_selectors():
+    with pytest.raises(ValueError):
+        control_request(parse("reboot", "charger-a", "--charger", "charger-b"))
 
 
 @pytest.mark.parametrize(
-    ("argv", "expected_keys", "expected_force"),
+    ("argv", "expected_charger", "expected_keys", "expected_force"),
     [
-        (("config", "charger-a"), None, False),
-        (("config", "charger-a", "HeartbeatInterval", "GetConfigurationMaxKeys"), ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
-        (("config", "charger-a", "-f"), None, True),
-        (("config", "-f", "charger-a"), None, True),
-        (("config", "charger-a", "HeartbeatInterval", "--force"), ["HeartbeatInterval"], True),
-        (("config", "--force", "charger-a", "HeartbeatInterval"), ["HeartbeatInterval"], True),
+        (("config",), None, None, False),
+        (("config", "HeartbeatInterval", "GetConfigurationMaxKeys"), None, ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
+        (("config", "-f"), None, None, True),
+        (("config", "--charger", "charger-a"), "charger-a", None, False),
+        (("config", "--charger", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"], False),
+        (("config", "HeartbeatInterval", "--force"), None, ["HeartbeatInterval"], True),
     ],
 )
-def test_config_request_preserves_keys_and_force_regardless_of_option_position(argv, expected_keys, expected_force):
+def test_config_request_preserves_selector_keys_and_force(argv, expected_charger, expected_keys, expected_force):
     request = configuration_request(parse(*argv))
 
     assert request["command"] == "config"
-    assert request["charger"] == "charger-a"
+    assert request.get("charger") == expected_charger
     assert request["force"] is expected_force
     assert request.get("keys") == expected_keys
+
+
+def test_legacy_config_positional_charger_is_forwarded_for_daemon_compatibility():
+    request = configuration_request(parse("config", "charger-a", "HeartbeatInterval"))
+
+    assert "charger" not in request
+    assert request["keys"] == ["charger-a", "HeartbeatInterval"]
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -85,22 +109,22 @@ def test_command_status_controls_exit_code(monkeypatch, status, expected_code):
         {"ok": True, "response": {"status": status}},
     )
 
-    assert run_control(parse("reboot", "charger-a")) == expected_code
+    assert run_control(parse("reboot")) == expected_code
 
 
 def test_control_error_returns_one(monkeypatch):
     install_control_response(
         monkeypatch,
-        {"error": "charger_not_connected", "charger": "charger-a"},
+        {"error": "charger_required", "chargers": ["charger-a", "charger-b"]},
     )
 
-    assert run_control(parse("reboot", "charger-a")) == 1
+    assert run_control(parse("reboot")) == 1
 
 
 def test_missing_control_socket_returns_one(monkeypatch):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
 
-    assert run_control(parse("reboot", "charger-a")) == 1
+    assert run_control(parse("reboot")) == 1
 
 
 @pytest.mark.parametrize(
@@ -125,16 +149,16 @@ def test_missing_control_socket_returns_one(monkeypatch):
 def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
     install_control_response(monkeypatch, response)
 
-    assert run_configuration(parse("config", "charger-a")) == expected_code
+    assert run_configuration(parse("config", "HeartbeatInterval")) == expected_code
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ("start", "charger-a", "--connector", "-1", "--id-tag", "REMOTE"),
-        ("start", "charger-a", "--cp", "-1", "--id-tag", "REMOTE"),
-        ("stop", "charger-a", "--transaction", "-1"),
-        ("stop", "charger-a", "--txn", "-1"),
+        ("start", "--connector", "-1", "--id-tag", "REMOTE"),
+        ("start", "--cp", "-1", "--id-tag", "REMOTE"),
+        ("stop", "--transaction", "-1"),
+        ("stop", "--txn", "-1"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(args):
