@@ -89,7 +89,7 @@ ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N
 ocpp-csms txn [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
 ocpp-csms config CHARGER [KEY ...] [-f|--force]
 ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG
-ocpp-csms stop CHARGER --transaction ID|--txn ID
+ocpp-csms stop CHARGER (--transaction ID|--txn ID)
 ocpp-csms reboot CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
