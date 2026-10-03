@@ -194,20 +194,28 @@ def format_transaction(view: TransactionView) -> str:
     )
     if meter["latest_energy"] is not None:
         value, unit = meter["latest_energy"]
-        lines.append(f"  energy:     {value} {unit}")
+        lines.append(f"  latest energy: {value} {unit}")
     if meter["latest_power"] is not None:
         value, unit = meter["latest_power"]
-        lines.append(f"  power:      {value} {unit}")
+        lines.append(f"  latest power: {value} {unit}")
 
     if origin == "recovered" and not start:
-        lines.extend(("", "Recovery:     start evidence unavailable; adopted from historical traffic"))
+        recovered_by = "StopTransaction" if stop else "MeterValues" if record.get("meter_values") else "historical traffic"
+        lines.extend(
+            (
+                "",
+                "Recovery:",
+                "  start:      unknown",
+                f"  recovered:  {recovered_by}",
+            )
+        )
 
     if view.unresolved:
         lines.extend(("", "Warnings:"))
         for unresolved in view.unresolved:
             reason = unresolved.get("reason") or "unknown"
             message_type = unresolved.get("message_type") or "OCPP"
-            lines.append(f"  {message_type}: {reason}")
+            lines.append(f"  unresolved {message_type}: {reason}")
 
     lines.extend(("", f"Archive:      {_archive_path(view)}"))
     return "\n".join(lines)
