@@ -1,5 +1,3 @@
-import sqlite3
-
 import pytest
 
 from field.protocol import configuration_map, configuration_payload, evidence_checkpoint, reboot_observation
