@@ -40,7 +40,7 @@ Both service names must identify existing service units. How those units are ins
 
 A successful preflight records `state.json` and `preflight.json`. Reusing a run directory with different operational configuration is rejected.
 
-## Chunk 2: takeover, baseline, and rollback
+## Takeover, baseline, and rollback
 
 After successful preflight, switch from the configured legacy service to the configured candidate CSMS with:
 
@@ -48,7 +48,7 @@ After successful preflight, switch from the configured legacy service to the con
 python -m field.harness takeover /path/to/run
 ```
 
-The takeover requires, in order, the configured legacy service, listener release, configured CSMS service/listener/control socket, charger connection, at least one inbound `Heartbeat`, and no active transaction. Evidence is read directly and read-only from the configured CSMS SQLite store; human-readable CLI output is not parsed.
+The takeover requires the configured legacy service, listener release, configured CSMS service/listener/control socket, charger connection, at least one inbound `Heartbeat`, and no active transaction. Evidence is read directly and read-only from the configured CSMS SQLite store; human-readable CLI output is not parsed.
 
 Timeouts are caller-configurable:
 
@@ -67,7 +67,7 @@ python -m field.harness rollback /path/to/run --reason operator_requested
 
 Rollback is idempotent and uses only the configured services and listener values.
 
-## Chunk 3: reboot and GetConfiguration
+## Reboot and GetConfiguration
 
 After the run reaches `baseline`, execute:
 
@@ -90,14 +90,7 @@ The sequence is:
 9. record semantic differences without treating a changed charger-reported value as an automatic protocol failure;
 10. require the charger to remain connected and idle.
 
-Default selected keys are:
-
-- `SupportedFeatureProfiles`
-- `GetConfigurationMaxKeys`
-- `HeartbeatInterval`
-- `MeterValueSampleInterval`
-
-Override the selected set by repeating `--key`:
+Default selected keys are `SupportedFeatureProfiles`, `GetConfigurationMaxKeys`, `HeartbeatInterval`, and `MeterValueSampleInterval`. Override the selected set by repeating `--key`.
 
 ```sh
 python -m field.harness reboot-config /path/to/run \
@@ -111,15 +104,7 @@ python -m field.harness reboot-config /path/to/run \
 
 The control socket location comes from `state.json`; the harness does not assume that it is `<data-dir>/control.sock`.
 
-Evidence written by this phase includes:
-
-- `reboot.json`: reset attempts plus post-checkpoint reboot evidence;
-- `config/all.json`: full charger-reported configuration response;
-- `config/selected.json`: selected-key response;
-- `config/repeat.json`: repeated selected-key response;
-- `configuration.json`: comparison, unknown keys, and final idle/connection observation.
-
-Unknown configuration keys are evidence, not failure. This protocol never sends `force=true` and never performs configuration writes.
+Evidence written by this phase includes `reboot.json`, `config/all.json`, `config/selected.json`, `config/repeat.json`, and `configuration.json`. Unknown configuration keys are evidence, not failure. This protocol never sends `force=true` and never performs configuration writes.
 
 Successful completion leaves the run in phase `configuration`.
 
