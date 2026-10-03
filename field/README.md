@@ -97,7 +97,7 @@ Default selected keys are:
 - `HeartbeatInterval`
 - `MeterValueSampleInterval`
 
-Override/add the selected set by repeating `--key`:
+Override the selected set by repeating `--key`:
 
 ```sh
 python -m field.harness reboot-config /path/to/run \
@@ -114,7 +114,7 @@ The control socket location comes from `state.json`; the harness does not assume
 Evidence written by this phase includes:
 
 - `reboot.json`: reset attempts plus post-checkpoint reboot evidence;
-- `config/all.json`: the full charger-reported configuration response;
+- `config/all.json`: full charger-reported configuration response;
 - `config/selected.json`: selected-key response;
 - `config/repeat.json`: repeated selected-key response;
 - `configuration.json`: comparison, unknown keys, and final idle/connection observation.
