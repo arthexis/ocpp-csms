@@ -30,19 +30,26 @@ def send_control(path: str, request: dict[str, Any]) -> dict[str, Any]:
     return asyncio.run(_send_control(path, request))
 
 
-def latest_event_id(data_dir: str) -> int:
+def evidence_checkpoint(data_dir: str) -> tuple[int, int]:
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
     with sqlite3.connect(database) as connection:
-        row = connection.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()
-    return int(row[0])
+        event_id = int(connection.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0])
+        runtime_id = int(connection.execute("SELECT COALESCE(MAX(id), 0) FROM runtime_events").fetchone()[0])
+    return event_id, runtime_id
 
 
-def reboot_observation(data_dir: str, charger: str, *, after_event_id: int) -> dict[str, Any]:
+def reboot_observation(
+    data_dir: str,
+    charger: str,
+    *,
+    after_event_id: int,
+    after_runtime_id: int,
+) -> dict[str, Any]:
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
     with sqlite3.connect(database) as connection:
         rows = connection.execute(
             """
-            SELECT id, action, direction, received_at, payload_json
+            SELECT action, direction
             FROM events
             WHERE charger_id = ? AND id > ?
             ORDER BY id
@@ -52,13 +59,13 @@ def reboot_observation(data_dir: str, charger: str, *, after_event_id: int) -> d
         runtime = connection.execute(
             """
             SELECT event FROM runtime_events
-            WHERE charger_id = ? AND event IN ('charger_connected', 'charger_disconnected')
+            WHERE charger_id = ? AND id > ?
+              AND event IN ('charger_connected', 'charger_disconnected')
             ORDER BY id
             """,
-            (charger,),
+            (charger, after_runtime_id),
         ).fetchall()
-    inbound = [row for row in rows if row[2] == "in"]
-    actions = [row[1] for row in inbound]
+    actions = [row[0] for row in rows if row[1] == "in"]
     runtime_events = [row[0] for row in runtime]
     return {
         "boot_notification": "BootNotification" in actions,
