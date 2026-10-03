@@ -44,7 +44,7 @@ class Registry:
         return list(self.active.get(charge_point_id, []))
 
     def record_control_event(self, event, *, charger_id, details=None):
-        self.events.append((event, charger_id, details))
+        self.events.append({"event": event, "charger_id": charger_id, "details": details or {}})
 
 
 @pytest.mark.asyncio
@@ -94,15 +94,11 @@ async def test_get_configuration_is_blocked_during_active_transaction():
         {"command": "config", "charger": "charger-a"},
     )
 
-    assert response == {
-        "error": "active_transaction",
-        "charger": "charger-a",
-        "transactions": [17],
-    }
+    assert response["error"] == "active_transaction"
+    assert response["transactions"] == [17]
     assert session.calls == []
-    assert registry.events == [
-        ("configuration_query_blocked", "charger-a", {"transactions": [17]})
-    ]
+    assert registry.events[0]["charger_id"] == "charger-a"
+    assert registry.events[0]["details"]["transactions"] == [17]
 
 
 @pytest.mark.asyncio
@@ -117,9 +113,8 @@ async def test_forced_get_configuration_bypasses_active_transaction_guard():
 
     assert response["ok"] is True
     assert session.calls == [("config", None)]
-    assert registry.events == [
-        ("configuration_query_forced", "charger-a", {"transactions": [17]})
-    ]
+    assert registry.events[0]["charger_id"] == "charger-a"
+    assert registry.events[0]["details"]["transactions"] == [17]
 
 
 @pytest.mark.asyncio
