@@ -254,19 +254,37 @@ def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
     return _bounded_tcpdump(["tcpdump", "-i", candidate.interface, "-l", "-nn", "-s0", "-A", packet_filter], seconds)
 
 
+def capture_passive_tcp(interface: str, seconds: float) -> str:
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
+    return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-s0", "-A", "tcp"], seconds)
+
+
 def _tcp_blocks(text: str) -> list[tuple[re.Match[str], str]]:
     matches = list(_TCP_PACKET.finditer(text))
     return [(match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)]) for index, match in enumerate(matches)]
 
 
-def parse_tcp_websocket(text: str, candidate: DiscoveryCandidate, *, listen_port: int) -> RedirectReceipt:
-    _, source_ip = _validate_candidate(candidate)
+def _websocket_receipt(
+    text: str,
+    *,
+    interface: str,
+    listen_port: int,
+    source_ip: str | None = None,
+    destination_filter: set[str] | None = None,
+) -> RedirectReceipt:
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
     if not 1 <= listen_port <= 65535:
         raise ValueError("invalid_listen_port")
-    websocket_candidates: list[tuple[str, int, WebSocketRequest]] = []
+    websocket_candidates: list[tuple[str, str, int, WebSocketRequest]] = []
     saw_tls = False
     for packet, payload in _tcp_blocks(text):
-        if packet.group("src") != source_ip:
+        packet_source = packet.group("src")
+        destination_ip = packet.group("dst")
+        if source_ip is not None and packet_source != source_ip:
+            continue
+        if destination_filter is not None and destination_ip not in destination_filter:
             continue
         destination_port = int(packet.group("dst_port"))
         if destination_port == 443:
@@ -279,27 +297,29 @@ def parse_tcp_websocket(text: str, candidate: DiscoveryCandidate, *, listen_port
             continue
         if "upgrade" not in {token.strip().lower() for token in connection.group("value").split(",")}:
             continue
-        destination_ip = packet.group("dst")
-        websocket_candidates.append((destination_ip, destination_port, WebSocketRequest(destination_ip, host.group("host"), get.group("path"))))
+        websocket_candidates.append((packet_source, destination_ip, destination_port, WebSocketRequest(destination_ip, host.group("host"), get.group("path"))))
     if not websocket_candidates:
         if saw_tls:
             raise ValueError("secure_or_opaque_traffic")
         raise ValueError("no_plaintext_websocket_upgrade")
-    ports = {port for _, port, _ in websocket_candidates}
+    sources = {item[0] for item in websocket_candidates}
+    if len(sources) != 1:
+        raise ValueError("ambiguous_websocket_sources")
+    ports = {item[2] for item in websocket_candidates}
     if len(ports) != 1:
         raise ValueError("ambiguous_tcp_destinations")
     requests: list[WebSocketRequest] = []
     seen_requests: set[tuple[str, str, str]] = set()
-    for _, _, request in websocket_candidates:
+    for _, _, _, request in websocket_candidates:
         key = (request.destination_ip, request.host, request.path)
         if key not in seen_requests:
             seen_requests.add(key)
             requests.append(request)
-    destination_ips = sorted({destination_ip for destination_ip, _, _ in websocket_candidates}, key=ipaddress.ip_address)
+    destination_ips = sorted({destination_ip for _, destination_ip, _, _ in websocket_candidates}, key=ipaddress.ip_address)
     return RedirectReceipt(
-        interface=candidate.interface,
+        interface=interface,
         listen_port=listen_port,
-        source_ip=source_ip,
+        source_ip=next(iter(sources)),
         destination_ips=destination_ips,
         requests=requests,
         captured_at="discovered",
@@ -307,8 +327,34 @@ def parse_tcp_websocket(text: str, candidate: DiscoveryCandidate, *, listen_port
     )
 
 
+def parse_tcp_websocket(text: str, candidate: DiscoveryCandidate, *, listen_port: int) -> RedirectReceipt:
+    _, source_ip = _validate_candidate(candidate)
+    return _websocket_receipt(text, interface=candidate.interface, listen_port=listen_port, source_ip=source_ip)
+
+
+def parse_passive_websocket(text: str, *, interface: str, local_addresses: set[str], listen_port: int) -> RedirectReceipt:
+    if not local_addresses:
+        raise ValueError("no_local_ipv4_addresses")
+    return _websocket_receipt(text, interface=interface, listen_port=listen_port, destination_filter=local_addresses)
+
+
 def discover_tcp(candidate: DiscoveryCandidate, *, listen_port: int, seconds: float = _DEFAULT_SECONDS) -> RedirectReceipt:
     return parse_tcp_websocket(capture_tcp(candidate, seconds), candidate, listen_port=listen_port)
+
+
+def discover_existing_endpoint(*, interface: str, listen_port: int, seconds: float = _DEFAULT_SECONDS) -> RedirectReceipt | None:
+    local_addresses = interface_addresses(interface)
+    try:
+        return parse_passive_websocket(
+            capture_passive_tcp(interface, seconds),
+            interface=interface,
+            local_addresses=local_addresses,
+            listen_port=listen_port,
+        )
+    except ValueError as exc:
+        if str(exc) == "no_plaintext_websocket_upgrade":
+            return None
+        raise
 
 
 def connected_chargers(data_dir: str | Path) -> list[str]:
@@ -398,13 +444,19 @@ def run_discovery(
 
     address_claimed = False
     redirect_applied = False
+    candidate: DiscoveryCandidate | None = None
     try:
-        candidate = discover(interface=interface, seconds=arp_seconds, min_requests=min_requests)
-        _write_state(state_dir, "candidate", candidate)
-        claim_address(candidate, state_dir)
-        address_claimed = True
-        _write_state(state_dir, "address_claimed", candidate)
-        receipt = discover_tcp(candidate, listen_port=listen_port, seconds=tcp_seconds)
+        receipt = discover_existing_endpoint(interface=interface, listen_port=listen_port, seconds=tcp_seconds)
+        if receipt is not None:
+            _write_state(state_dir, "existing_endpoint")
+        else:
+            candidate = discover(interface=interface, seconds=arp_seconds, min_requests=min_requests)
+            _write_state(state_dir, "candidate", candidate)
+            claim_address(candidate, state_dir)
+            address_claimed = True
+            _write_state(state_dir, "address_claimed", candidate)
+            receipt = discover_tcp(candidate, listen_port=listen_port, seconds=tcp_seconds)
+
         _write_redirect(state_dir, receipt)
         _write_state(state_dir, "redirect_ready", candidate)
         redirect_tools.apply_redirect(state_dir)
