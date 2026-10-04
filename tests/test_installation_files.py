@@ -32,15 +32,31 @@ def test_base_service_runs_unprivileged_and_restarts():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_base_installer_help_explains_optional_discovery():
+def test_base_installer_help_explains_optional_discovery_and_rollover():
     help_output = help_text("install.sh")
 
     assert "--host HOST" in help_output
     assert "--port PORT" in help_output
+    assert "--rollover" in help_output
+    assert "idle chargers" in help_output
+    assert "never overrides" in help_output
     assert "--with-discover" in help_output
     assert "Also install and enable OCPP Discover" in help_output
     assert "--without-discover" in help_output
     assert "preserved" in help_output
+
+
+def test_base_installer_runs_read_only_preflight_before_mutation():
+    installer = read("install.sh")
+
+    preflight = installer.index("ocpp_csms.install_preflight")
+    create_venv = installer.index('python3 -m venv "$VENV"')
+    create_data_dir = installer.index('mkdir -p "$BIN_DIR" "$DATA_DIR"')
+    install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
+
+    assert 'ROLLOVER=0' in installer
+    assert 'ROLLOVER=1' in installer
+    assert preflight < create_venv < create_data_dir < install_service
 
 
 def test_base_installer_preserves_and_delegates_discovery_state():
