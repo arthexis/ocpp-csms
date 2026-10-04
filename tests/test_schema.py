@@ -15,39 +15,6 @@ from ocpp_csms.schema import (
 )
 
 
-def create_schema_one(tmp_path):
-    path = tmp_path / DATABASE_FILENAME
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                received_at TEXT NOT NULL,
-                charger_id TEXT NOT NULL,
-                action TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                transaction_id INTEGER,
-                id_tag TEXT,
-                charger_timestamp TEXT,
-                payload_json TEXT NOT NULL
-            );
-            CREATE TABLE runtime_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                occurred_at TEXT NOT NULL,
-                event TEXT NOT NULL,
-                charger_id TEXT,
-                details_json TEXT
-            );
-            PRAGMA user_version = 1;
-            """
-        )
-        connection.execute(
-            "INSERT INTO runtime_events (occurred_at, event, charger_id) VALUES (?, ?, ?)",
-            ("2026-10-04T00:00:00Z", "legacy_evidence", "charger-a"),
-        )
-    return path
-
-
 def test_missing_database_inspection_is_read_only(tmp_path):
     data_dir = tmp_path / "missing"
 
@@ -112,13 +79,11 @@ def test_event_store_refuses_newer_schema(tmp_path):
         EventStore(tmp_path)
 
 
-def test_event_store_refuses_older_schema_without_mutating_it(tmp_path):
-    path = create_schema_one(tmp_path)
-
+def test_event_store_refuses_older_schema_without_mutating_it(tmp_path, schema_one):
     with pytest.raises(RuntimeError, match="schema 1 is older than required 2; explicit upgrade required"):
         EventStore(tmp_path)
 
-    with sqlite3.connect(path) as connection:
+    with sqlite3.connect(schema_one) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
         assert connection.execute(
             "SELECT event, charger_id FROM runtime_events"
@@ -128,16 +93,15 @@ def test_event_store_refuses_older_schema_without_mutating_it(tmp_path):
         ).fetchone()[0] == 0
 
 
-def test_schema_one_has_explicit_upgrade_path(tmp_path):
-    create_schema_one(tmp_path)
+def test_schema_one_has_explicit_upgrade_path(tmp_path, schema_one):
     info = inspect_schema(tmp_path)
 
+    assert info.path == schema_one
     assert can_upgrade_schema(info) is True
     assert schema_backup_path(info).name == f"{DATABASE_FILENAME}.schema-1.bak"
 
 
-def test_upgrade_schema_one_to_two_preserves_evidence_and_creates_backup(tmp_path):
-    path = create_schema_one(tmp_path)
+def test_upgrade_schema_one_to_two_preserves_evidence_and_creates_backup(tmp_path, schema_one):
     info = inspect_schema(tmp_path)
     backup = schema_backup_path(info)
 
@@ -145,7 +109,7 @@ def test_upgrade_schema_one_to_two_preserves_evidence_and_creates_backup(tmp_pat
 
     assert upgraded.version == 2
     assert backup.exists()
-    with sqlite3.connect(path) as connection:
+    with sqlite3.connect(schema_one) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
         assert connection.execute(
             "SELECT event, charger_id FROM runtime_events"
@@ -186,8 +150,7 @@ def test_upgrade_refuses_unversioned_database(tmp_path):
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='legacy'").fetchone() == ("legacy",)
 
 
-def test_upgrade_refuses_to_overwrite_existing_backup(tmp_path):
-    create_schema_one(tmp_path)
+def test_upgrade_refuses_to_overwrite_existing_backup(tmp_path, schema_one):
     info = inspect_schema(tmp_path)
     backup = schema_backup_path(info)
     backup.write_text("keep me")
