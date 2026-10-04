@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import os
 import re
 import shutil
 import subprocess
 from collections import Counter
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 _DEFAULT_INTERFACE = "eth0"
 _DEFAULT_SECONDS = 15.0
 _MIN_REQUESTS = 2
+_ADDRESS_STATE = "address.json"
 
 _ARP_REQUEST = re.compile(
     r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+"
@@ -34,6 +38,15 @@ class DiscoveryCandidate:
     requests: int
 
     def to_json(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AddressClaim:
+    interface: str
+    address: str
+
+    def to_json(self) -> dict[str, str]:
         return asdict(self)
 
 
@@ -126,6 +139,96 @@ def discover(
         interface=interface,
         min_requests=min_requests,
     )
+
+
+def require_root() -> None:
+    if os.geteuid() != 0:
+        raise RuntimeError("root_required")
+
+
+def _require_ip() -> None:
+    if shutil.which("ip") is None:
+        raise RuntimeError("ip_not_found")
+
+
+def _run_ip(command: list[str]) -> subprocess.CompletedProcess[str]:
+    _require_ip()
+    return subprocess.run(command, text=True, capture_output=True, check=False)
+
+
+def _ip_error(result: subprocess.CompletedProcess[str], fallback: str) -> RuntimeError:
+    detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else fallback
+    return RuntimeError(detail)
+
+
+def interface_addresses(interface: str) -> set[str]:
+    result = _run_ip(["ip", "-j", "address", "show", "dev", interface])
+    if result.returncode != 0:
+        raise _ip_error(result, "interface_address_query_failed")
+    try:
+        payload = json.loads(result.stdout)
+        return {
+            str(info["local"])
+            for item in payload
+            for info in item.get("addr_info", [])
+            if info.get("family") == "inet" and "local" in info
+        }
+    except (TypeError, ValueError, KeyError):
+        raise RuntimeError("invalid_ip_address_output") from None
+
+
+def _claim_path(state_dir: str | Path) -> Path:
+    return Path(state_dir).expanduser() / _ADDRESS_STATE
+
+
+def load_address_claim(state_dir: str | Path) -> AddressClaim:
+    path = _claim_path(state_dir)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        interface = str(payload["interface"])
+        address = str(ipaddress.ip_address(payload["address"]))
+    except FileNotFoundError:
+        raise RuntimeError("address_claim_not_found") from None
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        raise RuntimeError("invalid_address_claim") from None
+    if ":" in address:
+        raise RuntimeError("invalid_address_claim")
+    return AddressClaim(interface=interface, address=address)
+
+
+def claim_address(candidate: DiscoveryCandidate, state_dir: str | Path) -> AddressClaim:
+    require_root()
+    address = str(ipaddress.ip_address(candidate.target_ip))
+    if ":" in address:
+        raise ValueError("target_must_be_ipv4")
+
+    path = _claim_path(state_dir)
+    if path.exists():
+        raise RuntimeError("address_claim_exists")
+    if address in interface_addresses(candidate.interface):
+        raise RuntimeError("target_address_already_present")
+
+    claim = AddressClaim(candidate.interface, address)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(claim.to_json(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = _run_ip(["ip", "address", "add", f"{address}/32", "dev", candidate.interface])
+    if result.returncode != 0:
+        path.unlink(missing_ok=True)
+        raise _ip_error(result, "address_add_failed")
+    return claim
+
+
+def cleanup_address(state_dir: str | Path) -> AddressClaim:
+    require_root()
+    path = _claim_path(state_dir)
+    claim = load_address_claim(state_dir)
+    if claim.address in interface_addresses(claim.interface):
+        result = _run_ip(["ip", "address", "del", f"{claim.address}/32", "dev", claim.interface])
+        if result.returncode != 0:
+            raise _ip_error(result, "address_remove_failed")
+    path.unlink()
+    return claim
 
 
 def build_parser() -> argparse.ArgumentParser:
