@@ -87,6 +87,32 @@ def test_historical_start_event_does_not_imply_running(tmp_path: Path):
     assert data["started_at"] is None
 
 
+def test_running_server_ignores_connected_state_from_previous_process(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_runtime("server_started")
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+
+    assert charger.charger_id == "charger-a"
+    assert charger.connected is False
+    assert charger.connected_at is None
+
+
+def test_running_server_accepts_connection_after_current_start(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+
+    assert charger.connected is True
+    assert charger.connected_at is not None
+
+
 def test_live_pid_reports_running_without_database(tmp_path: Path):
     write_pid(tmp_path)
 
