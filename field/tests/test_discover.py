@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from field import discover
@@ -14,16 +16,28 @@ REPLY = (
     "ethertype ARP (0x0806), length 42: ARP, Reply 192.168.129.1 "
     "is-at 11:22:33:44:55:66, length 28\n"
 )
+GRATUITOUS = (
+    "12:00:00.000001 aa:bb:cc:dd:ee:ff > ff:ff:ff:ff:ff:ff, "
+    "ethertype ARP (0x0806), length 42: ARP, Request who-has 192.168.129.182 "
+    "tell 192.168.129.182, length 28\n"
+    "12:00:01.000001 aa:bb:cc:dd:ee:ff > ff:ff:ff:ff:ff:ff, "
+    "ethertype ARP (0x0806), length 42: ARP, Request who-has 192.168.129.182 "
+    "tell 192.168.129.182, length 28\n"
+)
+
+
+def candidate():
+    return discover.DiscoveryCandidate("eth0", "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
 
 
 def test_discover_candidate_finds_one_repeated_unanswered_target():
-    candidate = discover.discover_candidate(REQUEST + SECOND_REQUEST)
+    found = discover.discover_candidate(REQUEST + SECOND_REQUEST)
 
-    assert candidate.interface == "eth0"
-    assert candidate.source_mac == "aa:bb:cc:dd:ee:ff"
-    assert candidate.source_ip == "192.168.129.182"
-    assert candidate.target_ip == "192.168.129.1"
-    assert candidate.requests == 2
+    assert found.interface == "eth0"
+    assert found.source_mac == "aa:bb:cc:dd:ee:ff"
+    assert found.source_ip == "192.168.129.182"
+    assert found.target_ip == "192.168.129.1"
+    assert found.requests == 2
 
 
 def test_discover_candidate_ignores_answered_target():
@@ -37,7 +51,7 @@ def test_discover_candidate_requires_repetition_by_default():
 
 
 def test_discover_candidate_rejects_ambiguous_targets():
-    other = (REQUEST + SECOND_REQUEST).replace("192.168.129.1", "192.168.129.2")
+    other = (REQUEST + SECOND_REQUEST).replace("192.168.129.1 ", "192.168.129.2 ")
 
     with pytest.raises(ValueError, match="ambiguous_arp_candidates"):
         discover.discover_candidate(REQUEST + SECOND_REQUEST + other)
@@ -51,21 +65,19 @@ def test_discover_candidate_rejects_multiple_requesters():
 
 
 def test_discover_candidate_ignores_gratuitous_arp():
-    gratuitous = (REQUEST + SECOND_REQUEST).replace("192.168.129.1", "192.168.129.182")
-
     with pytest.raises(ValueError, match="no_unresolved_arp_candidate"):
-        discover.discover_candidate(gratuitous)
+        discover.discover_candidate(GRATUITOUS)
 
 
 def test_discover_candidate_allows_explicit_interface_and_threshold():
-    candidate = discover.discover_candidate(
+    found = discover.discover_candidate(
         REQUEST,
         interface="eno1",
         min_requests=1,
     )
 
-    assert candidate.interface == "eno1"
-    assert candidate.requests == 1
+    assert found.interface == "eno1"
+    assert found.requests == 1
 
 
 def test_capture_arp_uses_default_bounded_tcpdump_shape(monkeypatch):
@@ -123,3 +135,117 @@ def test_cli_defaults_to_eth0_and_prints_candidate(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert seen == {"interface": "eth0", "seconds": 15.0, "min_requests": 2}
     assert '"target_ip": "192.168.129.1"' in output
+
+
+def test_interface_addresses_reads_only_ipv4_on_requested_interface(monkeypatch):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = json.dumps([
+            {
+                "addr_info": [
+                    {"family": "inet", "local": "10.0.0.5"},
+                    {"family": "inet6", "local": "fe80::1"},
+                ]
+            }
+        ])
+
+    monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
+
+    assert discover.interface_addresses("eth9") == {"10.0.0.5"}
+    assert calls == [["ip", "-j", "address", "show", "dev", "eth9"]]
+
+
+def test_claim_address_requires_root_and_refuses_preexisting_address(tmp_path, monkeypatch):
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 1000)
+    with pytest.raises(RuntimeError, match="root_required"):
+        discover.claim_address(candidate(), tmp_path)
+
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"192.168.129.1"})
+    with pytest.raises(RuntimeError, match="target_address_already_present"):
+        discover.claim_address(candidate(), tmp_path)
+
+    assert not (tmp_path / "address.json").exists()
+
+
+def test_claim_address_records_ownership_before_exact_ip_add(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.0.0.5"})
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    def run_ip(command):
+        calls.append(command)
+        assert (tmp_path / "address.json").exists()
+        return Result()
+
+    monkeypatch.setattr(discover, "_run_ip", run_ip)
+
+    claim = discover.claim_address(candidate(), tmp_path)
+
+    assert claim == discover.AddressClaim("eth0", "192.168.129.1")
+    assert calls == [["ip", "address", "add", "192.168.129.1/32", "dev", "eth0"]]
+    assert json.loads((tmp_path / "address.json").read_text()) == {
+        "address": "192.168.129.1",
+        "interface": "eth0",
+    }
+
+
+def test_claim_address_removes_receipt_when_ip_add_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: set())
+
+    class Result:
+        returncode = 2
+        stderr = "RTNETLINK answers: File exists"
+
+    monkeypatch.setattr(discover, "_run_ip", lambda command: Result())
+
+    with pytest.raises(RuntimeError, match="File exists"):
+        discover.claim_address(candidate(), tmp_path)
+
+    assert not (tmp_path / "address.json").exists()
+
+
+def test_claim_address_refuses_existing_ownership_receipt(tmp_path, monkeypatch):
+    (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+
+    with pytest.raises(RuntimeError, match="address_claim_exists"):
+        discover.claim_address(candidate(), tmp_path)
+
+
+def test_cleanup_removes_only_owned_address_and_receipt(tmp_path, monkeypatch):
+    (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
+    calls = []
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.0.0.5", "192.168.129.1"})
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
+
+    claim = discover.cleanup_address(tmp_path)
+
+    assert claim == discover.AddressClaim("eth0", "192.168.129.1")
+    assert calls == [["ip", "address", "del", "192.168.129.1/32", "dev", "eth0"]]
+    assert not (tmp_path / "address.json").exists()
+
+
+def test_cleanup_is_safe_when_owned_address_is_already_absent(tmp_path, monkeypatch):
+    (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.0.0.5"})
+    monkeypatch.setattr(discover, "_run_ip", lambda command: pytest.fail("no delete should run"))
+
+    discover.cleanup_address(tmp_path)
+
+    assert not (tmp_path / "address.json").exists()
