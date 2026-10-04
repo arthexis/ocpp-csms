@@ -6,10 +6,46 @@ from ocpp_csms.events import EventStore
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
+    can_upgrade_schema,
     create_current_schema,
     inspect_schema,
     require_supported_schema,
+    schema_backup_path,
+    upgrade_schema,
 )
+
+
+def create_schema_one(tmp_path):
+    path = tmp_path / DATABASE_FILENAME
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                received_at TEXT NOT NULL,
+                charger_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                transaction_id INTEGER,
+                id_tag TEXT,
+                charger_timestamp TEXT,
+                payload_json TEXT NOT NULL
+            );
+            CREATE TABLE runtime_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                event TEXT NOT NULL,
+                charger_id TEXT,
+                details_json TEXT
+            );
+            PRAGMA user_version = 1;
+            """
+        )
+        connection.execute(
+            "INSERT INTO runtime_events (occurred_at, event, charger_id) VALUES (?, ?, ?)",
+            ("2026-10-04T00:00:00Z", "legacy_evidence", "charger-a"),
+        )
+    return path
 
 
 def test_missing_database_inspection_is_read_only(tmp_path):
@@ -74,6 +110,93 @@ def test_event_store_refuses_newer_schema(tmp_path):
 
     with pytest.raises(RuntimeError, match="schema 99 is newer than supported 2"):
         EventStore(tmp_path)
+
+
+def test_event_store_refuses_older_schema_without_mutating_it(tmp_path):
+    path = create_schema_one(tmp_path)
+
+    with pytest.raises(RuntimeError, match="schema 1 is older than required 2; explicit upgrade required"):
+        EventStore(tmp_path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT event, charger_id FROM runtime_events"
+        ).fetchone() == ("legacy_evidence", "charger-a")
+        assert connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='transactions'"
+        ).fetchone()[0] == 0
+
+
+def test_schema_one_has_explicit_upgrade_path(tmp_path):
+    create_schema_one(tmp_path)
+    info = inspect_schema(tmp_path)
+
+    assert can_upgrade_schema(info) is True
+    assert schema_backup_path(info).name == f"{DATABASE_FILENAME}.schema-1.bak"
+
+
+def test_upgrade_schema_one_to_two_preserves_evidence_and_creates_backup(tmp_path):
+    path = create_schema_one(tmp_path)
+    info = inspect_schema(tmp_path)
+    backup = schema_backup_path(info)
+
+    upgraded = upgrade_schema(tmp_path)
+
+    assert upgraded.version == 2
+    assert backup.exists()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT event, charger_id FROM runtime_events"
+        ).fetchone() == ("legacy_evidence", "charger-a")
+        assert connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='transactions'"
+        ).fetchone()[0] == 1
+    with sqlite3.connect(backup) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT event, charger_id FROM runtime_events"
+        ).fetchone() == ("legacy_evidence", "charger-a")
+        assert connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='transactions'"
+        ).fetchone()[0] == 0
+
+
+def test_upgrade_current_schema_is_noop_without_backup(tmp_path):
+    info = create_current_schema(tmp_path)
+
+    upgraded = upgrade_schema(tmp_path)
+
+    assert upgraded == info
+    assert not schema_backup_path(info).exists()
+
+
+def test_upgrade_refuses_unversioned_database(tmp_path):
+    path = tmp_path / DATABASE_FILENAME
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE legacy (value TEXT)")
+
+    info = inspect_schema(tmp_path)
+    assert info.version == 0
+    assert can_upgrade_schema(info) is False
+    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 2"):
+        upgrade_schema(tmp_path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='legacy'").fetchone() == ("legacy",)
+
+
+def test_upgrade_refuses_to_overwrite_existing_backup(tmp_path):
+    create_schema_one(tmp_path)
+    info = inspect_schema(tmp_path)
+    backup = schema_backup_path(info)
+    backup.write_text("keep me")
+
+    with pytest.raises(RuntimeError, match="schema backup already exists"):
+        upgrade_schema(tmp_path)
+
+    assert backup.read_text() == "keep me"
+    assert inspect_schema(tmp_path).version == 1
 
 
 def test_current_schema_creation_refuses_existing_database(tmp_path):
