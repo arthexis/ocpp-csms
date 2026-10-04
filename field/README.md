@@ -14,18 +14,38 @@ Field-harness self-tests live under `field/tests/` and run explicitly with:
 python -m pytest field/tests
 ```
 
-## Passive Ethernet discovery
+## Ethernet discovery
 
-`field.discover` starts with a passive ARP observation on `eth0` by default. It requires repeated unanswered requests from one requester before producing a discovery candidate and refuses ambiguity.
+`field.discover` defaults to `eth0` and can perform a full transactional discovery run. It first gives the charger a short opportunity to connect directly to the local CSMS. If a charger is already connected, discovery exits without invoking packet capture, `ip`, or `nft`.
+
+A manual full run is:
+
+```sh
+sudo python -m field.discover run \
+  --data-dir /home/arthe/ocpp-csms-data \
+  --state-dir /run/ocpp-discover \
+  --interface eth0 \
+  --listen-port 9000
+```
+
+When direct connection does not occur, the run passively identifies one repeated unresolved ARP target, claims it as an additive `/32` secondary address, observes only that charger's plaintext WebSocket traffic, applies the narrowly scoped redirect, and then waits for the CSMS itself to report a connected charger session.
+
+A failed attempt removes the address and redirect it created. A successful attempt records `discovery.json`, `address.json`, and `redirect.json` and leaves that exact network adaptation active so the charger can continue reconnecting. New runs refuse stale state instead of stacking another claim or redirect.
+
+Explicit cleanup removes only discovery-owned state:
+
+```sh
+sudo python -m field.discover cleanup --state-dir /run/ocpp-discover
+```
+
+The installer and `ocpp-discover.service` are intentionally deferred to the next chunk.
+
+The passive-only form remains available for diagnostics:
 
 ```sh
 python -m field.discover
 python -m field.discover --interface eno1
 ```
-
-The address-claim primitive used by later discovery stages is deliberately additive: after root authorization it can add only the discovered target as a `/32` secondary IPv4 address and records that exact ownership in `address.json`. Cleanup removes only the address named in that receipt and never replaces or flushes pre-existing interface addresses.
-
-The current CLI remains passive-only. Automatic address claiming, service installation, and boot-time discovery orchestration are intentionally left for later discovery chunks.
 
 ## Plaintext OCPP redirect helper
 
@@ -49,7 +69,7 @@ Before any mutation, render and syntax-check the exact nftables candidate:
 python -m field.redirect validate /path/to/redirect-run
 ```
 
-Validation rechecks the receipt and requires the destination set to match the captured WebSocket request evidence exactly. It renders one dedicated `table ip ocpp_field_redirect`, scoped to the captured input interface, charger source IPv4, observed destination IPv4 set, TCP/80, and local listener port, then checks it with `nft -c`.
+Validation rechecks the receipt and requires the destination set to match the captured WebSocket request evidence exactly. It renders one dedicated `table ip ocpp_field_redirect`, scoped to the captured input interface, charger source IPv4, observed destination IPv4 set, the observed destination TCP port, and local listener port, then checks it with `nft -c`.
 
 Applying and removing the temporary redirect are explicit root-only operations:
 
