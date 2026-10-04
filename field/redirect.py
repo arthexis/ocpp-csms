@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import re
 import shutil
 import socket
@@ -255,27 +256,79 @@ def render_ruleset(receipt: RedirectReceipt) -> str:
     )
 
 
-def validate_ruleset(receipt: RedirectReceipt) -> str:
-    ruleset = render_ruleset(receipt)
+def _require_nft() -> None:
     if shutil.which("nft") is None:
         raise RuntimeError("nft_not_found")
-    result = subprocess.run(
-        ["nft", "-c", "-f", "-"],
-        input=ruleset,
+
+
+def _run_nft(command: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+    _require_nft()
+    return subprocess.run(
+        command,
+        input=input_text,
         text=True,
         capture_output=True,
         check=False,
     )
+
+
+def _nft_error(result: subprocess.CompletedProcess[str], fallback: str) -> RuntimeError:
+    detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else fallback
+    return RuntimeError(detail)
+
+
+def validate_ruleset(receipt: RedirectReceipt) -> str:
+    ruleset = render_ruleset(receipt)
+    result = _run_nft(["nft", "-c", "-f", "-"], input_text=ruleset)
     if result.returncode != 0:
-        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "nft_validation_failed"
-        raise RuntimeError(detail)
+        raise _nft_error(result, "nft_validation_failed")
     return ruleset
+
+
+def require_root() -> None:
+    if os.geteuid() != 0:
+        raise RuntimeError("root_required")
+
+
+def table_exists() -> bool:
+    result = _run_nft(["nft", "list", "table", "ip", _TABLE])
+    if result.returncode == 0:
+        return True
+    stderr = result.stderr.lower()
+    if "no such file or directory" in stderr or "not found" in stderr:
+        return False
+    raise _nft_error(result, "nft_table_status_failed")
+
+
+def apply_redirect(run_dir: str | Path) -> str:
+    require_root()
+    receipt = load_receipt(run_dir)
+    if not listener_available(receipt.listen_port):
+        raise RuntimeError("listener_unavailable")
+    if table_exists():
+        raise RuntimeError("redirect_table_exists")
+
+    ruleset = validate_ruleset(receipt)
+    result = _run_nft(["nft", "-f", "-"], input_text=ruleset)
+    if result.returncode != 0:
+        raise _nft_error(result, "nft_apply_failed")
+    return ruleset
+
+
+def remove_redirect(run_dir: str | Path) -> None:
+    require_root()
+    load_receipt(run_dir)
+    if not table_exists():
+        raise RuntimeError("redirect_table_not_found")
+    result = _run_nft(["nft", "delete", "table", "ip", _TABLE])
+    if result.returncode != 0:
+        raise _nft_error(result, "nft_remove_failed")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m field.redirect",
-        description="Passive field discovery and validation for plaintext OCPP WebSocket redirects.",
+        description="Field discovery, validation, and explicit temporary redirects for plaintext OCPP WebSockets.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     capture_parser = subparsers.add_parser("capture", help="Observe a bounded passive capture and write redirect.json")
@@ -285,6 +338,10 @@ def build_parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--run-dir", required=True)
     validate_parser = subparsers.add_parser("validate", help="Render redirect.json as nftables rules and check with nft -c")
     validate_parser.add_argument("run_dir")
+    apply_parser = subparsers.add_parser("apply", help="Install the validated temporary redirect table")
+    apply_parser.add_argument("run_dir")
+    remove_parser = subparsers.add_parser("remove", help="Delete only the temporary redirect table")
+    remove_parser.add_argument("run_dir")
     return parser
 
 
@@ -305,6 +362,22 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc))
             return 1
         print(ruleset, end="")
+        return 0
+    if args.command == "apply":
+        try:
+            ruleset = apply_redirect(args.run_dir)
+        except (RuntimeError, ValueError) as exc:
+            print(str(exc))
+            return 1
+        print(ruleset, end="")
+        return 0
+    if args.command == "remove":
+        try:
+            remove_redirect(args.run_dir)
+        except (RuntimeError, ValueError) as exc:
+            print(str(exc))
+            return 1
+        print(f"removed table ip {_TABLE}")
         return 0
     return 2
 
