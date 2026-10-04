@@ -41,6 +41,7 @@ class RedirectReceipt:
     destination_ips: list[str]
     requests: list[WebSocketRequest]
     captured_at: str
+    destination_port: int = 80
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -111,6 +112,7 @@ def parse_capture(text: str, *, interface: str, listen_port: int, captured_at: s
         destination_ips=destinations,
         requests=requests,
         captured_at=captured_at or datetime.now(timezone.utc).isoformat(),
+        destination_port=80,
     )
 
 
@@ -196,6 +198,7 @@ def receipt_from_json(payload: object) -> RedirectReceipt:
             destination_ips=[str(item) for item in destinations_payload],
             requests=requests,
             captured_at=str(payload["captured_at"]),
+            destination_port=int(payload.get("destination_port", 80)),
         )
     except (KeyError, TypeError, ValueError):
         raise ValueError("invalid_redirect_receipt") from None
@@ -229,6 +232,8 @@ def validate_receipt(receipt: RedirectReceipt) -> None:
         raise ValueError("invalid_interface")
     if not 1 <= receipt.listen_port <= 65535:
         raise ValueError("invalid_listen_port")
+    if not 1 <= receipt.destination_port <= 65535:
+        raise ValueError("invalid_destination_port")
     _ipv4(receipt.source_ip, "invalid_source_ip")
     if not receipt.destination_ips:
         raise ValueError("no_destination_ips")
@@ -250,7 +255,7 @@ def render_ruleset(receipt: RedirectReceipt) -> str:
         "  chain prerouting {\n"
         "    type nat hook prerouting priority dstnat; policy accept;\n"
         f'    iifname "{receipt.interface}" ip saddr {receipt.source_ip} '
-        f"ip daddr {{ {destinations} }} tcp dport 80 redirect to :{receipt.listen_port}\n"
+        f"ip daddr {{ {destinations} }} tcp dport {receipt.destination_port} redirect to :{receipt.listen_port}\n"
         "  }\n"
         "}\n"
     )
@@ -263,13 +268,7 @@ def _require_nft() -> None:
 
 def _run_nft(command: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     _require_nft()
-    return subprocess.run(
-        command,
-        input=input_text,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    return subprocess.run(command, input=input_text, text=True, capture_output=True, check=False)
 
 
 def _nft_error(result: subprocess.CompletedProcess[str], fallback: str) -> RuntimeError:
