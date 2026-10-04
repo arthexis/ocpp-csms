@@ -124,3 +124,24 @@ def test_preflight_ignores_stale_connected_event_when_server_is_stopped(tmp_path
     assert result.allowed is True
     assert result.mode == "normal"
     assert result.connected_chargers == ()
+
+
+def test_unversioned_existing_database_is_blocked(tmp_path, monkeypatch):
+    (tmp_path / DATABASE_FILENAME).touch()
+    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: False)
+
+    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+
+    assert result.allowed is False
+    assert "unversioned" in result.reason
+
+
+def test_newer_database_schema_is_blocked(tmp_path, monkeypatch):
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
+        connection.execute("PRAGMA user_version = 99")
+    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: False)
+
+    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+
+    assert result.allowed is False
+    assert "newer than supported" in result.reason
