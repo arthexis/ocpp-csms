@@ -172,6 +172,7 @@ def test_receipt_validation_rejects_values_that_could_widen_or_inject_rules():
         (receipt(destination_ips=[]), "no_destination_ips"),
         (receipt(destination_ips=["203.0.113.10", "0.0.0.0/0"]), "invalid_destination_ip"),
         (receipt(listen_port=70000), "invalid_listen_port"),
+        (receipt(requests=[]), "no_websocket_requests"),
     ]
 
     for candidate, message in invalid:
@@ -179,14 +180,13 @@ def test_receipt_validation_rejects_values_that_could_widen_or_inject_rules():
             redirect.render_ruleset(candidate)
 
 
-def test_receipt_validation_rejects_request_destination_outside_captured_set():
-    candidate = receipt(
-        destination_ips=["203.0.113.10"],
-        requests=[redirect.WebSocketRequest("203.0.113.99", "other.example", "/ocpp-j/CHARGER")],
-    )
+def test_receipt_validation_requires_destination_set_to_match_capture_evidence_exactly():
+    widened = receipt(destination_ips=["203.0.113.10", "203.0.113.11", "203.0.113.99"])
+    missing = receipt(destination_ips=["203.0.113.10"])
 
-    with pytest.raises(ValueError, match="request_destination_not_captured"):
-        redirect.render_ruleset(candidate)
+    for candidate in (widened, missing):
+        with pytest.raises(ValueError, match="destination_evidence_mismatch"):
+            redirect.render_ruleset(candidate)
 
 
 def test_load_receipt_round_trips_capture_evidence(tmp_path):
@@ -196,11 +196,17 @@ def test_load_receipt_round_trips_capture_evidence(tmp_path):
     assert redirect.load_receipt(tmp_path) == candidate
 
 
-def test_load_receipt_rejects_missing_or_invalid_evidence(tmp_path):
+def test_load_receipt_rejects_missing_invalid_or_wrong_shaped_evidence(tmp_path):
     with pytest.raises(RuntimeError, match="redirect_receipt_not_found"):
         redirect.load_receipt(tmp_path)
 
     (tmp_path / "redirect.json").write_text("not-json")
+    with pytest.raises(ValueError, match="invalid_redirect_receipt"):
+        redirect.load_receipt(tmp_path)
+
+    payload = receipt().to_json()
+    payload["destination_ips"] = "203.0.113.10"
+    (tmp_path / "redirect.json").write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="invalid_redirect_receipt"):
         redirect.load_receipt(tmp_path)
 
@@ -224,7 +230,6 @@ def test_validate_ruleset_uses_nft_check_without_applying(monkeypatch):
 
     assert calls["command"] == ["nft", "-c", "-f", "-"]
     assert calls["input"] == ruleset
-    assert "add table" not in calls["command"]
 
 
 def test_validate_ruleset_reports_missing_nft_and_validation_failure(monkeypatch):
