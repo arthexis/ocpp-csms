@@ -50,7 +50,7 @@ Install the appliance together with discovery:
 sh install.sh --with-discover
 ```
 
-This keeps the normal CSMS unprivileged and installs a separate root `ocpp-discover.service`. At boot, Discover first gives the charger a short chance to connect normally. If no charger appears, it can passively identify the charger's expected IPv4 identity, temporarily claim that address on the configured Ethernet interface, observe that charger's plaintext WebSocket destination and port, install a narrow nftables redirect to the local CSMS, and stop once the CSMS reports a real charger session.
+This keeps the normal CSMS unprivileged and installs a separate root `ocpp-discover.service`. At boot, Discover first gives the charger a short chance to connect normally. If no charger appears, it passively watches for validated plaintext WebSocket traffic to an IPv4 address already owned by the selected Ethernet interface. When that existing endpoint is visible, Discover applies only the narrow source/destination/port redirect needed to reach the local CSMS and does not claim another address. If no usable local endpoint is visible, it falls back to repeated unresolved-ARP discovery, temporarily claims only that exact IPv4 address as an additive `/32`, observes the charger's destination and port, installs the narrow redirect, and stops once the CSMS reports a real charger session.
 
 Discover defaults to `eth0`. Its standalone management surface is:
 
@@ -80,7 +80,7 @@ sh install.sh --without-discover    # disable/remove it
 sh install.sh                       # preserve its current enabled/disabled state
 ```
 
-Discovery only redirects **validated plaintext HTTP WebSocket Upgrade traffic**. TLS/WSS traffic is detected as opaque and refused rather than guessed. Successful discovery leaves only the exact address and redirect required for reconnects; failed attempts roll back the state they created. Details and field-only primitives live in `field/README.md`.
+Discovery only redirects **validated plaintext HTTP WebSocket Upgrade traffic**. TLS/WSS traffic is detected as opaque and refused rather than guessed. The invariant is to apply the minimum network mutation necessary: an existing host address is never re-claimed or removed, while the ARP fallback owns and later cleans only the exact `/32` it added. Failed attempts roll back only state created by that attempt. Details and field-only primitives live in `field/README.md`.
 
 ## Operating model
 
@@ -325,7 +325,7 @@ CI exercises:
 - Debian 12 Bookworm / Python 3.11 / ARM64 as the primary appliance target;
 - Debian 13 / Python 3.13 / ARM64 as the compatibility target.
 
-Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Discovery tests cover passive ARP selection, additive address ownership, charger-specific WebSocket destination discovery, port-aware nftables redirects, successful state preservation, rollback on failed attempts, cleanup, and the already-connected fast path.
+Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
 
 ## Source layout
 
