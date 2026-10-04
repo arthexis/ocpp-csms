@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from ocpp_csms.app import run_profile
 
 
@@ -18,6 +20,7 @@ def schedule(connector, status="Accepted", limit=60000):
 
 
 def fallback(status="Accepted"):
+    second_status = "Accepted" if status == "Accepted" else "Rejected"
     return {
         "ok": True,
         "response": {
@@ -26,25 +29,33 @@ def fallback(status="Accepted"):
             "compatibility_fallback": "physical_connectors",
             "schedules": [
                 {"connector_id": 1, "response": schedule(1)},
-                {"connector_id": 2, "response": schedule(2, "Accepted" if status == "Accepted" else "Rejected")},
+                {"connector_id": 2, "response": schedule(2, second_status)},
             ],
         },
     }
 
 
-def test_profile_composite_fallback_renders_notice_and_each_schedule(
-    cli_parser, profile_control, capsys
+@pytest.mark.parametrize(
+    ("status", "exit_code", "expected_fragments"),
+    [
+        ("Accepted", 0, ("Connector 1", "Connector 2", "60000 W")),
+        ("Rejected", 1, ("Connector 1", "60000 W", "Connector 2", "Rejected")),
+    ],
+)
+def test_profile_composite_fallback_renders_physical_evidence(
+    cli_parser, profile_control, capsys, status, exit_code, expected_fragments
 ):
-    profile_control.response = fallback()
+    profile_control.response = fallback(status)
     args = cli_parser.parse_args(["profile", "composite"])
 
-    assert run_profile(args) == 0
+    assert run_profile(args) == exit_code
     output = capsys.readouterr().out
     assert "does not support aggregate composite schedule on connector 0" in output
     assert "Showing physical connectors instead" in output
-    assert "Connector 1" in output
-    assert "Connector 2" in output
-    assert output.count("60000 W") == 2
+    for fragment in expected_fragments:
+        assert fragment in output
+    if status == "Accepted":
+        assert output.count("60000 W") == 2
 
 
 def test_profile_composite_fallback_json_preserves_structured_payload(
@@ -56,16 +67,5 @@ def test_profile_composite_fallback_json_preserves_structured_payload(
     assert run_profile(args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["compatibility_fallback"] == "physical_connectors"
+    assert payload["requested_connector"] == 0
     assert [item["connector_id"] for item in payload["schedules"]] == [1, 2]
-
-
-def test_profile_composite_partial_fallback_renders_evidence_but_fails(
-    cli_parser, profile_control, capsys
-):
-    profile_control.response = fallback("Rejected")
-    args = cli_parser.parse_args(["profile", "composite"])
-
-    assert run_profile(args) == 1
-    output = capsys.readouterr().out
-    assert "Connector 1" in output and "60000 W" in output
-    assert "Connector 2" in output and "Rejected" in output
