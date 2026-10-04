@@ -23,7 +23,6 @@ def help_text(script: str) -> str:
 
 def test_base_service_runs_unprivileged_and_restarts():
     unit = read("systemd/ocpp-csms.service.in")
-
     assert "User=@USER@" in unit
     assert "Group=@GROUP@" in unit
     assert 'Environment="HOME=@HOME@"' in unit
@@ -34,46 +33,58 @@ def test_base_service_runs_unprivileged_and_restarts():
 
 def test_base_installer_help_explains_optional_discovery_and_rollover():
     help_output = help_text("install.sh")
-
     assert "--host HOST" in help_output
     assert "--port PORT" in help_output
     assert "--rollover" in help_output
     assert "idle chargers" in help_output
     assert "never overrides" in help_output
+    assert "staged cutover" in help_output
     assert "--with-discover" in help_output
-    assert "Also install and enable OCPP Discover" in help_output
     assert "--without-discover" in help_output
     assert "preserved" in help_output
 
 
-def test_base_installer_runs_read_only_preflight_before_mutation():
+def test_base_installer_stages_before_disruptive_cutover():
     installer = read("install.sh")
-
-    preflight = installer.index("ocpp_csms.install_preflight")
-    create_venv = installer.index('python3 -m venv "$VENV"')
-    create_data_dir = installer.index('mkdir -p "$BIN_DIR" "$DATA_DIR"')
+    first_preflight = installer.index("# First safety gate")
+    stage_venv = installer.index('python3 -m venv "$STAGE_VENV"')
+    schema_check = installer.index("schema-check")
+    final_preflight = installer.index("# Second safety gate")
+    stop_service = installer.index('sudo systemctl stop "$SERVICE_NAME"')
+    schema_upgrade = installer.index("schema-upgrade")
+    promote = installer.index('mv "$STAGE_VENV" "$VENV"')
     install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
+    reconnect = installer.index("wait-reconnect")
 
-    assert 'ROLLOVER=0' in installer
-    assert 'ROLLOVER=1' in installer
-    assert preflight < create_venv < create_data_dir < install_service
+    assert first_preflight < stage_venv < schema_check < final_preflight
+    assert final_preflight < stop_service < schema_upgrade < promote < install_service < reconnect
+    assert 'STAGE_VENV="$PREFIX/venv.next"' in installer
+    assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in installer
 
 
-def test_base_installer_preserves_and_delegates_discovery_state():
+def test_base_installer_keeps_active_charge_gate_and_conditional_rollback():
     installer = read("install.sh")
+    assert "run_preflight --json" in installer
+    assert 'if [ "$SCHEMA_ACTION" != upgrade ]' in installer
+    assert "automatic rollback is intentionally disabled" in installer
+    assert 'mv "$PREVIOUS_VENV" "$VENV"' in installer
+    assert 'mv "$VENV" "$VENV.failed"' in installer
 
+
+def test_base_installer_preserves_and_delegates_discovery_after_cutover():
+    installer = read("install.sh")
+    reconnect = installer.index("wait-reconnect")
+    discover = installer.index('sh "$ROOT/discover.sh" --install')
     assert 'DISCOVER_MODE=preserve' in installer
     assert 'DISCOVER_MODE=install' in installer
     assert 'DISCOVER_MODE=uninstall' in installer
-    assert 'sh "$ROOT/discover.sh" --install' in installer
+    assert reconnect < discover
     assert 'sh "$ROOT/discover.sh" --uninstall' in installer
-    assert 'sudo systemctl enable --now "$SERVICE_NAME"' in installer
-    assert '"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null' in installer
+    assert 'ocpp_csms.install_preflight --data-dir "$DATA_DIR" --rollover' in installer
 
 
 def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
     installer = read("install.sh")
-
     assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
     assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
     assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
@@ -83,12 +94,10 @@ def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_
     assert 'zsh) rc="$HOME/.zshrc"' in installer
     assert 'fish) rc="$HOME/.config/fish/config.fish"' in installer
     assert '*) rc="$HOME/.profile"' in installer
-    assert "Open a new shell, or source your shell configuration" in installer
 
 
 def test_discover_help_exposes_runtime_and_install_surfaces():
     help_output = help_text("discover.sh")
-
     assert "Run OCPP network discovery immediately by default" in help_output
     assert "--interface IFACE" in help_output
     assert "--install" in help_output
@@ -98,7 +107,6 @@ def test_discover_help_exposes_runtime_and_install_surfaces():
 
 def test_discover_service_is_root_boot_helper_that_retries_only_failures():
     unit = read("systemd/ocpp-discover.service.in")
-
     assert "Description=OCPP Discover" in unit
     assert "After=network-online.target ocpp-csms.service" in unit
     assert "Type=oneshot" in unit
@@ -115,7 +123,6 @@ def test_discover_service_is_root_boot_helper_that_retries_only_failures():
 
 def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
     script = read("discover.sh")
-
     assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
     assert "sudo apt-get install -y tcpdump nftables iproute2" in script
     assert "Automatic dependency installation is supported only on Debian" in script
