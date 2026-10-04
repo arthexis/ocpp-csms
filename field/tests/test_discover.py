@@ -31,8 +31,7 @@ def candidate():
 
 
 def test_discover_candidate_finds_one_repeated_unanswered_target():
-    found = discover.discover_candidate(REQUEST + SECOND_REQUEST)
-    assert found == discover.DiscoveryCandidate("eth0", "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
+    assert discover.discover_candidate(REQUEST + SECOND_REQUEST) == candidate()
 
 
 def test_discover_candidate_ignores_answered_target():
@@ -78,21 +77,25 @@ def test_capture_arp_uses_default_bounded_tcpdump_shape(monkeypatch):
 
     class Process:
         returncode = None
+
         def communicate(self, timeout=None):
             calls.setdefault("timeouts", []).append(timeout)
             if len(calls["timeouts"]) == 1:
                 raise discover.subprocess.TimeoutExpired("tcpdump", timeout)
             self.returncode = -15
             return REQUEST + SECOND_REQUEST, ""
-        def terminate(self): calls["terminated"] = True
-        def kill(self): calls["killed"] = True
 
-    monkeypatch.setattr(discover.shutil, "which", lambda command: "/usr/bin/tcpdump")
-    monkeypatch.setattr(discover.subprocess, "Popen", lambda command, **kwargs: calls.setdefault("command", command) or Process())
-    # Avoid truthy setdefault return selecting the command list instead of Process.
+        def terminate(self):
+            calls["terminated"] = True
+
+        def kill(self):
+            calls["killed"] = True
+
     def popen(command, **kwargs):
         calls["command"] = command
         return Process()
+
+    monkeypatch.setattr(discover.shutil, "which", lambda command: "/usr/bin/tcpdump")
     monkeypatch.setattr(discover.subprocess, "Popen", popen)
 
     assert discover.capture_arp("eth0", 3) == REQUEST + SECOND_REQUEST
@@ -110,9 +113,11 @@ def test_capture_arp_reports_missing_tcpdump(monkeypatch):
 
 def test_cli_defaults_to_eth0_and_prints_candidate(monkeypatch, capsys):
     seen = {}
+
     def fake_discover(*, interface, seconds, min_requests):
         seen.update(interface=interface, seconds=seconds, min_requests=min_requests)
         return candidate()
+
     monkeypatch.setattr(discover, "discover", fake_discover)
 
     assert discover.main([]) == 0
@@ -122,10 +127,12 @@ def test_cli_defaults_to_eth0_and_prints_candidate(monkeypatch, capsys):
 
 def test_interface_addresses_reads_only_ipv4_on_requested_interface(monkeypatch):
     calls = []
+
     class Result:
         returncode = 0
         stderr = ""
         stdout = json.dumps([{"addr_info": [{"family": "inet", "local": "10.0.0.5"}, {"family": "inet6", "local": "fe80::1"}]}])
+
     monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
 
     assert discover.interface_addresses("eth9") == {"10.0.0.5"}
@@ -148,13 +155,16 @@ def test_claim_address_records_ownership_before_exact_ip_add(tmp_path, monkeypat
     calls = []
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
     monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.0.0.5"})
+
     class Result:
         returncode = 0
         stderr = ""
+
     def run_ip(command):
         calls.append(command)
         assert (tmp_path / "address.json").exists()
         return Result()
+
     monkeypatch.setattr(discover, "_run_ip", run_ip)
 
     claim = discover.claim_address(candidate(), tmp_path)
@@ -166,9 +176,11 @@ def test_claim_address_records_ownership_before_exact_ip_add(tmp_path, monkeypat
 def test_claim_address_removes_receipt_when_ip_add_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
     monkeypatch.setattr(discover, "interface_addresses", lambda interface: set())
+
     class Result:
         returncode = 2
         stderr = "RTNETLINK answers: File exists"
+
     monkeypatch.setattr(discover, "_run_ip", lambda command: Result())
 
     with pytest.raises(RuntimeError, match="File exists"):
@@ -188,9 +200,11 @@ def test_cleanup_removes_only_owned_address_and_receipt(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
     monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.0.0.5", "172.16.0.9", "192.168.129.1"})
+
     class Result:
         returncode = 0
         stderr = ""
+
     monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
 
     assert discover.cleanup_address(tmp_path) == discover.AddressClaim("eth0", "192.168.129.1")
