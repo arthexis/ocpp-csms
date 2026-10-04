@@ -14,6 +14,17 @@ Field-harness self-tests live under `field/tests/` and run explicitly with:
 python -m pytest field/tests
 ```
 
+## Passive Ethernet discovery
+
+`field.discover` starts with a passive ARP observation on `eth0` by default. It requires repeated unanswered requests from one requester before producing a discovery candidate and refuses ambiguity.
+
+```sh
+python -m field.discover
+python -m field.discover --interface eno1
+```
+
+The address-claim primitive used by later discovery stages is deliberately additive: after root authorization it can add only the discovered target as a `/32` secondary IPv4 address and records that exact ownership in `address.json`. Cleanup removes only the address named in that receipt and never replaces or flushes pre-existing interface addresses. Installer/service integration and automatic mutation are intentionally left for later discovery chunks.
+
 ## Plaintext OCPP redirect helper
 
 Issue #53 uses a field-only helper for discovering and temporarily redirecting one observed plaintext OCPP WebSocket flow. It does not configure the host's gateway, DHCP, routing, NetworkManager, or persistent firewall state.
