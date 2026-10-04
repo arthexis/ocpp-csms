@@ -6,50 +6,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ocpp_csms.schema import (
+    CURRENT_SCHEMA_VERSION,
+    DATABASE_FILENAME,
+    create_current_schema,
+    inspect_schema,
+    require_supported_schema,
+)
 from ocpp_csms.time import utc_now_iso
-
-DATABASE_FILENAME = "ocpp-csms.sqlite3"
-_SCHEMA_VERSION = 2
-
-_DERIVED_SCHEMA = """
-CREATE TABLE IF NOT EXISTS transactions (
-    transaction_id INTEGER PRIMARY KEY,
-    charger_id TEXT NOT NULL,
-    connector_id INTEGER,
-    id_tag TEXT,
-    meter_start INTEGER,
-    started_at TEXT,
-    start_received_at TEXT,
-    meter_stop INTEGER,
-    stopped_at TEXT,
-    stop_received_at TEXT,
-    state TEXT NOT NULL,
-    last_activity_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_transactions_charger_state
-    ON transactions (charger_id, state, start_received_at);
-CREATE INDEX IF NOT EXISTS idx_transactions_connector_state
-    ON transactions (charger_id, connector_id, state);
-
-CREATE TABLE IF NOT EXISTS connector_status (
-    charger_id TEXT NOT NULL,
-    connector_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    error_code TEXT,
-    event_timestamp TEXT NOT NULL,
-    received_at TEXT NOT NULL,
-    PRIMARY KEY (charger_id, connector_id)
-);
-
-CREATE VIEW IF NOT EXISTS transaction_summary AS
-SELECT
-    transaction_id, charger_id, connector_id, id_tag,
-    started_at, stopped_at, state, meter_start, meter_stop,
-    CASE WHEN meter_start IS NOT NULL AND meter_stop IS NOT NULL
-         THEN meter_stop - meter_start END AS energy_wh,
-    last_activity_at
-FROM transactions;
-"""
 
 
 def _timestamp(value: str) -> datetime:
@@ -71,49 +35,11 @@ class EventStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
-            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version > _SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"events database schema {version} is newer than supported {_SCHEMA_VERSION}"
-                )
-            if version == 0:
-                connection.executescript(
-                    """
-                    CREATE TABLE events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        received_at TEXT NOT NULL,
-                        charger_id TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        direction TEXT NOT NULL,
-                        transaction_id INTEGER,
-                        id_tag TEXT,
-                        charger_timestamp TEXT,
-                        payload_json TEXT NOT NULL
-                    );
-                    CREATE INDEX idx_events_charger_time
-                        ON events (charger_id, received_at);
-                    CREATE INDEX idx_events_transaction
-                        ON events (transaction_id);
-                    CREATE INDEX idx_events_card
-                        ON events (id_tag);
-
-                    CREATE TABLE runtime_events (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        occurred_at TEXT NOT NULL,
-                        event TEXT NOT NULL,
-                        charger_id TEXT,
-                        details_json TEXT
-                    );
-                    CREATE INDEX idx_runtime_events_time
-                        ON runtime_events (occurred_at);
-                    CREATE INDEX idx_runtime_events_charger_time
-                        ON runtime_events (charger_id, occurred_at);
-                    """
-                )
-            if version < 2:
-                connection.executescript(_DERIVED_SCHEMA)
-                connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+        schema = inspect_schema(self.data_dir)
+        if not schema.exists:
+            create_current_schema(self.data_dir)
+            return
+        require_supported_schema(schema)
 
     def record_ocpp(
         self,
