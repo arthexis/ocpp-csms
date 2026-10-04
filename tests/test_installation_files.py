@@ -55,6 +55,21 @@ def test_base_installer_preserves_and_delegates_discovery_state():
     assert '"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null' in installer
 
 
+def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
+    installer = read("install.sh")
+
+    assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
+    assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
+    assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
+    assert 'ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"' in installer
+    assert "ensure_user_bin_on_path" in installer
+    assert 'bash) rc="$HOME/.bashrc"' in installer
+    assert 'zsh) rc="$HOME/.zshrc"' in installer
+    assert 'fish) rc="$HOME/.config/fish/config.fish"' in installer
+    assert '*) rc="$HOME/.profile"' in installer
+    assert "Open a new shell, or source your shell configuration" in installer
+
+
 def test_discover_help_exposes_runtime_and_install_surfaces():
     help_output = help_text("discover.sh")
 
