@@ -139,6 +139,31 @@ def test_interface_addresses_reads_only_ipv4_on_requested_interface(monkeypatch)
     assert calls == [["ip", "-j", "address", "show", "dev", "eth9"]]
 
 
+def test_host_addresses_reads_ipv4_across_all_interfaces(monkeypatch):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = json.dumps(
+            [
+                {"ifname": "eth0", "addr_info": [{"family": "inet", "local": "192.168.129.10"}]},
+                {
+                    "ifname": "wlan0",
+                    "addr_info": [
+                        {"family": "inet", "local": "10.42.0.1"},
+                        {"family": "inet6", "local": "fe80::1"},
+                    ],
+                },
+            ]
+        )
+
+    monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
+
+    assert discover.host_addresses() == {"192.168.129.10", "10.42.0.1"}
+    assert calls == [["ip", "-j", "address", "show"]]
+
+
 def test_claim_address_requires_root_and_refuses_preexisting_address(tmp_path, monkeypatch):
     monkeypatch.setattr(discover.os, "geteuid", lambda: 1000)
     with pytest.raises(RuntimeError, match="root_required"):
