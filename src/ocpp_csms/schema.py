@@ -80,6 +80,7 @@ FROM transactions;
 """
 
 CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL
+_SUPPORTED_UPGRADES = {1: 2}
 
 
 @dataclass(frozen=True)
@@ -125,4 +126,67 @@ def require_supported_schema(info: SchemaInfo) -> int:
         raise RuntimeError(
             f"events database schema {info.version} is newer than supported {CURRENT_SCHEMA_VERSION}"
         )
+    if info.version < CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"events database schema {info.version} is older than required {CURRENT_SCHEMA_VERSION}; explicit upgrade required"
+        )
     return info.version
+
+
+def can_upgrade_schema(info: SchemaInfo) -> bool:
+    """Return whether this exact historical schema has a defined upgrade path."""
+    return bool(
+        info.exists
+        and info.version is not None
+        and _SUPPORTED_UPGRADES.get(info.version) == CURRENT_SCHEMA_VERSION
+    )
+
+
+def schema_backup_path(info: SchemaInfo) -> Path:
+    if not info.exists or info.version is None:
+        raise RuntimeError("events database does not exist")
+    return info.path.with_name(f"{info.path.name}.schema-{info.version}.bak")
+
+
+def _backup_database(info: SchemaInfo) -> Path:
+    backup = schema_backup_path(info)
+    if backup.exists():
+        raise RuntimeError(f"schema backup already exists: {backup}")
+    source = sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)
+    try:
+        with sqlite3.connect(backup) as destination:
+            source.backup(destination)
+    finally:
+        source.close()
+    return backup
+
+
+def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
+    """Upgrade a known historical schema after first making a SQLite-safe backup."""
+    info = inspect_schema(data_dir)
+    if not info.exists or info.version is None:
+        raise RuntimeError("events database does not exist")
+    if info.version == CURRENT_SCHEMA_VERSION:
+        return info
+    if info.version > CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"events database schema {info.version} is newer than supported {CURRENT_SCHEMA_VERSION}"
+        )
+    if not can_upgrade_schema(info):
+        raise RuntimeError(
+            f"no supported schema upgrade from {info.version} to {CURRENT_SCHEMA_VERSION}"
+        )
+
+    _backup_database(info)
+    try:
+        with sqlite3.connect(info.path) as connection:
+            if info.version == 1:
+                connection.executescript(_SCHEMA_2_ADDITIONS_SQL)
+            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+    except Exception:
+        # Keep the backup as evidence/recovery material if the upgrade fails.
+        raise
+
+    upgraded = inspect_schema(data_dir)
+    require_supported_schema(upgraded)
+    return upgraded
