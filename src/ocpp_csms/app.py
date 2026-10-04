@@ -320,7 +320,7 @@ def _schedule_value(mapping: dict[str, object], snake: str, camel: str) -> objec
     return mapping.get(snake, mapping.get(camel))
 
 
-def _format_composite_schedule(payload: dict[str, object]) -> str:
+def _format_single_composite_schedule(payload: dict[str, object]) -> str:
     status = payload.get("status")
     if status != "Accepted":
         return str(status or "Unknown")
@@ -344,6 +344,27 @@ def _format_composite_schedule(payload: dict[str, object]) -> str:
         if phases is not None:
             line += f"\t{phases} phase(s)"
         lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_composite_schedule(payload: dict[str, object]) -> str:
+    if payload.get("compatibility_fallback") != "physical_connectors":
+        return _format_single_composite_schedule(payload)
+    schedules = payload.get("schedules")
+    if not isinstance(schedules, list):
+        raise ValueError("invalid composite schedule fallback response")
+    lines = [
+        "Charger does not support aggregate composite schedule on connector 0.",
+        "Showing physical connectors instead.",
+    ]
+    for item in schedules:
+        if not isinstance(item, dict):
+            raise ValueError("invalid composite schedule fallback response")
+        connector_id = item.get("connector_id")
+        response = item.get("response")
+        if not isinstance(response, dict):
+            raise ValueError("invalid composite schedule fallback response")
+        lines.extend(["", f"Connector {connector_id}", _format_single_composite_schedule(response)])
     return "\n".join(lines)
 
 
