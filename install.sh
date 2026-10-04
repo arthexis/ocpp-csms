@@ -20,9 +20,25 @@ SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
+DISCOVER_MODE=preserve
 
 usage() {
-    printf 'Usage: sh install.sh [--host HOST] [--port PORT]\n'
+    cat <<'EOF'
+Usage: sh install.sh [--host HOST] [--port PORT] [--with-discover|--without-discover]
+
+Install or update the OCPP CSMS appliance service.
+
+Options:
+  --host HOST          Listener address for the CSMS (default: 0.0.0.0).
+  --port PORT          Listener port for the CSMS (default: 9000).
+  --with-discover      Also install and enable OCPP Discover. Discover can learn the
+                       charger-facing Ethernet address/port at boot and adapt the
+                       local network so plaintext OCPP reaches this CSMS.
+  --without-discover   Disable/uninstall OCPP Discover and clean its owned network state.
+  -h, --help           Show this help.
+
+Without either discovery flag, the existing OCPP Discover enabled/disabled state is preserved.
+EOF
 }
 
 while [ "$#" -gt 0 ]; do
@@ -43,6 +59,16 @@ while [ "$#" -gt 0 ]; do
             ;;
         --port=*)
             PORT=${1#*=}
+            shift
+            ;;
+        --with-discover)
+            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
+            DISCOVER_MODE=install
+            shift
+            ;;
+        --without-discover)
+            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
+            DISCOVER_MODE=uninstall
             shift
             ;;
         -h|--help)
@@ -179,10 +205,27 @@ fi
 }
 "$COMMAND" --data-dir "$DATA_DIR" status >/dev/null
 
+case "$DISCOVER_MODE" in
+    install)
+        OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" \
+            sh "$ROOT/discover.sh" --install
+        ;;
+    uninstall)
+        OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" \
+            sh "$ROOT/discover.sh" --uninstall
+        ;;
+    preserve) ;;
+esac
+
 printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
 printf 'Command: %s\n' "$COMMAND"
 printf 'Data:    %s\n' "$DATA_DIR"
 printf 'Service: %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
+case "$DISCOVER_MODE" in
+    install) printf 'Discover: ocpp-discover.service enabled\n' ;;
+    uninstall) printf 'Discover: disabled/uninstalled\n' ;;
+    preserve) printf 'Discover: existing state preserved\n' ;;
+esac
 printf '\nUseful commands:\n'
 printf '  %s status\n' "$COMMAND"
 printf '  sudo systemctl status %s\n' "$SERVICE_NAME"
