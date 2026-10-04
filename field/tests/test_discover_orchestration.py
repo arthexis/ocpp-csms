@@ -5,6 +5,8 @@ import pytest
 
 from field import discover
 from field.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_csms.events import EventStore
+from ocpp_csms.runtime import write_pid
 
 
 def candidate():
@@ -60,6 +62,19 @@ def test_connected_chargers_uses_live_status(monkeypatch):
         lambda data_dir: {"chargers": [SimpleNamespace(charger_id="A", connected=False), SimpleNamespace(charger_id="B", connected=True)]},
     )
     assert discover.connected_chargers("/data") == ["B"]
+
+
+def test_connected_chargers_ignore_previous_process_history(tmp_path):
+    events = EventStore(tmp_path)
+    events.record_runtime("charger_connected", charger_id="CP1")
+    events.record_runtime("server_started")
+    write_pid(tmp_path)
+
+    assert discover.connected_chargers(tmp_path) == []
+
+    events.record_runtime("charger_connected", charger_id="CP1")
+
+    assert discover.connected_chargers(tmp_path) == ["CP1"]
 
 
 def test_run_exits_during_grace_without_network_tools(tmp_path, monkeypatch):
