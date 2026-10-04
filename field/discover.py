@@ -11,6 +11,8 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from field.redirect import RedirectReceipt, WebSocketRequest
+
 _DEFAULT_INTERFACE = "eth0"
 _DEFAULT_SECONDS = 15.0
 _MIN_REQUESTS = 2
@@ -27,7 +29,18 @@ _ARP_REPLY = re.compile(
     r"ARP.*?Reply (?P<ip>\d+\.\d+\.\d+\.\d+) is-at (?P<mac>[0-9a-f:]{17})",
     re.IGNORECASE,
 )
+_TCP_PACKET = re.compile(
+    r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+IP\s+"
+    r"(?P<src>\d+\.\d+\.\d+\.\d+)\.(?P<src_port>\d+)\s+>\s+"
+    r"(?P<dst>\d+\.\d+\.\d+\.\d+)\.(?P<dst_port>\d+):",
+    re.MULTILINE,
+)
+_GET = re.compile(r"GET\s+(?P<path>\S+)\s+HTTP/1\.[01]", re.IGNORECASE)
+_HOST = re.compile(r"(?im)^Host:\s*(?P<host>\S+)\s*$")
+_UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
+_CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
 _INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+_MAC = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -51,15 +64,12 @@ class AddressClaim:
         return asdict(self)
 
 
-def capture_arp(interface: str, seconds: float) -> str:
+def _bounded_tcpdump(command: list[str], seconds: float) -> str:
     if seconds <= 0:
         raise ValueError("seconds_must_be_positive")
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
 
-    command = ["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         stdout, stderr = process.communicate(timeout=seconds)
@@ -75,6 +85,12 @@ def capture_arp(interface: str, seconds: float) -> str:
         detail = stderr.strip().splitlines()[-1] if stderr.strip() else "capture_failed"
         raise RuntimeError(detail)
     return stdout
+
+
+def capture_arp(interface: str, seconds: float) -> str:
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
+    return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"], seconds)
 
 
 def discover_candidate(
@@ -222,6 +238,111 @@ def cleanup_address(state_dir: str | Path) -> AddressClaim:
             raise _ip_error(result, "address_remove_failed")
     path.unlink()
     return claim
+
+
+def _validate_candidate(candidate: DiscoveryCandidate) -> tuple[str, str]:
+    if not _INTERFACE.fullmatch(candidate.interface):
+        raise ValueError("invalid_interface")
+    if not _MAC.fullmatch(candidate.source_mac):
+        raise ValueError("invalid_source_mac")
+    try:
+        source_ip = ipaddress.ip_address(candidate.source_ip)
+    except ValueError:
+        raise ValueError("invalid_source_ip") from None
+    if source_ip.version != 4:
+        raise ValueError("invalid_source_ip")
+    return candidate.source_mac.lower(), str(source_ip)
+
+
+def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
+    source_mac, source_ip = _validate_candidate(candidate)
+    packet_filter = f"ether src {source_mac} and ip src {source_ip} and tcp"
+    command = ["tcpdump", "-i", candidate.interface, "-l", "-nn", "-s0", "-A", packet_filter]
+    return _bounded_tcpdump(command, seconds)
+
+
+def _tcp_blocks(text: str) -> list[tuple[re.Match[str], str]]:
+    matches = list(_TCP_PACKET.finditer(text))
+    return [
+        (match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)])
+        for index, match in enumerate(matches)
+    ]
+
+
+def parse_tcp_websocket(
+    text: str,
+    candidate: DiscoveryCandidate,
+    *,
+    listen_port: int,
+) -> RedirectReceipt:
+    _, source_ip = _validate_candidate(candidate)
+    if not 1 <= listen_port <= 65535:
+        raise ValueError("invalid_listen_port")
+
+    websocket_candidates: list[tuple[str, int, WebSocketRequest]] = []
+    saw_tls = False
+
+    for packet, payload in _tcp_blocks(text):
+        if packet.group("src") != source_ip:
+            continue
+        destination_port = int(packet.group("dst_port"))
+        if destination_port == 443:
+            saw_tls = True
+            continue
+
+        get = _GET.search(payload)
+        host = _HOST.search(payload)
+        connection = _CONNECTION.search(payload)
+        if not (get and host and _UPGRADE.search(payload) and connection):
+            continue
+        if "upgrade" not in {token.strip().lower() for token in connection.group("value").split(",")}:
+            continue
+
+        destination_ip = packet.group("dst")
+        websocket_candidates.append(
+            (
+                destination_ip,
+                destination_port,
+                WebSocketRequest(destination_ip, host.group("host"), get.group("path")),
+            )
+        )
+
+    if not websocket_candidates:
+        if saw_tls:
+            raise ValueError("secure_or_opaque_traffic")
+        raise ValueError("no_plaintext_websocket_upgrade")
+
+    ports = {port for _, port, _ in websocket_candidates}
+    if len(ports) != 1:
+        raise ValueError("ambiguous_tcp_destinations")
+
+    requests: list[WebSocketRequest] = []
+    seen_requests: set[tuple[str, str, str]] = set()
+    for _, _, request in websocket_candidates:
+        key = (request.destination_ip, request.host, request.path)
+        if key not in seen_requests:
+            seen_requests.add(key)
+            requests.append(request)
+
+    destination_ips = sorted({destination_ip for destination_ip, _, _ in websocket_candidates}, key=ipaddress.ip_address)
+    return RedirectReceipt(
+        interface=candidate.interface,
+        listen_port=listen_port,
+        source_ip=source_ip,
+        destination_ips=destination_ips,
+        requests=requests,
+        captured_at="discovered",
+        destination_port=next(iter(ports)),
+    )
+
+
+def discover_tcp(
+    candidate: DiscoveryCandidate,
+    *,
+    listen_port: int,
+    seconds: float = _DEFAULT_SECONDS,
+) -> RedirectReceipt:
+    return parse_tcp_websocket(capture_tcp(candidate, seconds), candidate, listen_port=listen_port)
 
 
 def build_parser() -> argparse.ArgumentParser:
