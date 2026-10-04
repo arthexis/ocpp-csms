@@ -90,7 +90,6 @@ def _bounded_tcpdump(command: list[str], seconds: float) -> str:
         raise ValueError("seconds_must_be_positive")
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
-
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         stdout, stderr = process.communicate(timeout=seconds)
@@ -101,7 +100,6 @@ def _bounded_tcpdump(command: list[str], seconds: float) -> str:
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
-
     if process.returncode not in {0, -15}:
         detail = stderr.strip().splitlines()[-1] if stderr.strip() else "capture_failed"
         raise RuntimeError(detail)
@@ -114,20 +112,13 @@ def capture_arp(interface: str, seconds: float) -> str:
     return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"], seconds)
 
 
-def discover_candidate(
-    text: str,
-    *,
-    interface: str = _DEFAULT_INTERFACE,
-    min_requests: int = _MIN_REQUESTS,
-) -> DiscoveryCandidate:
+def discover_candidate(text: str, *, interface: str = _DEFAULT_INTERFACE, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
     if min_requests < 1:
         raise ValueError("min_requests_must_be_positive")
     if not _INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
-
     answered: set[str] = set()
     counts: Counter[tuple[str, str, str]] = Counter()
-
     for line in text.splitlines():
         reply = _ARP_REPLY.search(line)
         if reply:
@@ -141,7 +132,6 @@ def discover_candidate(
         if source_ip == target_ip:
             continue
         counts[(request.group("src_mac").lower(), source_ip, target_ip)] += 1
-
     candidates = [
         DiscoveryCandidate(interface, source_mac, source_ip, target_ip, count)
         for (source_mac, source_ip, target_ip), count in counts.items()
@@ -357,12 +347,10 @@ def _write_redirect(state_dir: str | Path, receipt: RedirectReceipt) -> None:
     _redirect_path(state_dir).write_text(json.dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _refuse_stale_state(state_dir: str | Path) -> None:
+def _refuse_stale_files(state_dir: str | Path) -> None:
     root = Path(state_dir).expanduser()
     if any((root / name).exists() for name in (_DISCOVERY_STATE, _ADDRESS_STATE, _REDIRECT_STATE)):
         raise RuntimeError("discovery_state_exists")
-    if redirect_tools.table_exists():
-        raise RuntimeError("redirect_table_exists")
 
 
 def cleanup_discovery(state_dir: str | Path) -> None:
@@ -401,12 +389,13 @@ def run_discovery(
     poll_interval: float = 0.5,
 ) -> DiscoveryResult:
     require_root()
-    _refuse_stale_state(state_dir)
+    _refuse_stale_files(state_dir)
     existing = wait_for_charger(data_dir, grace_seconds, poll_interval)
     if existing:
         return DiscoveryResult("already_connected", existing)
+    if redirect_tools.table_exists():
+        raise RuntimeError("redirect_table_exists")
 
-    candidate: DiscoveryCandidate | None = None
     address_claimed = False
     redirect_applied = False
     try:
