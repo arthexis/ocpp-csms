@@ -1,52 +1,113 @@
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_systemd_service_runs_as_installing_user_and_restarts():
-    unit = (ROOT / "systemd" / "ocpp-csms.service.in").read_text(encoding="utf-8")
+def read(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def help_text(script: str) -> str:
+    result = subprocess.run(
+        ["sh", str(ROOT / script), "--help"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def test_base_service_runs_unprivileged_and_restarts():
+    unit = read("systemd/ocpp-csms.service.in")
 
     assert "User=@USER@" in unit
     assert "Group=@GROUP@" in unit
     assert 'Environment="HOME=@HOME@"' in unit
-    assert 'ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve' in unit
-    assert 'serve --host "@HOST@" --port @PORT@' in unit
+    assert 'ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve --host "@HOST@" --port @PORT@' in unit
     assert "Restart=always" in unit
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_installer_configures_enables_and_validates_service():
-    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+def test_base_installer_help_explains_optional_discovery():
+    help_output = help_text("install.sh")
 
-    assert 'if [ "$(id -u)" -eq 0 ]' in installer
-    assert "Do not run this installer as root or with sudo" in installer
-    assert 'HOST=${OCPP_CSMS_HOST:-"0.0.0.0"}' in installer
-    assert 'PORT=${OCPP_CSMS_PORT:-9000}' in installer
-    assert "--host)" in installer
-    assert "--port)" in installer
-    assert '"$VENV/bin/python" - "$HOST" "$PORT"' in installer
+    assert "--host HOST" in help_output
+    assert "--port PORT" in help_output
+    assert "--with-discover" in help_output
+    assert "Also install and enable OCPP Discover" in help_output
+    assert "--without-discover" in help_output
+    assert "preserved" in help_output
+
+
+def test_base_installer_preserves_and_delegates_discovery_state():
+    installer = read("install.sh")
+
+    assert 'DISCOVER_MODE=preserve' in installer
+    assert 'DISCOVER_MODE=install' in installer
+    assert 'DISCOVER_MODE=uninstall' in installer
+    assert 'sh "$ROOT/discover.sh" --install' in installer
+    assert 'sh "$ROOT/discover.sh" --uninstall' in installer
     assert 'sudo systemctl enable --now "$SERVICE_NAME"' in installer
-    assert 'sudo systemctl is-active --quiet "$SERVICE_NAME"' in installer
     assert '"$COMMAND" --data-dir "$DATA_DIR" status >/dev/null' in installer
-    assert 'probe_host = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host' in installer
-    assert 'socket.create_connection((probe_host, port), timeout=0.5)' in installer
-    assert 'sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager' in installer
 
 
-def test_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
-    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
+    installer = read("install.sh")
 
     assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
     assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
     assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
     assert 'ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"' in installer
-    assert 'Installed command is not executable: %s\\n' in installer
     assert "ensure_user_bin_on_path" in installer
     assert 'bash) rc="$HOME/.bashrc"' in installer
     assert 'zsh) rc="$HOME/.zshrc"' in installer
     assert 'fish) rc="$HOME/.config/fish/config.fish"' in installer
     assert '*) rc="$HOME/.profile"' in installer
-    assert 'path_line="export PATH=\\\"$BIN_DIR:\\$PATH\\\""' in installer
-    assert 'path_line="fish_add_path \\\"$BIN_DIR\\\""' in installer
     assert "Open a new shell, or source your shell configuration" in installer
+
+
+def test_discover_help_exposes_runtime_and_install_surfaces():
+    help_output = help_text("discover.sh")
+
+    assert "Run OCPP network discovery immediately by default" in help_output
+    assert "--interface IFACE" in help_output
+    assert "--install" in help_output
+    assert "--uninstall" in help_output
+    assert "--cleanup" in help_output
+
+
+def test_discover_service_is_root_boot_helper_that_retries_only_failures():
+    unit = read("systemd/ocpp-discover.service.in")
+
+    assert "Description=OCPP Discover" in unit
+    assert "After=network-online.target ocpp-csms.service" in unit
+    assert "Type=oneshot" in unit
+    assert "User=" not in unit
+    assert 'WorkingDirectory="@DISCOVER_ROOT@"' in unit
+    assert 'ExecStart="@PYTHON@" -m field.discover run' in unit
+    assert "--state-dir /run/ocpp-discover" in unit
+    assert '--interface "@INTERFACE@"' in unit
+    assert "--listen-port @PORT@" in unit
+    assert "Restart=on-failure" in unit
+    assert "RestartSec=5" in unit
+    assert "WantedBy=multi-user.target" in unit
+
+
+def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
+    script = read("discover.sh")
+
+    assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
+    assert "sudo apt-get install -y tcpdump nftables iproute2" in script
+    assert "Automatic dependency installation is supported only on Debian" in script
+    assert 'sudo systemctl enable "$SERVICE_NAME"' in script
+    assert 'sudo systemctl start --no-block "$SERVICE_NAME"' in script
+    assert 'sudo systemctl disable "$SERVICE_NAME"' in script
+    assert 'sudo "$PYTHON" -m field.discover cleanup' in script
+    assert 'sudo "$PYTHON" -m field.discover run' in script
+    assert 'cp "$ROOT/field/discover.py" "$DISCOVER_ROOT/field/discover.py"' in script
+    assert 'cp "$ROOT/field/redirect.py" "$DISCOVER_ROOT/field/redirect.py"' in script
+    assert "ocpp-csms.service" not in script

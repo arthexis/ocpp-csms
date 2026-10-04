@@ -1,11 +1,6 @@
 #!/bin/sh
 set -eu
 
-if [ "$(id -u)" -eq 0 ]; then
-    printf 'Do not run this installer as root or with sudo. Run: sh install.sh\n' >&2
-    exit 1
-fi
-
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
@@ -21,9 +16,25 @@ SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
+DISCOVER_MODE=preserve
 
 usage() {
-    printf 'Usage: sh install.sh [--host HOST] [--port PORT]\n'
+    cat <<'EOF'
+Usage: sh install.sh [--host HOST] [--port PORT] [--with-discover|--without-discover]
+
+Install or update the OCPP CSMS appliance service.
+
+Options:
+  --host HOST          Listener address for the CSMS (default: 0.0.0.0).
+  --port PORT          Listener port for the CSMS (default: 9000).
+  --with-discover      Also install and enable OCPP Discover. Discover can learn the
+                       charger-facing Ethernet address/port at boot and adapt the
+                       local network so plaintext OCPP reaches this CSMS.
+  --without-discover   Disable/uninstall OCPP Discover and clean its owned network state.
+  -h, --help           Show this help.
+
+Without either discovery flag, the existing OCPP Discover enabled/disabled state is preserved.
+EOF
 }
 
 while [ "$#" -gt 0 ]; do
@@ -46,6 +57,16 @@ while [ "$#" -gt 0 ]; do
             PORT=${1#*=}
             shift
             ;;
+        --with-discover)
+            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
+            DISCOVER_MODE=install
+            shift
+            ;;
+        --without-discover)
+            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
+            DISCOVER_MODE=uninstall
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -57,6 +78,11 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$(id -u)" -eq 0 ]; then
+    printf 'Do not run this installer as root or with sudo. Run: sh install.sh\n' >&2
+    exit 1
+fi
 
 [ -n "$HOST" ] || {
     printf 'Listener host must not be empty.\n' >&2
@@ -125,7 +151,6 @@ ensure_user_bin_on_path
     exit 1
 }
 
-# Initialize and validate the local evidence store before touching systemd.
 "$COMMAND" --data-dir "$DATA_DIR" init
 [ -f "$DATA_DIR/$DATABASE_NAME" ] || {
     printf 'SQLite evidence database was not created: %s/%s\n' "$DATA_DIR" "$DATABASE_NAME" >&2
@@ -173,7 +198,6 @@ if ! sudo systemctl is-active --quiet "$SERVICE_NAME"; then
     exit 1
 fi
 
-# Verify the process actually accepts TCP connections on the configured endpoint.
 if ! "$VENV/bin/python" - "$HOST" "$PORT" <<'PY'
 import socket
 import sys
@@ -197,18 +221,33 @@ then
     exit 1
 fi
 
-# The service must own no root-only state. Verify the data path is still usable
-# by the installing user after systemd has started it.
 [ -w "$DATA_DIR" ] || {
     printf 'Data directory stopped being writable by %s: %s\n' "$INSTALL_USER" "$DATA_DIR" >&2
     exit 1
 }
 "$COMMAND" --data-dir "$DATA_DIR" status >/dev/null
 
+case "$DISCOVER_MODE" in
+    install)
+        OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" \
+            sh "$ROOT/discover.sh" --install
+        ;;
+    uninstall)
+        OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" \
+            sh "$ROOT/discover.sh" --uninstall
+        ;;
+    preserve) ;;
+esac
+
 printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
 printf 'Command: %s\n' "$CSMS_COMMAND"
 printf 'Data:    %s\n' "$DATA_DIR"
 printf 'Service: %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
+case "$DISCOVER_MODE" in
+    install) printf 'Discover: ocpp-discover.service enabled\n' ;;
+    uninstall) printf 'Discover: disabled/uninstalled\n' ;;
+    preserve) printf 'Discover: existing state preserved\n' ;;
+esac
 printf '\nUseful commands:\n'
 printf '  csms status\n'
 printf '  sudo systemctl status %s\n' "$SERVICE_NAME"

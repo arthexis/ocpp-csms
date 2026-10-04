@@ -14,6 +14,74 @@ Field-harness self-tests live under `field/tests/` and run explicitly with:
 python -m pytest field/tests
 ```
 
+## Passive Ethernet discovery
+
+`field.discover` starts with a passive ARP observation on `eth0` by default. It requires repeated unanswered requests from one requester before producing a discovery candidate and refuses ambiguity.
+
+```sh
+python -m field.discover
+python -m field.discover --interface eno1
+```
+
+The address-claim primitive used by later discovery stages is deliberately additive: after root authorization it can add only the discovered target as a `/32` secondary IPv4 address and records that exact ownership in `address.json`. Cleanup removes only the address named in that receipt and never replaces or flushes pre-existing interface addresses.
+
+For a complete transactional discovery attempt, run:
+
+```sh
+sudo python -m field.discover run \
+  --data-dir /path/to/csms-data \
+  --state-dir /run/ocpp-discover \
+  --interface eth0 \
+  --listen-port 9000
+```
+
+`run` first gives an already-configured charger a grace period to connect to the normal CSMS. If one appears, it exits without invoking packet capture, `ip`, or `nft`. Otherwise it performs passive ARP discovery, claims the unresolved target as an additive `/32`, observes plaintext WebSocket traffic only from that charger, writes `redirect.json`, applies the narrow redirect, and waits for the charger to appear in the CSMS status store. Only that real CSMS session marks discovery successful.
+
+Successful discovery preserves `address.json`, `redirect.json`, and `discovery.json` so the discovered network identity remains available for reconnects. A failed attempt rolls back any address or redirect created by that attempt. Existing discovery receipts or an unexpected pre-existing `ocpp_field_redirect` table are refused rather than layered over.
+
+Explicit cleanup removes only discovery-owned state:
+
+```sh
+sudo python -m field.discover cleanup --state-dir /run/ocpp-discover
+```
+
+For normal appliance use, the repository-root `discover.sh` wrapper provides the supported surface: running it directly starts discovery now, `--install` installs Debian dependencies and enables `ocpp-discover.service` at boot, `--uninstall` disables/removes the service and cleans discovery-owned state, and `--cleanup` removes only the current network adaptation. The base `install.sh` exposes the same optional feature as `--with-discover` and `--without-discover`; omitting either flag preserves the existing discovery state.
+
+## Plaintext OCPP redirect helper
+
+Issue #53 uses a field-only helper for discovering and temporarily redirecting one observed plaintext OCPP WebSocket flow. It does not configure the host's gateway, DHCP, routing, NetworkManager, or persistent firewall state.
+
+First passively capture a bounded observation window while the intended local CSMS listener is already available:
+
+```sh
+python -m field.redirect capture \
+  --interface eth0 \
+  --listen-port 9000 \
+  --seconds 30 \
+  --run-dir /path/to/redirect-run
+```
+
+A successful capture writes `redirect.json`. The receipt records one charger source, the observed destination IPv4 addresses, HTTP Host/path evidence, interface, local listener port, and capture time. Ambiguous sources, TLS/opaque traffic, non-WebSocket HTTP, unavailable listeners, and receipt overwrite are rejected.
+
+Before any mutation, render and syntax-check the exact nftables candidate:
+
+```sh
+python -m field.redirect validate /path/to/redirect-run
+```
+
+Validation rechecks the receipt and requires the destination set to match the captured WebSocket request evidence exactly. It renders one dedicated `table ip ocpp_field_redirect`, scoped to the captured input interface, charger source IPv4, observed destination IPv4 set, observed destination TCP port, and local listener port, then checks it with `nft -c`.
+
+Applying and removing the temporary redirect are explicit root-only operations:
+
+```sh
+sudo python -m field.redirect apply /path/to/redirect-run
+sudo python -m field.redirect remove /path/to/redirect-run
+```
+
+`apply` revalidates the receipt, rechecks that the local listener is available, refuses to proceed if the dedicated table already exists, runs `nft -c` again, and then loads exactly the checked ruleset. `remove` deletes only `table ip ocpp_field_redirect` and refuses if that table is absent. Neither command writes a systemd unit or persistent nftables configuration.
+
+The replacement field host must already provide the charger-facing gateway role that makes the original flow visible. Gateway/DHCP/NAT provisioning remains deployment responsibility and is intentionally outside this helper.
+
 ## Configuration
 
 All environment-specific operational values are supplied by the caller. The harness does not assume service names, ports, listener addresses, executable locations, CSMS data directories, or control-socket paths.
@@ -217,17 +285,3 @@ python -m field.harness handoff /path/to/run
 ```
 
 `handoff` is intentionally non-mutating with respect to the configured CSMS services. It verifies that the candidate CSMS is still active, legacy remains inactive, and the configured listener/control socket are available; then it disables the watchdog and records `handoff.json`. It does **not** stop the candidate CSMS or start legacy. Successful handoff leaves the run in phase `handed_off`, ready for production-style startup configuration and active-charge testing under #45.
-
-Generate a structured summary at any time with:
-
-```sh
-python -m field.harness report /path/to/run
-```
-
-The report is printed and stored as `result.json`. It includes phase results, current configured-service state, watchdog state, collected evidence references, archived attempt identifiers, and whether protocol #44 reached the intentional handoff state. `protocol_44_complete` is true only after successful preflight, takeover, baseline, reboot, configuration, soak, and handoff evidence are all present and successful with the watchdog disabled.
-
-Inspect stored harness state at any point with:
-
-```sh
-python -m field.harness status /path/to/run
-```
