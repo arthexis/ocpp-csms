@@ -14,6 +14,41 @@ Field-harness self-tests live under `field/tests/` and run explicitly with:
 python -m pytest field/tests
 ```
 
+## Plaintext OCPP redirect helper
+
+Issue #53 uses a field-only helper for discovering and temporarily redirecting one observed plaintext OCPP WebSocket flow. It does not configure the host's gateway, DHCP, routing, NetworkManager, or persistent firewall state.
+
+First passively capture a bounded observation window while the intended local CSMS listener is already available:
+
+```sh
+python -m field.redirect capture \
+  --interface eth0 \
+  --listen-port 9000 \
+  --seconds 30 \
+  --run-dir /path/to/redirect-run
+```
+
+A successful capture writes `redirect.json`. The receipt records one charger source, the observed destination IPv4 addresses, HTTP Host/path evidence, interface, local listener port, and capture time. Ambiguous sources, TLS/opaque traffic, non-WebSocket HTTP, unavailable listeners, and receipt overwrite are rejected.
+
+Before any mutation, render and syntax-check the exact nftables candidate:
+
+```sh
+python -m field.redirect validate /path/to/redirect-run
+```
+
+Validation rechecks the receipt and requires the destination set to match the captured WebSocket request evidence exactly. It renders one dedicated `table ip ocpp_field_redirect`, scoped to the captured input interface, charger source IPv4, observed destination IPv4 set, TCP/80, and local listener port, then checks it with `nft -c`.
+
+Applying and removing the temporary redirect are explicit root-only operations:
+
+```sh
+sudo python -m field.redirect apply /path/to/redirect-run
+sudo python -m field.redirect remove /path/to/redirect-run
+```
+
+`apply` revalidates the receipt, rechecks that the local listener is available, refuses to proceed if the dedicated table already exists, runs `nft -c` again, and then loads exactly the checked ruleset. `remove` deletes only `table ip ocpp_field_redirect` and refuses if that table is absent. Neither command writes a systemd unit or persistent nftables configuration.
+
+The replacement field host must already provide the charger-facing gateway role that makes the original flow visible. Gateway/DHCP/NAT provisioning remains deployment responsibility and is intentionally outside this helper.
+
 ## Configuration
 
 All environment-specific operational values are supplied by the caller. The harness does not assume service names, ports, listener addresses, executable locations, CSMS data directories, or control-socket paths.
@@ -217,17 +252,3 @@ python -m field.harness handoff /path/to/run
 ```
 
 `handoff` is intentionally non-mutating with respect to the configured CSMS services. It verifies that the candidate CSMS is still active, legacy remains inactive, and the configured listener/control socket are available; then it disables the watchdog and records `handoff.json`. It does **not** stop the candidate CSMS or start legacy. Successful handoff leaves the run in phase `handed_off`, ready for production-style startup configuration and active-charge testing under #45.
-
-Generate a structured summary at any time with:
-
-```sh
-python -m field.harness report /path/to/run
-```
-
-The report is printed and stored as `result.json`. It includes phase results, current configured-service state, watchdog state, collected evidence references, archived attempt identifiers, and whether protocol #44 reached the intentional handoff state. `protocol_44_complete` is true only after successful preflight, takeover, baseline, reboot, configuration, soak, and handoff evidence are all present and successful with the watchdog disabled.
-
-Inspect stored harness state at any point with:
-
-```sh
-python -m field.harness status /path/to/run
-```
