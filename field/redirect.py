@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import socket
+import subprocess
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+_PACKET = re.compile(
+    r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+IP\s+"
+    r"(?P<src>\d+\.\d+\.\d+\.\d+)\.(?P<src_port>\d+)\s+>\s+"
+    r"(?P<dst>\d+\.\d+\.\d+\.\d+)\.(?P<dst_port>\d+):",
+    re.MULTILINE,
+)
+_GET = re.compile(r"GET\s+(?P<path>\S+)\s+HTTP/1\.[01]", re.IGNORECASE)
+_HOST = re.compile(r"(?im)^Host:\s*(?P<host>\S+)\s*$")
+_UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
+_CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
+
+
+@dataclass(frozen=True)
+class WebSocketRequest:
+    destination_ip: str
+    host: str
+    path: str
+
+
+@dataclass(frozen=True)
+class RedirectReceipt:
+    interface: str
+    listen_port: int
+    source_ip: str
+    destination_ips: list[str]
+    requests: list[WebSocketRequest]
+    captured_at: str
+
+    def to_json(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def _packet_blocks(text: str) -> list[tuple[re.Match[str], str]]:
+    matches = list(_PACKET.finditer(text))
+    return [
+        (match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)])
+        for index, match in enumerate(matches)
+    ]
+
+
+def parse_capture(text: str, *, interface: str, listen_port: int, captured_at: str | None = None) -> RedirectReceipt:
+    candidates: list[tuple[str, WebSocketRequest]] = []
+    saw_tls_port = False
+
+    for packet, payload in _packet_blocks(text):
+        destination_port = int(packet.group("dst_port"))
+        if destination_port == 443:
+            saw_tls_port = True
+            continue
+        if destination_port != 80:
+            continue
+
+        get = _GET.search(payload)
+        host = _HOST.search(payload)
+        connection = _CONNECTION.search(payload)
+        if not (get and host and _UPGRADE.search(payload) and connection):
+            continue
+        if "upgrade" not in {token.strip().lower() for token in connection.group("value").split(",")}:
+            continue
+
+        candidates.append(
+            (
+                packet.group("src"),
+                WebSocketRequest(
+                    destination_ip=packet.group("dst"),
+                    host=host.group("host"),
+                    path=get.group("path"),
+                ),
+            )
+        )
+
+    if not candidates:
+        if saw_tls_port:
+            raise ValueError("secure_or_opaque_traffic")
+        raise ValueError("no_plaintext_websocket_upgrade")
+
+    sources = {source for source, _ in candidates}
+    if len(sources) != 1:
+        raise ValueError("ambiguous_websocket_sources")
+
+    source_ip = next(iter(sources))
+    requests: list[WebSocketRequest] = []
+    seen_requests: set[tuple[str, str, str]] = set()
+    for _, request in candidates:
+        key = (request.destination_ip, request.host, request.path)
+        if key not in seen_requests:
+            seen_requests.add(key)
+            requests.append(request)
+
+    destinations = sorted({request.destination_ip for request in requests})
+    return RedirectReceipt(
+        interface=interface,
+        listen_port=listen_port,
+        source_ip=source_ip,
+        destination_ips=destinations,
+        requests=requests,
+        captured_at=captured_at or datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def listener_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def capture_text(interface: str, seconds: float) -> str:
+    if shutil.which("tcpdump") is None:
+        raise RuntimeError("tcpdump_not_found")
+
+    command = [
+        "tcpdump",
+        "-i",
+        interface,
+        "-l",
+        "-nn",
+        "-s0",
+        "-A",
+        "tcp dst port 80 or tcp dst port 443",
+    ]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        stdout, stderr = process.communicate(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            stdout, stderr = process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+
+    if process.returncode not in {0, -15}:
+        detail = stderr.strip().splitlines()[-1] if stderr.strip() else "capture_failed"
+        raise RuntimeError(detail)
+    return stdout
+
+
+def capture(interface: str, listen_port: int, seconds: float, run_dir: str | Path) -> RedirectReceipt:
+    if seconds <= 0:
+        raise ValueError("seconds_must_be_positive")
+    if not 1 <= listen_port <= 65535:
+        raise ValueError("invalid_listen_port")
+    if not listener_available(listen_port):
+        raise RuntimeError("listener_unavailable")
+
+    directory = Path(run_dir).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    receipt_path = directory / "redirect.json"
+    if receipt_path.exists():
+        raise RuntimeError("redirect_receipt_exists")
+
+    receipt = parse_capture(capture_text(interface, seconds), interface=interface, listen_port=listen_port)
+    receipt_path.write_text(json.dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return receipt
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m field.redirect",
+        description="Passive field discovery for plaintext OCPP WebSocket redirect candidates.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    capture_parser = subparsers.add_parser("capture", help="Observe a bounded passive capture and write redirect.json")
+    capture_parser.add_argument("--interface", required=True)
+    capture_parser.add_argument("--listen-port", type=int, required=True)
+    capture_parser.add_argument("--seconds", type=float, required=True)
+    capture_parser.add_argument("--run-dir", required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "capture":
+        try:
+            receipt = capture(args.interface, args.listen_port, args.seconds, args.run_dir)
+        except (RuntimeError, ValueError) as exc:
+            print(str(exc))
+            return 1
+        print(json.dumps(receipt.to_json(), indent=2, sort_keys=True))
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
