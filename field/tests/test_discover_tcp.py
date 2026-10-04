@@ -24,6 +24,14 @@ Connection: keep-alive, Upgrade
 """
 
 
+def assert_redirect_scope(receipt, destination):
+    ruleset = redirect.render_ruleset(receipt)
+    assert 'iifname "eth0"' in ruleset
+    assert f"ip saddr {receipt.source_ip}" in ruleset
+    assert f"ip daddr {{ {destination} }}" in ruleset
+    assert f"tcp dport {receipt.destination_port} redirect to :{receipt.listen_port}" in ruleset
+
+
 def test_parse_tcp_websocket_builds_port_aware_redirect_receipt():
     receipt = discover.parse_tcp_websocket(packet(port=8888), CANDIDATE, listen_port=9000)
 
@@ -194,23 +202,13 @@ def test_discover_existing_endpoint_accepts_host_local_destination_on_other_inte
     assert receipt.source_ip == "192.168.129.182"
     assert receipt.destination_ips == ["10.42.0.1"]
     assert receipt.destination_port == 8888
-
-    ruleset = redirect.render_ruleset(receipt)
-    assert 'iifname "eth0"' in ruleset
-    assert "ip saddr 192.168.129.182" in ruleset
-    assert "ip daddr { 10.42.0.1 }" in ruleset
-    assert "tcp dport 8888 redirect to :9000" in ruleset
+    assert_redirect_scope(receipt, "10.42.0.1")
 
 
 def test_redirect_ruleset_uses_discovered_destination_port():
     receipt = discover.parse_tcp_websocket(packet(port=8888), CANDIDATE, listen_port=9000)
 
-    ruleset = redirect.render_ruleset(receipt)
-
-    assert 'iifname "eth0"' in ruleset
-    assert "tcp dport 8888 redirect to :9000" in ruleset
-    assert "ip saddr 192.168.129.182" in ruleset
-    assert "ip daddr { 203.0.113.10 }" in ruleset
+    assert_redirect_scope(receipt, "203.0.113.10")
 
 
 def test_old_redirect_receipt_without_destination_port_loads_as_port_80(tmp_path):
