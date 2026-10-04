@@ -17,16 +17,20 @@ SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
 DISCOVER_MODE=preserve
+ROLLOVER=0
 
 usage() {
     cat <<'EOF'
-Usage: sh install.sh [--host HOST] [--port PORT] [--with-discover|--without-discover]
+Usage: sh install.sh [--host HOST] [--port PORT] [--rollover] [--with-discover|--without-discover]
 
 Install or update the OCPP CSMS appliance service.
 
 Options:
   --host HOST          Listener address for the CSMS (default: 0.0.0.0).
   --port PORT          Listener port for the CSMS (default: 9000).
+  --rollover           Allow replacement while idle chargers are connected to the
+                       existing CSMS. Active charging always blocks installation;
+                       --rollover never overrides that safety gate.
   --with-discover      Also install and enable OCPP Discover. Discover can learn the
                        charger-facing Ethernet address/port at boot and adapt the
                        local network so plaintext OCPP reaches this CSMS.
@@ -55,6 +59,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --port=*)
             PORT=${1#*=}
+            shift
+            ;;
+        --rollover)
+            ROLLOVER=1
             shift
             ;;
         --with-discover)
@@ -126,6 +134,16 @@ ensure_user_bin_on_path() {
 }
 
 need python3
+
+PREFLIGHT_ARGS="--data-dir $DATA_DIR"
+if [ "$ROLLOVER" -eq 1 ]; then
+    PREFLIGHT_ARGS="$PREFLIGHT_ARGS --rollover"
+fi
+# This is deliberately before venv/service/data mutations. The source-tree
+# helper uses only the standard library and reads the existing appliance state.
+# shellcheck disable=SC2086
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight $PREFLIGHT_ARGS
+
 need systemctl
 need sudo
 
