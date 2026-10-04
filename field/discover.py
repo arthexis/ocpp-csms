@@ -27,6 +27,7 @@ _ARP_REPLY = re.compile(
     r"ARP.*?Reply (?P<ip>\d+\.\d+\.\d+\.\d+) is-at (?P<mac>[0-9a-f:]{17})",
     re.IGNORECASE,
 )
+_INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class AddressClaim:
 def capture_arp(interface: str, seconds: float) -> str:
     if seconds <= 0:
         raise ValueError("seconds_must_be_positive")
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
 
@@ -82,6 +85,8 @@ def discover_candidate(
 ) -> DiscoveryCandidate:
     if min_requests < 1:
         raise ValueError("min_requests_must_be_positive")
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
 
     answered: set[str] = set()
     counts: Counter[tuple[str, str, str]] = Counter()
@@ -101,22 +106,10 @@ def discover_candidate(
         if source_ip == target_ip:
             continue
 
-        counts[
-            (
-                request.group("src_mac").lower(),
-                source_ip,
-                target_ip,
-            )
-        ] += 1
+        counts[(request.group("src_mac").lower(), source_ip, target_ip)] += 1
 
     candidates = [
-        DiscoveryCandidate(
-            interface=interface,
-            source_mac=source_mac,
-            source_ip=source_ip,
-            target_ip=target_ip,
-            requests=count,
-        )
+        DiscoveryCandidate(interface, source_mac, source_ip, target_ip, count)
         for (source_mac, source_ip, target_ip), count in counts.items()
         if count >= min_requests and target_ip not in answered
     ]
@@ -134,11 +127,7 @@ def discover(
     seconds: float = _DEFAULT_SECONDS,
     min_requests: int = _MIN_REQUESTS,
 ) -> DiscoveryCandidate:
-    return discover_candidate(
-        capture_arp(interface, seconds),
-        interface=interface,
-        min_requests=min_requests,
-    )
+    return discover_candidate(capture_arp(interface, seconds), interface=interface, min_requests=min_requests)
 
 
 def require_root() -> None:
@@ -162,6 +151,8 @@ def _ip_error(result: subprocess.CompletedProcess[str], fallback: str) -> Runtim
 
 
 def interface_addresses(interface: str) -> set[str]:
+    if not _INTERFACE.fullmatch(interface):
+        raise ValueError("invalid_interface")
     result = _run_ip(["ip", "-j", "address", "show", "dev", interface])
     if result.returncode != 0:
         raise _ip_error(result, "interface_address_query_failed")
@@ -191,13 +182,15 @@ def load_address_claim(state_dir: str | Path) -> AddressClaim:
         raise RuntimeError("address_claim_not_found") from None
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         raise RuntimeError("invalid_address_claim") from None
-    if ":" in address:
+    if not _INTERFACE.fullmatch(interface) or ":" in address:
         raise RuntimeError("invalid_address_claim")
     return AddressClaim(interface=interface, address=address)
 
 
 def claim_address(candidate: DiscoveryCandidate, state_dir: str | Path) -> AddressClaim:
     require_root()
+    if not _INTERFACE.fullmatch(candidate.interface):
+        raise ValueError("invalid_interface")
     address = str(ipaddress.ip_address(candidate.target_ip))
     if ":" in address:
         raise ValueError("target_must_be_ipv4")
@@ -245,11 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        candidate = discover(
-            interface=args.interface,
-            seconds=args.seconds,
-            min_requests=args.min_requests,
-        )
+        candidate = discover(interface=args.interface, seconds=args.seconds, min_requests=args.min_requests)
     except (RuntimeError, ValueError) as exc:
         print(str(exc))
         return 1
