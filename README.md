@@ -20,7 +20,9 @@ Before changing an existing appliance, the installer performs a read-only usage 
 sh install.sh --rollover
 ```
 
-`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS. The actual staged cutover and reconnect verification are handled by the rollover implementation rather than by this safety gate itself.
+`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS. The installer stages the replacement while the old CSMS stays live, repeats the active-charge check immediately before cutover, then requires fresh reconnect evidence from every charger that was connected at the final gate.
+
+Normal upgrades use the same staged cutover machinery even when no charger is connected. Expensive work is done in `venv.next`; the previous environment is retained as `venv.previous` after promotion so startup failures can be recovered without rebuilding the old environment.
 
 Check the appliance with:
 
@@ -58,6 +60,8 @@ Install the appliance together with discovery:
 sh install.sh --with-discover
 ```
 
+If the current CSMS already has an idle connected charger, add `--rollover`; if any transaction is active, installation is refused even with `--rollover`.
+
 This keeps the normal CSMS unprivileged and installs a separate root `ocpp-discover.service`. At boot, Discover first gives the charger a short chance to connect normally. If no charger appears, it passively watches for validated plaintext WebSocket traffic to an IPv4 address already owned by the selected Ethernet interface. When that existing endpoint is visible, Discover applies only the narrow source/destination/port redirect needed to reach the local CSMS and does not claim another address. If no usable local endpoint is visible, it falls back to repeated unresolved-ARP discovery, temporarily claims only that exact IPv4 address as an additive `/32`, observes the charger's destination and port, installs the narrow redirect, and stops once the CSMS reports a real charger session.
 
 Discover defaults to `eth0`. Its standalone management surface is:
@@ -87,6 +91,8 @@ sh install.sh --with-discover       # install/enable it
 sh install.sh --without-discover    # disable/remove it
 sh install.sh                       # preserve its current enabled/disabled state
 ```
+
+Discovery changes are processed only after the base CSMS cutover succeeds. The installer checks active charging again before applying an explicit Discover install/uninstall request.
 
 Discovery only redirects **validated plaintext HTTP WebSocket Upgrade traffic**. TLS/WSS traffic is detected as opaque and refused rather than guessed. The invariant is to apply the minimum network mutation necessary: an existing host address is never re-claimed or removed, while the ARP fallback owns and later cleans only the exact `/32` it added. Failed attempts roll back only state created by that attempt. Details and field-only primitives live in `field/README.md`.
 
@@ -231,7 +237,7 @@ The current built-in template is `max-power`:
 
 ```bash
 ocpp-csms profile list
-ocpp-csms profile help max-power
+ocpp-csms profile help TEMPLATE
 ocpp-csms profile set max-power --watts 60000
 ```
 
@@ -280,6 +286,7 @@ By default the appliance stores:
 ~/ocpp-csms-data/
   control.sock
   ocpp-csms.sqlite3
+  ocpp-csms.sqlite3.schema-<old-version>.bak   # only when a schema upgrade occurs
   transactions/
     YYYY-MM-DD/
       <charger>-<transaction>.json
@@ -290,6 +297,8 @@ By default the appliance stores:
 
 `control.sock` exists only while the daemon is running. JSON archives remain directly readable and copyable. SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and the small amount of operational state needed by diagnostics.
 
+SQLite schema versions are independent of application releases. The current schema is version `2`, recorded with `PRAGMA user_version`; it changes only when the database structure changes. Brand-new databases are created directly at the current schema. Normal CSMS startup never upgrades an older database implicitly. During installation, schema compatibility is inspected before cutover; a supported older schema is upgraded explicitly only after the old CSMS has stopped, and a SQLite-safe versioned backup is created first. Unknown/unversioned databases and schemas newer than the running code are refused rather than guessed.
+
 Incoming OCPP calls and replies are preserved together with CSMS-initiated requests and charger confirmations. Connection lifecycle, configuration guard decisions, Smart Charging evidence, transaction recovery, and unresolved collisions are recorded rather than reduced to human-readable logs.
 
 ## Installed layout
@@ -297,11 +306,16 @@ Incoming OCPP calls and replies are preserved together with CSMS-initiated reque
 The normal appliance runs as the installing user, not root. The base installer uses `sudo` only for systemd installation/management.
 
 ```text
-~/.local/share/ocpp-csms/venv/       private Python environment
-~/.local/bin/ocpp-csms               stable command
-~/ocpp-csms-data/                    user-owned appliance data
+~/.local/share/ocpp-csms/venv/          active private Python environment
+~/.local/share/ocpp-csms/venv.previous/ previous environment retained after cutover
+~/.local/share/ocpp-csms/venv.next/     temporary staging environment during install
+~/.local/bin/ocpp-csms                  stable command
+~/.local/bin/csms                       short command alias
+~/ocpp-csms-data/                       user-owned appliance data
 /etc/systemd/system/ocpp-csms.service
 ```
+
+`venv.next` is removed when staging fails before promotion. `venv.previous` is retained after a successful promotion so a startup failure can restore the prior binary environment when the database schema has not changed. If a schema upgrade has already occurred, automatic rollback is intentionally disabled because restoring the old binary would also require an evidence-sensitive database restore.
 
 When OCPP Discover is installed, its small field runtime is copied under the appliance prefix and the separate root service is added:
 
@@ -333,7 +347,7 @@ CI exercises:
 - Debian 12 Bookworm / Python 3.11 / ARM64 as the primary appliance target;
 - Debian 13 / Python 3.13 / ARM64 as the compatibility target.
 
-Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
+Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Schema/rollover tests cover read-only preflight, active-charge refusal, explicit schema upgrades and backups, staged promotion, startup rollback boundaries, reconnect baselines, and fresh post-cutover connection evidence. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
 
 ## Source layout
 
@@ -345,6 +359,9 @@ src/ocpp_csms/
   server.py            # WebSocket accept loop and connection lifecycle
   session.py           # direct OCPP 1.6J handlers and outbound commands
   events.py            # SQLite event store and derived state
+  schema.py            # SQLite schema identity, inspection, backup, and explicit upgrade
+  install_preflight.py # read-only install/rollover safety policy
+  install_cutover.py   # schema-aware staged cutover and reconnect helpers
   diagnostics.py       # direct event queries and formatting
   status.py            # status queries and formatting
   transaction_query.py # read-only transaction query/model layer
@@ -362,7 +379,7 @@ systemd/
   ocpp-discover.service.in
 
 discover.sh            # run/install/uninstall optional OCPP Discover
-install.sh             # base appliance installer
+install.sh             # staged appliance installer and rollover entry point
 ```
 
 This README is the canonical project documentation. Important operator information belongs here; detailed field-harness procedures stay in `field/README.md` so the main path remains easy to scan.
