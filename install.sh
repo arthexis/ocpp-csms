@@ -14,6 +14,7 @@ HOST=${OCPP_CSMS_HOST:-"0.0.0.0"}
 PORT=${OCPP_CSMS_PORT:-9000}
 VENV="$PREFIX/venv"
 COMMAND="$BIN_DIR/ocpp-csms"
+CSMS_COMMAND="$BIN_DIR/csms"
 DATABASE_NAME=ocpp-csms.sqlite3
 SERVICE_NAME=ocpp-csms.service
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
@@ -79,6 +80,25 @@ need() {
     }
 }
 
+ensure_user_bin_on_path() {
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) return 0 ;;
+    esac
+
+    shell_name=$(basename "${SHELL:-sh}")
+    case "$shell_name" in
+        bash) rc="$HOME/.bashrc"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        zsh) rc="$HOME/.zshrc"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        fish) rc="$HOME/.config/fish/config.fish"; path_line="fish_add_path \"$BIN_DIR\"" ;;
+        *) rc="$HOME/.profile"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+    esac
+
+    mkdir -p "$(dirname "$rc")"
+    if [ ! -f "$rc" ] || ! grep -F "$path_line" "$rc" >/dev/null 2>&1; then
+        printf '\n# OCPP CSMS user commands\n%s\n' "$path_line" >> "$rc"
+    fi
+}
+
 need python3
 need systemctl
 need sudo
@@ -89,9 +109,15 @@ python3 -m venv "$VENV"
 
 mkdir -p "$BIN_DIR" "$DATA_DIR"
 ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
+ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"
+ensure_user_bin_on_path
 
 [ -x "$COMMAND" ] || {
     printf 'Installed command is not executable: %s\n' "$COMMAND" >&2
+    exit 1
+}
+[ -x "$CSMS_COMMAND" ] || {
+    printf 'Installed command is not executable: %s\n' "$CSMS_COMMAND" >&2
     exit 1
 }
 [ -w "$DATA_DIR" ] || {
@@ -180,15 +206,15 @@ fi
 "$COMMAND" --data-dir "$DATA_DIR" status >/dev/null
 
 printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
-printf 'Command: %s\n' "$COMMAND"
+printf 'Command: %s\n' "$CSMS_COMMAND"
 printf 'Data:    %s\n' "$DATA_DIR"
 printf 'Service: %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
 printf '\nUseful commands:\n'
-printf '  %s status\n' "$COMMAND"
+printf '  csms status\n'
 printf '  sudo systemctl status %s\n' "$SERVICE_NAME"
 printf '  sudo journalctl -u %s -f\n' "$SERVICE_NAME"
 
 case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) printf 'Add %s to PATH to run ocpp-csms directly.\n' "$BIN_DIR" ;;
+    *":$BIN_DIR:"*) ;;
+    *) printf 'Open a new shell, or source your shell configuration, before running csms directly.\n' ;;
 esac

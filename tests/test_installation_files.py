@@ -32,3 +32,21 @@ def test_installer_configures_enables_and_validates_service():
     assert 'probe_host = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host' in installer
     assert 'socket.create_connection((probe_host, port), timeout=0.5)' in installer
     assert 'sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager' in installer
+
+
+def test_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
+    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+
+    assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
+    assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
+    assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
+    assert 'ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"' in installer
+    assert 'Installed command is not executable: %s\\n' in installer
+    assert "ensure_user_bin_on_path" in installer
+    assert 'bash) rc="$HOME/.bashrc"' in installer
+    assert 'zsh) rc="$HOME/.zshrc"' in installer
+    assert 'fish) rc="$HOME/.config/fish/config.fish"' in installer
+    assert '*) rc="$HOME/.profile"' in installer
+    assert 'path_line="export PATH=\\\"$BIN_DIR:\\$PATH\\\""' in installer
+    assert 'path_line="fish_add_path \\\"$BIN_DIR\\\""' in installer
+    assert "Open a new shell, or source your shell configuration" in installer
