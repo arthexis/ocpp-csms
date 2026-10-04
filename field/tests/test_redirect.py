@@ -22,29 +22,45 @@ Connection: Upgrade
 """
 
 
+def receipt(**changes):
+    values = {
+        "interface": "eth0",
+        "listen_port": 9000,
+        "source_ip": "192.168.129.182",
+        "destination_ips": ["203.0.113.11", "203.0.113.10"],
+        "requests": [
+            redirect.WebSocketRequest("203.0.113.10", "cloud.example", "/services/ocppj/CHARGER"),
+            redirect.WebSocketRequest("203.0.113.11", "backup.example", "/ocpp-j/CHARGER"),
+        ],
+        "captured_at": "2026-10-04T04:00:00+00:00",
+    }
+    values.update(changes)
+    return redirect.RedirectReceipt(**values)
+
+
 def test_parse_capture_builds_receipt_for_one_source_and_multiple_destinations():
-    receipt = redirect.parse_capture(
+    parsed = redirect.parse_capture(
         UPGRADE_ONE + UPGRADE_TWO,
         interface="eth0",
         listen_port=9000,
         captured_at="2026-10-04T04:00:00+00:00",
     )
 
-    assert receipt.source_ip == "192.168.129.182"
-    assert receipt.destination_ips == ["203.0.113.10", "203.0.113.11"]
-    assert [(request.host, request.path) for request in receipt.requests] == [
+    assert parsed.source_ip == "192.168.129.182"
+    assert parsed.destination_ips == ["203.0.113.10", "203.0.113.11"]
+    assert [(request.host, request.path) for request in parsed.requests] == [
         ("cloud.example", "/services/ocppj/CHARGER"),
         ("backup.example", "/ocpp-j/CHARGER"),
     ]
-    assert receipt.interface == "eth0"
-    assert receipt.listen_port == 9000
+    assert parsed.interface == "eth0"
+    assert parsed.listen_port == 9000
 
 
 def test_parse_capture_deduplicates_repeated_upgrade():
-    receipt = redirect.parse_capture(UPGRADE_ONE + UPGRADE_ONE, interface="eth0", listen_port=9000)
+    parsed = redirect.parse_capture(UPGRADE_ONE + UPGRADE_ONE, interface="eth0", listen_port=9000)
 
-    assert receipt.destination_ips == ["203.0.113.10"]
-    assert len(receipt.requests) == 1
+    assert parsed.destination_ips == ["203.0.113.10"]
+    assert len(parsed.requests) == 1
 
 
 def test_parse_capture_rejects_ambiguous_sources():
@@ -77,10 +93,10 @@ def test_capture_writes_receipt_only_after_listener_and_valid_capture(tmp_path, 
     monkeypatch.setattr(redirect, "listener_available", lambda port: port == 9000)
     monkeypatch.setattr(redirect, "capture_text", lambda interface, seconds: UPGRADE_ONE)
 
-    receipt = redirect.capture("eth0", 9000, 10, tmp_path)
+    parsed = redirect.capture("eth0", 9000, 10, tmp_path)
     saved = json.loads((tmp_path / "redirect.json").read_text())
 
-    assert receipt.source_ip == "192.168.129.182"
+    assert parsed.source_ip == "192.168.129.182"
     assert saved["source_ip"] == "192.168.129.182"
     assert saved["destination_ips"] == ["203.0.113.10"]
     assert saved["requests"][0]["path"] == "/services/ocppj/CHARGER"
@@ -135,3 +151,103 @@ def test_capture_text_invokes_bounded_tcpdump(monkeypatch):
     assert calls["timeouts"][0] == 3
     assert calls["terminated"] is True
     assert "killed" not in calls
+
+
+def test_render_ruleset_is_narrow_and_deterministic():
+    ruleset = redirect.render_ruleset(receipt())
+
+    assert ruleset == """table ip ocpp_field_redirect {
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+    iifname "eth0" ip saddr 192.168.129.182 ip daddr { 203.0.113.10, 203.0.113.11 } tcp dport 80 redirect to :9000
+  }
+}
+"""
+
+
+def test_receipt_validation_rejects_values_that_could_widen_or_inject_rules():
+    invalid = [
+        (receipt(interface='eth0" counter'), "invalid_interface"),
+        (receipt(source_ip="0.0.0.0/0"), "invalid_source_ip"),
+        (receipt(destination_ips=[]), "no_destination_ips"),
+        (receipt(destination_ips=["203.0.113.10", "0.0.0.0/0"]), "invalid_destination_ip"),
+        (receipt(listen_port=70000), "invalid_listen_port"),
+    ]
+
+    for candidate, message in invalid:
+        with pytest.raises(ValueError, match=message):
+            redirect.render_ruleset(candidate)
+
+
+def test_receipt_validation_rejects_request_destination_outside_captured_set():
+    candidate = receipt(
+        destination_ips=["203.0.113.10"],
+        requests=[redirect.WebSocketRequest("203.0.113.99", "other.example", "/ocpp-j/CHARGER")],
+    )
+
+    with pytest.raises(ValueError, match="request_destination_not_captured"):
+        redirect.render_ruleset(candidate)
+
+
+def test_load_receipt_round_trips_capture_evidence(tmp_path):
+    candidate = receipt()
+    (tmp_path / "redirect.json").write_text(json.dumps(candidate.to_json()))
+
+    assert redirect.load_receipt(tmp_path) == candidate
+
+
+def test_load_receipt_rejects_missing_or_invalid_evidence(tmp_path):
+    with pytest.raises(RuntimeError, match="redirect_receipt_not_found"):
+        redirect.load_receipt(tmp_path)
+
+    (tmp_path / "redirect.json").write_text("not-json")
+    with pytest.raises(ValueError, match="invalid_redirect_receipt"):
+        redirect.load_receipt(tmp_path)
+
+
+def test_validate_ruleset_uses_nft_check_without_applying(monkeypatch):
+    calls = {}
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    def run(command, **kwargs):
+        calls["command"] = command
+        calls["input"] = kwargs["input"]
+        return Result()
+
+    monkeypatch.setattr(redirect.shutil, "which", lambda command: "/usr/sbin/nft")
+    monkeypatch.setattr(redirect.subprocess, "run", run)
+
+    ruleset = redirect.validate_ruleset(receipt())
+
+    assert calls["command"] == ["nft", "-c", "-f", "-"]
+    assert calls["input"] == ruleset
+    assert "add table" not in calls["command"]
+
+
+def test_validate_ruleset_reports_missing_nft_and_validation_failure(monkeypatch):
+    monkeypatch.setattr(redirect.shutil, "which", lambda command: None)
+    with pytest.raises(RuntimeError, match="nft_not_found"):
+        redirect.validate_ruleset(receipt())
+
+    class Result:
+        returncode = 1
+        stderr = "stdin:4: syntax error"
+
+    monkeypatch.setattr(redirect.shutil, "which", lambda command: "/usr/sbin/nft")
+    monkeypatch.setattr(redirect.subprocess, "run", lambda *args, **kwargs: Result())
+    with pytest.raises(RuntimeError, match="syntax error"):
+        redirect.validate_ruleset(receipt())
+
+
+def test_validate_cli_prints_checked_ruleset(tmp_path, monkeypatch, capsys):
+    (tmp_path / "redirect.json").write_text(json.dumps(receipt().to_json()))
+    monkeypatch.setattr(redirect, "validate_ruleset", redirect.render_ruleset)
+
+    assert redirect.main(["validate", str(tmp_path)]) == 0
+    output = capsys.readouterr().out
+    assert "table ip ocpp_field_redirect" in output
+    assert "192.168.129.182" in output
+    assert "redirect to :9000" in output
