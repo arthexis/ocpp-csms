@@ -1,11 +1,6 @@
 #!/bin/sh
 set -eu
 
-if [ "$(id -u)" -eq 0 ]; then
-    printf 'Do not run this installer as root or with sudo. Run: sh install.sh\n' >&2
-    exit 1
-fi
-
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
@@ -82,6 +77,11 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$(id -u)" -eq 0 ]; then
+    printf 'Do not run this installer as root or with sudo. Run: sh install.sh\n' >&2
+    exit 1
+fi
 
 [ -n "$HOST" ] || {
     printf 'Listener host must not be empty.\n' >&2
