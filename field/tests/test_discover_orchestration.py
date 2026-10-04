@@ -23,12 +23,24 @@ def receipt(destination="203.0.113.10"):
     )
 
 
-def prepare_attempt(tmp_path, monkeypatch, *, waits=(None,), redirect_table=False):
-    found = candidate()
+def prepare_base(monkeypatch, *, waits=(None,), redirect_tables=(False,)):
     wait_results = iter(waits)
+    table_results = iter(redirect_tables)
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
     monkeypatch.setattr(discover, "wait_for_charger", lambda *args: next(wait_results))
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: redirect_table)
+    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: next(table_results))
+
+
+def prepare_existing_endpoint(monkeypatch, endpoint, *, waits=(None,), redirect_tables=(False,)):
+    prepare_base(monkeypatch, waits=waits, redirect_tables=redirect_tables)
+    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: endpoint)
+    monkeypatch.setattr(discover, "discover", lambda **kwargs: pytest.fail("ARP fallback must not run"))
+    monkeypatch.setattr(discover, "claim_address", lambda *args: pytest.fail("address claim must not run"))
+
+
+def prepare_arp_fallback(tmp_path, monkeypatch, *, waits=(None,), redirect_tables=(False,)):
+    found = candidate()
+    prepare_base(monkeypatch, waits=waits, redirect_tables=redirect_tables)
     monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: None)
     monkeypatch.setattr(discover, "discover", lambda **kwargs: found)
 
@@ -68,14 +80,8 @@ def test_run_exits_during_grace_without_network_tools(tmp_path, monkeypatch):
 
 def test_existing_endpoint_redirects_without_claiming_address(tmp_path, monkeypatch):
     existing = receipt("10.42.0.1")
-    waits = iter([None, "CP1"])
     calls = []
-    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: next(waits))
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: existing)
-    monkeypatch.setattr(discover, "discover", lambda **kwargs: pytest.fail("ARP fallback must not run"))
-    monkeypatch.setattr(discover, "claim_address", lambda *args: pytest.fail("address claim must not run"))
+    prepare_existing_endpoint(monkeypatch, existing, waits=(None, "CP1"))
     monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda state_dir: calls.append("apply"))
 
     result = discover.run_discovery(data_dir="/data", state_dir=tmp_path, grace_seconds=0)
@@ -94,13 +100,8 @@ def test_existing_endpoint_redirects_without_claiming_address(tmp_path, monkeypa
 
 def test_existing_endpoint_timeout_removes_redirect_without_address_cleanup(tmp_path, monkeypatch):
     existing = receipt("10.42.0.1")
-    waits = iter([None, None])
-    table_checks = iter([False, True])
     cleaned = []
-    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: next(waits))
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: next(table_checks))
-    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: existing)
+    prepare_existing_endpoint(monkeypatch, existing, waits=(None, None), redirect_tables=(False, True))
     monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda state_dir: None)
     monkeypatch.setattr(discover.redirect_tools, "remove_redirect", lambda state_dir: cleaned.append("redirect") or (tmp_path / "redirect.json").unlink())
     monkeypatch.setattr(discover, "cleanup_address", lambda state_dir: pytest.fail("no address was claimed"))
@@ -114,7 +115,7 @@ def test_existing_endpoint_timeout_removes_redirect_without_address_cleanup(tmp_
 
 
 def test_successful_arp_fallback_preserves_discovered_network_state(tmp_path, monkeypatch):
-    found = prepare_attempt(tmp_path, monkeypatch, waits=(None, "CP1"))
+    found = prepare_arp_fallback(tmp_path, monkeypatch, waits=(None, "CP1"))
     redirect = receipt()
     calls = []
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: redirect)
@@ -131,7 +132,7 @@ def test_successful_arp_fallback_preserves_discovered_network_state(tmp_path, mo
 
 
 def test_tcp_discovery_failure_rolls_back_claim(tmp_path, monkeypatch):
-    prepare_attempt(tmp_path, monkeypatch)
+    prepare_arp_fallback(tmp_path, monkeypatch)
     cleaned = []
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("tcp_failed")))
     monkeypatch.setattr(discover, "cleanup_address", lambda state_dir: cleaned.append("address") or (tmp_path / "address.json").unlink())
@@ -144,13 +145,11 @@ def test_tcp_discovery_failure_rolls_back_claim(tmp_path, monkeypatch):
 
 
 def test_connection_timeout_removes_redirect_and_address(tmp_path, monkeypatch):
-    prepare_attempt(tmp_path, monkeypatch, waits=(None, None))
+    prepare_arp_fallback(tmp_path, monkeypatch, waits=(None, None), redirect_tables=(False, True))
     redirect = receipt()
     cleaned = []
-    table_checks = iter([False, True])
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: redirect)
     monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda state_dir: None)
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: next(table_checks))
     monkeypatch.setattr(discover.redirect_tools, "remove_redirect", lambda state_dir: cleaned.append("redirect") or (tmp_path / "redirect.json").unlink())
     monkeypatch.setattr(discover, "cleanup_address", lambda state_dir: cleaned.append("address") or (tmp_path / "address.json").unlink())
 
