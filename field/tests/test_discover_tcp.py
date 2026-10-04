@@ -24,6 +24,14 @@ Connection: keep-alive, Upgrade
 """
 
 
+def assert_redirect_scope(receipt, destination):
+    ruleset = redirect.render_ruleset(receipt)
+    assert 'iifname "eth0"' in ruleset
+    assert f"ip saddr {receipt.source_ip}" in ruleset
+    assert f"ip daddr {{ {destination} }}" in ruleset
+    assert f"tcp dport {receipt.destination_port} redirect to :{receipt.listen_port}" in ruleset
+
+
 def test_parse_tcp_websocket_builds_port_aware_redirect_receipt():
     receipt = discover.parse_tcp_websocket(packet(port=8888), CANDIDATE, listen_port=9000)
 
@@ -176,32 +184,31 @@ def test_capture_passive_tcp_is_bounded_to_interface(monkeypatch):
     }
 
 
-def test_discover_existing_endpoint_returns_none_when_no_local_websocket(monkeypatch):
-    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.42.0.1"})
+def test_discover_existing_endpoint_returns_none_when_destination_is_not_host_local(monkeypatch):
+    monkeypatch.setattr(discover, "host_addresses", lambda: {"10.42.0.1"})
     monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: packet(destination="203.0.113.10", port=8888))
 
     assert discover.discover_existing_endpoint(interface="eth0", listen_port=9000, seconds=3) is None
 
 
-def test_discover_existing_endpoint_returns_local_receipt(monkeypatch):
-    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.42.0.1"})
+def test_discover_existing_endpoint_accepts_host_local_destination_on_other_interface(monkeypatch):
+    monkeypatch.setattr(discover, "host_addresses", lambda: {"192.168.129.10", "10.42.0.1"})
     monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: packet(destination="10.42.0.1", port=8888))
 
     receipt = discover.discover_existing_endpoint(interface="eth0", listen_port=9000, seconds=3)
 
     assert receipt is not None
+    assert receipt.interface == "eth0"
+    assert receipt.source_ip == "192.168.129.182"
     assert receipt.destination_ips == ["10.42.0.1"]
     assert receipt.destination_port == 8888
+    assert_redirect_scope(receipt, "10.42.0.1")
 
 
 def test_redirect_ruleset_uses_discovered_destination_port():
     receipt = discover.parse_tcp_websocket(packet(port=8888), CANDIDATE, listen_port=9000)
 
-    ruleset = redirect.render_ruleset(receipt)
-
-    assert "tcp dport 8888 redirect to :9000" in ruleset
-    assert "ip saddr 192.168.129.182" in ruleset
-    assert "ip daddr { 203.0.113.10 }" in ruleset
+    assert_redirect_scope(receipt, "203.0.113.10")
 
 
 def test_old_redirect_receipt_without_destination_port_loads_as_port_80(tmp_path):

@@ -168,6 +168,18 @@ def _ip_error(result: subprocess.CompletedProcess[str], fallback: str) -> Runtim
     return RuntimeError(detail)
 
 
+def _ipv4_addresses(payload: object) -> set[str]:
+    try:
+        return {
+            str(info["local"])
+            for item in payload
+            for info in item.get("addr_info", [])
+            if info.get("family") == "inet" and "local" in info
+        }
+    except (TypeError, KeyError):
+        raise RuntimeError("invalid_ip_address_output") from None
+
+
 def interface_addresses(interface: str) -> set[str]:
     if not _INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
@@ -175,8 +187,17 @@ def interface_addresses(interface: str) -> set[str]:
     if result.returncode != 0:
         raise _ip_error(result, "interface_address_query_failed")
     try:
-        payload = json.loads(result.stdout)
-        return {str(info["local"]) for item in payload for info in item.get("addr_info", []) if info.get("family") == "inet" and "local" in info}
+        return _ipv4_addresses(json.loads(result.stdout))
+    except (TypeError, ValueError, KeyError):
+        raise RuntimeError("invalid_ip_address_output") from None
+
+
+def host_addresses() -> set[str]:
+    result = _run_ip(["ip", "-j", "address", "show"])
+    if result.returncode != 0:
+        raise _ip_error(result, "host_address_query_failed")
+    try:
+        return _ipv4_addresses(json.loads(result.stdout))
     except (TypeError, ValueError, KeyError):
         raise RuntimeError("invalid_ip_address_output") from None
 
@@ -343,7 +364,7 @@ def discover_tcp(candidate: DiscoveryCandidate, *, listen_port: int, seconds: fl
 
 
 def discover_existing_endpoint(*, interface: str, listen_port: int, seconds: float = _DEFAULT_SECONDS) -> RedirectReceipt | None:
-    local_addresses = interface_addresses(interface)
+    local_addresses = host_addresses()
     try:
         return parse_passive_websocket(
             capture_passive_tcp(interface, seconds),
