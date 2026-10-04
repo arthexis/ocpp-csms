@@ -200,6 +200,8 @@ ocpp-csms profile composite --json
 
 The defaults are connector `0` and a 3600-second query window. Human-readable output shows the schedule start, rate unit, and every returned period. `--json` prints the structured charger response for higher-level tooling. A composite schedule is an effective result, not a reconstruction of the individual profiles that produced it.
 
+Some chargers accept station-wide profiles on connector `0` but reject `GetCompositeSchedule` for connector `0`. In that case the CSMS first preserves the standards-defined connector-0 attempt, then automatically queries every known nonzero physical connector with the same duration and rate unit. A fully successful fan-out still exits `0` and the human output clearly reports that aggregate connector-0 inspection is incompatible before showing each physical connector schedule. JSON reports `compatibility_fallback: "physical_connectors"` and preserves every individual response rather than fabricating a station-level aggregate. If any physical connector query fails, the fallback remains non-successful and the per-connector evidence is still shown.
+
 `profile clear` sends OCPP `ClearChargingProfile`. With no filters it asks the charger to clear every profile the charger permits to be cleared:
 
 ```bash

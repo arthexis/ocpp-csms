@@ -49,6 +49,9 @@ class Registry:
     def connected_chargers(self):
         return ["charger-a"]
 
+    def physical_connector_ids(self, charge_point_id):
+        return []
+
     def active_transaction_ids(self, charge_point_id):
         return []
 

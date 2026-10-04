@@ -36,6 +36,7 @@ class Session(Protocol):
 class SessionRegistry(Protocol):
     def session(self, charge_point_id: str) -> Session | None: ...
     def connected_chargers(self) -> list[str]: ...
+    def physical_connector_ids(self, charge_point_id: str) -> list[int]: ...
     def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
     def record_control_event(self, event: str, *, charger_id: str, details: dict[str, Any] | None = None) -> None: ...
 
@@ -127,6 +128,44 @@ def _config_guard(registry: SessionRegistry, charger: str, force: Any, *, change
             details={"transactions": active_transactions},
         )
     return None
+
+
+async def _composite_schedule_response(
+    registry: SessionRegistry,
+    session: Session,
+    charger: str,
+    connector: int,
+    duration: int,
+    charging_rate_unit: str | None,
+) -> dict[str, Any]:
+    response = await session.get_composite_schedule(connector, duration, charging_rate_unit)
+    payload = _response_payload(response)
+    if connector != 0 or payload.get("status") != "Rejected":
+        return payload
+
+    physical_connectors = registry.physical_connector_ids(charger)
+    if not physical_connectors:
+        return payload
+
+    schedules: list[dict[str, Any]] = []
+    all_accepted = True
+    for connector_id in physical_connectors:
+        physical_response = await session.get_composite_schedule(
+            connector_id,
+            duration,
+            charging_rate_unit,
+        )
+        physical_payload = _response_payload(physical_response)
+        schedules.append({"connector_id": connector_id, "response": physical_payload})
+        if physical_payload.get("status") != "Accepted":
+            all_accepted = False
+
+    return {
+        "status": "Accepted" if all_accepted else "Rejected",
+        "requested_connector": 0,
+        "compatibility_fallback": "physical_connectors",
+        "schedules": schedules,
+    }
 
 
 _INVALID = object()
@@ -227,7 +266,17 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_duration"}
             if charging_rate_unit is not None and charging_rate_unit not in {"A", "W"}:
                 return {"error": "invalid_charging_rate_unit"}
-            response = await session.get_composite_schedule(connector, duration, charging_rate_unit)
+            return {
+                "ok": True,
+                "response": await _composite_schedule_response(
+                    registry,
+                    session,
+                    charger,
+                    connector,
+                    duration,
+                    charging_rate_unit,
+                ),
+            }
         else:
             return {"error": "unknown_command", "command": command}
     except Exception as exc:

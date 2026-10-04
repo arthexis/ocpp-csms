@@ -8,6 +8,7 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.connector_query import physical_connector_ids
 from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
@@ -50,6 +51,9 @@ class CSMSServer:
 
     def connected_chargers(self) -> list[str]:
         return sorted(self._active_sessions)
+
+    def physical_connector_ids(self, charge_point_id: str) -> list[int]:
+        return physical_connector_ids(self.events.data_dir, charge_point_id)
 
     def active_transaction_ids(self, charge_point_id: str) -> list[int]:
         return [
