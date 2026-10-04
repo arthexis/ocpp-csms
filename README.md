@@ -26,6 +26,11 @@ ocpp-csms txn --last
 ocpp-csms txn 42 --events
 ocpp-csms config charger-01
 ocpp-csms config charger-01 HeartbeatInterval
+ocpp-csms profile list
+ocpp-csms profile help max-power
+ocpp-csms profile set max-power --watts 60000
+ocpp-csms profile composite
+ocpp-csms profile clear
 ocpp-csms events
 ocpp-csms start charger-01 --cp 1 --id-tag REMOTE
 ocpp-csms stop charger-01 --txn 42
@@ -88,6 +93,11 @@ ocpp-csms status --charging
 ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
 ocpp-csms txn [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
 ocpp-csms config CHARGER [KEY ...] [-f|--force]
+ocpp-csms profile list
+ocpp-csms profile help TEMPLATE
+ocpp-csms profile set max-power --watts WATTS [--charger CHARGER]
+ocpp-csms profile composite [--charger CHARGER] [--connector N|--cp N] [--duration SECONDS] [--json]
+ocpp-csms profile clear [--charger CHARGER] [--id ID] [--connector N|--cp N] [--purpose PURPOSE] [--stack-level N]
 ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG
 ocpp-csms stop CHARGER (--transaction ID|--txn ID)
 ocpp-csms reboot CHARGER [--hard]
@@ -96,7 +106,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-`init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. It never starts, stops, closes, repairs, or deletes a transaction. `config` performs a live OCPP `GetConfiguration` query against a connected charger. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
+`init` creates the SQLite database and transaction archive. `status` is read-only. `transactions` is the canonical read-only transaction inspector and `txn` is its exact alias. It never starts, stops, closes, repairs, or deletes a transaction. `config` performs a live OCPP `GetConfiguration` query against a connected charger. `profile` exposes the deliberately small Smart Charging surface described below. `events` reads the recorded OCPP/runtime timeline. `explain` presents the same evidence for one charger and incident window; it does not infer a root cause.
 
 Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction, so an active transaction and `--last` are never the same record. A positional transaction ID opens a detailed read-only view. List filters include `--charger`, `--connector` / `--cp`, `--id-tag`, `--since`, `--until`, and `--limit`. Add `--events` to a transaction ID to append its transaction-scoped OCPP timeline.
 
@@ -118,6 +128,14 @@ ocpp-csms config charger-01
 ocpp-csms config charger-01 SupportedFeatureProfiles GetConfigurationMaxKeys
 ocpp-csms config charger-01 HeartbeatInterval MeterValueSampleInterval
 ocpp-csms config charger-01 HeartbeatInterval --force
+ocpp-csms profile list
+ocpp-csms profile help max-power
+ocpp-csms profile set max-power --watts 60000
+ocpp-csms profile composite
+ocpp-csms profile composite --cp 1 --duration 7200
+ocpp-csms profile composite --json
+ocpp-csms profile clear
+ocpp-csms profile clear --purpose ChargePointMaxProfile
 ocpp-csms start charger-01 --cp 1 --id-tag REMOTE
 ocpp-csms stop charger-01 --txn 42
 ocpp-csms reboot charger-01
@@ -135,6 +153,82 @@ Control-command exit behavior is intentionally simple:
 - successful `config` queries return exit status `0`;
 - OCPP `Rejected`, disconnected chargers, blocked configuration queries, and control-socket failures return exit status `1`;
 - invalid command-line arguments use normal `argparse` behavior and return exit status `2`.
+
+## Smart Charging profiles
+
+Smart Charging is intentionally **stateless on the CSMS side**. The CSMS does not keep a desired profile inventory or claim that a previously sent profile is still installed. The charger owns its Smart Charging state and is the source of truth. Site/business policy such as "this location is capped at 60 kW" belongs in an upper layer that can call these commands when it wants to enforce that policy.
+
+The CLI exposes built-in profile templates rather than requiring operators to construct full OCPP charging-profile payloads by hand:
+
+```bash
+ocpp-csms profile list
+ocpp-csms profile help max-power
+```
+
+The initial and currently only built-in template is `max-power`. It creates a station-wide OCPP `ChargePointMaxProfile` on connector `0`, with a stable charging profile ID and stack level and an absolute schedule in watts:
+
+```text
+SetChargingProfile
+  connectorId: 0
+  csChargingProfiles:
+    chargingProfileId: 1
+    stackLevel: 0
+    chargingProfilePurpose: ChargePointMaxProfile
+    chargingProfileKind: Absolute
+    chargingSchedule:
+      chargingRateUnit: W
+      chargingSchedulePeriod:
+        - startPeriod: 0
+          limit: [watts]
+```
+
+Apply it with a positive watt value:
+
+```bash
+ocpp-csms profile set max-power --watts 60000
+```
+
+If exactly one charger is connected, it is inferred. Use `--charger CHARGER` when an explicit target is needed. The command sends `SetChargingProfile` immediately and reports the charger's `Accepted` or `Rejected` result. Nothing is stored locally as desired Smart Charging state. Reapplying `max-power` uses the same OCPP charging profile ID (`1`) rather than inventing a locally named profile instance.
+
+OCPP 1.6 does not provide a general request for enumerating every installed charging profile. `profile composite` therefore uses `GetCompositeSchedule` to ask the charger for the **effective schedule** it currently computes:
+
+```bash
+ocpp-csms profile composite
+ocpp-csms profile composite --cp 1 --duration 7200
+ocpp-csms profile composite --json
+```
+
+The defaults are connector `0` and a 3600-second query window. Human-readable output shows the schedule start, rate unit, and every returned period. `--json` prints the structured charger response for higher-level tooling. A composite schedule is an effective result, not a reconstruction of the individual profiles that produced it.
+
+`profile clear` sends OCPP `ClearChargingProfile`. With no filters it asks the charger to clear every profile the charger permits to be cleared:
+
+```bash
+ocpp-csms profile clear
+```
+
+Optional OCPP filters can target a profile ID, connector, purpose, or stack level:
+
+```bash
+ocpp-csms profile clear --id 7
+ocpp-csms profile clear --cp 1
+ocpp-csms profile clear --purpose ChargePointMaxProfile
+ocpp-csms profile clear --stack-level 2
+```
+
+The same single-connected-charger inference applies to `set`, `composite`, and `clear`; each accepts `--charger CHARGER` when an explicit target is required.
+
+A simple stateless reconciliation workflow is therefore:
+
+```bash
+ocpp-csms profile composite
+ocpp-csms profile clear
+ocpp-csms profile set max-power --watts 60000
+ocpp-csms profile composite
+```
+
+The first query observes current effective behavior. Clearing removes the underlying clearable profiles rather than a "composite schedule" object. The new template is then applied, and the final composite query verifies what the charger reports afterward.
+
+`SetChargingProfile`, `ClearChargingProfile`, and `GetCompositeSchedule` use the same live-session control path and OCPP evidence recording as the other outbound charger commands. They are not guarded merely because a transaction is active: charging profiles are explicitly intended to affect active or future charging behavior.
 
 ## GetConfiguration safety policy
 
@@ -188,6 +282,9 @@ charger WebSocket
 The supported OCPP 1.6J mappings are:
 
 - `config` -> `GetConfiguration`;
+- `profile set` -> `SetChargingProfile`;
+- `profile composite` -> `GetCompositeSchedule`;
+- `profile clear` -> `ClearChargingProfile`;
 - `start` -> `RemoteStartTransaction`;
 - `stop` -> `RemoteStopTransaction`;
 - `reboot` -> `Reset` with `Soft` by default and `Hard` when `--hard` is used.
@@ -240,7 +337,7 @@ By default the appliance stores data under:
 
 `control.sock` exists only while the daemon is running and is removed on shutdown. The JSON transaction archive remains directly readable and copyable. SQLite stores append-oriented OCPP evidence, runtime events, and small derived operational state used by status/diagnostic commands.
 
-Incoming OCPP requests and handled replies are recorded together with CSMS-initiated remote requests and charger confirmations. Connection lifecycle, guarded-configuration decisions, and recovery diagnostics are also preserved. Unresolved transaction collisions are stored outside the normal transaction archive so they cannot silently mutate an unrelated transaction.
+Incoming OCPP requests and handled replies are recorded together with CSMS-initiated remote requests and charger confirmations. Connection lifecycle, guarded-configuration decisions, Smart Charging requests and confirmations, and recovery diagnostics are also preserved. Unresolved transaction collisions are stored outside the normal transaction archive so they cannot silently mutate an unrelated transaction.
 
 ## Installation details
 
@@ -281,7 +378,7 @@ CI exercises the project on the appliance target and a newer compatibility targe
 
 Tests are organized around behavior and state invariants rather than exact human-readable wording. Recovery tests deliberately cover both archive-level invariants and session/SQLite integration so restart, collision, and synthetic-session regressions remain visible.
 
-Remote-control tests cover outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. GetConfiguration tests additionally cover all-key and selected-key requests, the active-transaction guard, forced bypass, per-charger isolation, structured responses, and guard-decision evidence. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
+Remote-control tests cover outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. GetConfiguration tests additionally cover all-key and selected-key requests, the active-transaction guard, forced bypass, per-charger isolation, structured responses, and guard-decision evidence. Smart Charging tests cover the protocol transport, template mapping, composite rendering, clear filters, and an in-process CLI-to-control set -> composite -> clear workflow. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
 
 ## Source layout
 
@@ -289,6 +386,7 @@ Remote-control tests cover outbound OCPP payloads, live-session replacement, Uni
 src/ocpp_csms/
   app.py               # CLI and process startup
   control.py           # local Unix-socket control protocol and client
+  profile_templates.py # built-in stateless Smart Charging templates
   server.py            # WebSocket accept loop and connection lifecycle
   session.py           # direct OCPP 1.6J handlers and outbound commands
   events.py            # SQLite event store and derived state
