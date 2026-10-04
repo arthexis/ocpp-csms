@@ -20,7 +20,7 @@ Before changing an existing appliance, the installer performs a read-only usage 
 sh install.sh --rollover
 ```
 
-`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS; the staged handoff mechanics are kept separate from this safety policy.
+`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS. The actual staged cutover and reconnect verification are handled by the rollover implementation rather than by this safety gate itself.
 
 Check the appliance with:
 
