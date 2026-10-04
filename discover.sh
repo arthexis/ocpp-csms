@@ -139,7 +139,7 @@ install_discovery() {
     DISCOVER_ESC=$(escape_sed "$DISCOVER_ROOT")
     DATA_ESC=$(escape_sed "$DATA_DIR")
     INTERFACE_ESC=$(escape_sed "$INTERFACE")
-    TMP_SERVICE=$(mktemp)
+    TMP_SERVICE=$(mktemp --suffix=.service)
     trap 'rm -f "$TMP_SERVICE"' EXIT HUP INT TERM
     sed \
         -e "s|@PYTHON@|$PYTHON_ESC|g" \

@@ -111,7 +111,7 @@ need sudo
 
 TMP_FINAL=$(mktemp)
 TMP_BASELINE=$(mktemp)
-TMP_SERVICE=$(mktemp)
+TMP_SERVICE=$(mktemp --suffix=.service)
 TMP_OLD_SERVICE=$(mktemp)
 cleanup() {
     rm -f "$TMP_FINAL" "$TMP_BASELINE" "$TMP_SERVICE" "$TMP_OLD_SERVICE"
@@ -171,6 +171,11 @@ rm -rf "$PREVIOUS_VENV"
 if [ "$HAD_VENV" -eq 1 ]; then mv "$VENV" "$PREVIOUS_VENV"; fi
 mv "$STAGE_VENV" "$VENV"
 PROMOTED=1
+
+# Console scripts generated while the environment was named venv.next carry
+# that absolute interpreter path. Reinstall from the local checkout after the
+# promotion so the commands use the final venv path before systemd starts it.
+"$VENV/bin/python" -m pip install --no-deps --force-reinstall "$ROOT"
 
 mkdir -p "$BIN_DIR" "$DATA_DIR"
 ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
