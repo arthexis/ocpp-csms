@@ -14,8 +14,8 @@ CANDIDATE = discover.DiscoveryCandidate(
 )
 
 
-def packet(destination="203.0.113.10", port=80, path="/ocpp/CHARGER", host="cloud.example"):
-    return f"""12:00:02.000001 IP 192.168.129.182.40200 > {destination}.{port}: Flags [P.], length 180
+def packet(destination="203.0.113.10", port=80, path="/ocpp/CHARGER", host="cloud.example", source="192.168.129.182"):
+    return f"""12:00:02.000001 IP {source}.40200 > {destination}.{port}: Flags [P.], length 180
 GET {path} HTTP/1.1
 Host: {host}
 Upgrade: websocket
@@ -36,20 +36,14 @@ def test_parse_tcp_websocket_builds_port_aware_redirect_receipt():
 
 
 def test_parse_tcp_websocket_supports_direct_target_case():
-    receipt = discover.parse_tcp_websocket(
-        packet(destination="192.168.129.1", port=80),
-        CANDIDATE,
-        listen_port=9000,
-    )
+    receipt = discover.parse_tcp_websocket(packet(destination="192.168.129.1", port=80), CANDIDATE, listen_port=9000)
 
     assert receipt.destination_ips == ["192.168.129.1"]
     assert receipt.destination_port == 80
 
 
 def test_parse_tcp_websocket_allows_multiple_destinations_on_one_port():
-    text = packet("203.0.113.11", 8080, host="one.example") + packet(
-        "203.0.113.10", 8080, host="two.example"
-    )
+    text = packet("203.0.113.11", 8080, host="one.example") + packet("203.0.113.10", 8080, host="two.example")
 
     receipt = discover.parse_tcp_websocket(text, CANDIDATE, listen_port=9000)
 
@@ -85,7 +79,7 @@ Connection: keep-alive
 
 
 def test_parse_tcp_websocket_ignores_other_source_ips():
-    text = packet().replace("192.168.129.182", "192.168.129.183")
+    text = packet(source="192.168.129.183")
 
     with pytest.raises(ValueError, match="no_plaintext_websocket_upgrade"):
         discover.parse_tcp_websocket(text, CANDIDATE, listen_port=9000)
@@ -118,13 +112,7 @@ def test_capture_tcp_filters_to_discovered_mac_ip_and_interface(monkeypatch):
 
 
 def test_capture_tcp_rejects_candidate_values_before_building_filter(monkeypatch):
-    malicious = discover.DiscoveryCandidate(
-        'eth0;rm',
-        "aa:bb:cc:dd:ee:ff",
-        "192.168.129.182",
-        "192.168.129.1",
-        2,
-    )
+    malicious = discover.DiscoveryCandidate('eth0;rm', "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
     monkeypatch.setattr(discover, "_bounded_tcpdump", lambda *args: pytest.fail("capture must not run"))
 
     with pytest.raises(ValueError, match="invalid_interface"):
@@ -138,6 +126,72 @@ def test_discover_tcp_combines_bounded_capture_and_parser(monkeypatch):
 
     assert receipt.destination_port == 8888
     assert receipt.destination_ips == ["203.0.113.10"]
+
+
+def test_passive_parser_accepts_only_websocket_to_existing_local_address():
+    text = packet(destination="10.42.0.1", port=8888) + packet(destination="203.0.113.10", port=8888, source="192.168.129.183")
+
+    receipt = discover.parse_passive_websocket(
+        text,
+        interface="eth0",
+        local_addresses={"10.42.0.1", "10.42.0.20"},
+        listen_port=9000,
+    )
+
+    assert receipt.source_ip == "192.168.129.182"
+    assert receipt.destination_ips == ["10.42.0.1"]
+    assert receipt.destination_port == 8888
+
+
+def test_passive_parser_ignores_remote_websocket_and_allows_arp_fallback():
+    with pytest.raises(ValueError, match="no_plaintext_websocket_upgrade"):
+        discover.parse_passive_websocket(
+            packet(destination="203.0.113.10", port=8888),
+            interface="eth0",
+            local_addresses={"10.42.0.1"},
+            listen_port=9000,
+        )
+
+
+def test_passive_parser_refuses_ambiguous_local_websocket_sources():
+    text = packet(destination="10.42.0.1", port=8888) + packet(destination="10.42.0.1", port=8888, source="192.168.129.183")
+
+    with pytest.raises(ValueError, match="ambiguous_websocket_sources"):
+        discover.parse_passive_websocket(
+            text,
+            interface="eth0",
+            local_addresses={"10.42.0.1"},
+            listen_port=9000,
+        )
+
+
+def test_capture_passive_tcp_is_bounded_to_interface(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(discover, "_bounded_tcpdump", lambda command, seconds: calls.update(command=command, seconds=seconds) or "capture")
+
+    assert discover.capture_passive_tcp("eth0", 4) == "capture"
+    assert calls == {
+        "command": ["tcpdump", "-i", "eth0", "-l", "-nn", "-s0", "-A", "tcp"],
+        "seconds": 4,
+    }
+
+
+def test_discover_existing_endpoint_returns_none_when_no_local_websocket(monkeypatch):
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.42.0.1"})
+    monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: packet(destination="203.0.113.10", port=8888))
+
+    assert discover.discover_existing_endpoint(interface="eth0", listen_port=9000, seconds=3) is None
+
+
+def test_discover_existing_endpoint_returns_local_receipt(monkeypatch):
+    monkeypatch.setattr(discover, "interface_addresses", lambda interface: {"10.42.0.1"})
+    monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: packet(destination="10.42.0.1", port=8888))
+
+    receipt = discover.discover_existing_endpoint(interface="eth0", listen_port=9000, seconds=3)
+
+    assert receipt is not None
+    assert receipt.destination_ips == ["10.42.0.1"]
+    assert receipt.destination_port == 8888
 
 
 def test_redirect_ruleset_uses_discovered_destination_port():
@@ -156,13 +210,7 @@ def test_old_redirect_receipt_without_destination_port_loads_as_port_80(tmp_path
         "listen_port": 9000,
         "source_ip": "192.168.129.182",
         "destination_ips": ["203.0.113.10"],
-        "requests": [
-            {
-                "destination_ip": "203.0.113.10",
-                "host": "cloud.example",
-                "path": "/ocpp/CHARGER",
-            }
-        ],
+        "requests": [{"destination_ip": "203.0.113.10", "host": "cloud.example", "path": "/ocpp/CHARGER"}],
         "captured_at": "2026-10-04T04:00:00+00:00",
     }
     (tmp_path / "redirect.json").write_text(json.dumps(payload))
