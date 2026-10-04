@@ -174,7 +174,8 @@ def receipt_from_json(payload: object) -> RedirectReceipt:
         raise ValueError("invalid_redirect_receipt")
     try:
         requests_payload = payload["requests"]
-        if not isinstance(requests_payload, list):
+        destinations_payload = payload["destination_ips"]
+        if not isinstance(requests_payload, list) or not isinstance(destinations_payload, list):
             raise TypeError
         requests = [
             WebSocketRequest(
@@ -191,7 +192,7 @@ def receipt_from_json(payload: object) -> RedirectReceipt:
             interface=str(payload["interface"]),
             listen_port=int(payload["listen_port"]),
             source_ip=str(payload["source_ip"]),
-            destination_ips=[str(item) for item in payload["destination_ips"]],
+            destination_ips=[str(item) for item in destinations_payload],
             requests=requests,
             captured_at=str(payload["captured_at"]),
         )
@@ -230,12 +231,14 @@ def validate_receipt(receipt: RedirectReceipt) -> None:
     _ipv4(receipt.source_ip, "invalid_source_ip")
     if not receipt.destination_ips:
         raise ValueError("no_destination_ips")
+    if not receipt.requests:
+        raise ValueError("no_websocket_requests")
     normalized = [_ipv4(destination, "invalid_destination_ip") for destination in receipt.destination_ips]
     if len(set(normalized)) != len(normalized):
         raise ValueError("duplicate_destination_ip")
     request_destinations = {_ipv4(request.destination_ip, "invalid_request_destination_ip") for request in receipt.requests}
-    if not request_destinations.issubset(set(normalized)):
-        raise ValueError("request_destination_not_captured")
+    if request_destinations != set(normalized):
+        raise ValueError("destination_evidence_mismatch")
 
 
 def render_ruleset(receipt: RedirectReceipt) -> str:
