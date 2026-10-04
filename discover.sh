@@ -62,6 +62,17 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+case "$PORT" in
+    ''|*[!0-9]*)
+        printf 'OCPP listener port must be an integer: %s\n' "$PORT" >&2
+        exit 2
+        ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    printf 'OCPP listener port must be between 1 and 65535: %s\n' "$PORT" >&2
+    exit 2
+fi
+
 need() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -165,7 +176,7 @@ uninstall_discovery() {
     need sudo || { printf 'Missing required command: sudo\n' >&2; exit 1; }
     need systemctl || { printf 'Missing required command: systemctl\n' >&2; exit 1; }
     sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    cleanup_discovery || true
+    cleanup_discovery
     sudo systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     sudo rm -f "$SERVICE_PATH"
     sudo systemctl daemon-reload
