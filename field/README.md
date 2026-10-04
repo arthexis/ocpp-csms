@@ -23,7 +23,9 @@ python -m field.discover
 python -m field.discover --interface eno1
 ```
 
-The address-claim primitive used by later discovery stages is deliberately additive: after root authorization it can add only the discovered target as a `/32` secondary IPv4 address and records that exact ownership in `address.json`. Cleanup removes only the address named in that receipt and never replaces or flushes pre-existing interface addresses. Installer/service integration and automatic mutation are intentionally left for later discovery chunks.
+The address-claim primitive used by later discovery stages is deliberately additive: after root authorization it can add only the discovered target as a `/32` secondary IPv4 address and records that exact ownership in `address.json`. Cleanup removes only the address named in that receipt and never replaces or flushes pre-existing interface addresses.
+
+The current CLI remains passive-only. Automatic address claiming, service installation, and boot-time discovery orchestration are intentionally left for later discovery chunks.
 
 ## Plaintext OCPP redirect helper
 
