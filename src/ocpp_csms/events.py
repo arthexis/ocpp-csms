@@ -9,8 +9,6 @@ from typing import Any
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
-    _SCHEMA_1_SQL,
-    _SCHEMA_2_ADDITIONS_SQL,
     create_current_schema,
     inspect_schema,
     require_supported_schema,
@@ -41,19 +39,7 @@ class EventStore:
         if not schema.exists:
             create_current_schema(self.data_dir)
             return
-
-        version = require_supported_schema(schema)
-        if version == CURRENT_SCHEMA_VERSION:
-            return
-
-        # Preserve the existing compatibility behavior for older databases until
-        # schema upgrades become an explicit installer operation.
-        with self._connect() as connection:
-            if version == 0:
-                connection.executescript(_SCHEMA_1_SQL)
-            if version < 2:
-                connection.executescript(_SCHEMA_2_ADDITIONS_SQL)
-                connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+        require_supported_schema(schema)
 
     def record_ocpp(
         self,
