@@ -34,11 +34,14 @@ def test_installer_configures_enables_and_validates_service():
     assert 'sudo journalctl -u "$SERVICE_NAME" -n 20 --no-pager' in installer
 
 
-def test_installer_exposes_short_csms_command_and_configures_user_path():
+def test_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
     installer = (ROOT / "install.sh").read_text(encoding="utf-8")
 
+    assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
     assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
+    assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
     assert 'ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"' in installer
+    assert 'Installed command is not executable: %s\\n' in installer
     assert "ensure_user_bin_on_path" in installer
     assert 'bash) rc="$HOME/.bashrc"' in installer
     assert 'zsh) rc="$HOME/.zshrc"' in installer
