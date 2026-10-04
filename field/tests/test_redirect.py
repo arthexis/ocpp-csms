@@ -38,6 +38,11 @@ def receipt(**changes):
     return redirect.RedirectReceipt(**values)
 
 
+def write_receipt(path):
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "redirect.json").write_text(json.dumps(receipt().to_json()))
+
+
 def test_parse_capture_builds_receipt_for_one_source_and_multiple_destinations():
     parsed = redirect.parse_capture(
         UPGRADE_ONE + UPGRADE_TWO,
@@ -248,7 +253,7 @@ def test_validate_ruleset_reports_missing_nft_and_validation_failure(monkeypatch
 
 
 def test_validate_cli_prints_checked_ruleset(tmp_path, monkeypatch, capsys):
-    (tmp_path / "redirect.json").write_text(json.dumps(receipt().to_json()))
+    write_receipt(tmp_path)
     monkeypatch.setattr(redirect, "validate_ruleset", redirect.render_ruleset)
 
     assert redirect.main(["validate", str(tmp_path)]) == 0
@@ -256,3 +261,108 @@ def test_validate_cli_prints_checked_ruleset(tmp_path, monkeypatch, capsys):
     assert "table ip ocpp_field_redirect" in output
     assert "192.168.129.182" in output
     assert "redirect to :9000" in output
+
+
+def test_apply_requires_root_before_any_nft_mutation(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(redirect, "table_exists", lambda: pytest.fail("table lookup must not run"))
+
+    with pytest.raises(RuntimeError, match="root_required"):
+        redirect.apply_redirect(tmp_path)
+
+
+def test_apply_rechecks_listener_and_refuses_existing_table(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(redirect, "listener_available", lambda port: False)
+
+    with pytest.raises(RuntimeError, match="listener_unavailable"):
+        redirect.apply_redirect(tmp_path)
+
+    monkeypatch.setattr(redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(redirect, "table_exists", lambda: True)
+    with pytest.raises(RuntimeError, match="redirect_table_exists"):
+        redirect.apply_redirect(tmp_path)
+
+
+def test_apply_validates_then_installs_exact_ruleset(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    calls = []
+    ruleset = redirect.render_ruleset(receipt())
+
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(redirect, "table_exists", lambda: False)
+    monkeypatch.setattr(redirect, "validate_ruleset", lambda candidate: ruleset)
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    def run_nft(command, *, input_text=None):
+        calls.append((command, input_text))
+        return Result()
+
+    monkeypatch.setattr(redirect, "_run_nft", run_nft)
+
+    assert redirect.apply_redirect(tmp_path) == ruleset
+    assert calls == [(["nft", "-f", "-"], ruleset)]
+
+
+def test_apply_reports_nft_failure_without_cleanup_side_effect(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(redirect, "table_exists", lambda: False)
+    monkeypatch.setattr(redirect, "validate_ruleset", lambda candidate: "rules")
+
+    class Result:
+        returncode = 1
+        stderr = "apply failed"
+
+    monkeypatch.setattr(redirect, "_run_nft", lambda *args, **kwargs: Result())
+    with pytest.raises(RuntimeError, match="apply failed"):
+        redirect.apply_redirect(tmp_path)
+
+
+def test_remove_requires_receipt_and_deletes_only_dedicated_table(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    calls = []
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(redirect, "table_exists", lambda: True)
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    def run_nft(command, *, input_text=None):
+        calls.append((command, input_text))
+        return Result()
+
+    monkeypatch.setattr(redirect, "_run_nft", run_nft)
+
+    redirect.remove_redirect(tmp_path)
+
+    assert calls == [(["nft", "delete", "table", "ip", "ocpp_field_redirect"], None)]
+
+
+def test_remove_refuses_absent_table(tmp_path, monkeypatch):
+    write_receipt(tmp_path)
+    monkeypatch.setattr(redirect.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(redirect, "table_exists", lambda: False)
+
+    with pytest.raises(RuntimeError, match="redirect_table_not_found"):
+        redirect.remove_redirect(tmp_path)
+
+
+def test_apply_and_remove_cli_surface_failures_and_success(tmp_path, monkeypatch, capsys):
+    write_receipt(tmp_path)
+    monkeypatch.setattr(redirect, "apply_redirect", lambda run_dir: "checked-and-applied\n")
+    monkeypatch.setattr(redirect, "remove_redirect", lambda run_dir: None)
+
+    assert redirect.main(["apply", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "checked-and-applied\n"
+
+    assert redirect.main(["remove", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "removed table ip ocpp_field_redirect\n"
