@@ -240,6 +240,27 @@ def test_cleanup_removes_only_owned_address_and_receipt(tmp_path, monkeypatch):
     assert not (tmp_path / "address.json").exists()
 
 
+def test_cleanup_never_touches_other_addresses(tmp_path, monkeypatch):
+    (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
+    calls = []
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        discover,
+        "interface_addresses",
+        lambda interface: {"10.0.0.5", "172.16.0.9", "192.168.129.1"},
+    )
+
+    class Result:
+        returncode = 0
+        stderr = ""
+
+    monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
+
+    discover.cleanup_address(tmp_path)
+
+    assert calls == [["ip", "address", "del", "192.168.129.1/32", "dev", "eth0"]]
+
+
 def test_cleanup_is_safe_when_owned_address_is_already_absent(tmp_path, monkeypatch):
     (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
