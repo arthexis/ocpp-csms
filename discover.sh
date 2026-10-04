@@ -1,11 +1,6 @@
 #!/bin/sh
 set -eu
 
-if [ "$(id -u)" -eq 0 ]; then
-    printf 'Do not run discover.sh as root or with sudo. Run it as the normal appliance user.\n' >&2
-    exit 1
-fi
-
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 DATA_DIR=${OCPP_CSMS_DATA_DIR:-"$HOME/ocpp-csms-data"}
@@ -61,6 +56,11 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ "$(id -u)" -eq 0 ]; then
+    printf 'Do not run discover.sh as root or with sudo. Run it as the normal appliance user.\n' >&2
+    exit 1
+fi
 
 case "$PORT" in
     ''|*[!0-9]*)
