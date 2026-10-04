@@ -200,6 +200,8 @@ ocpp-csms profile composite --json
 
 The defaults are connector `0` and a 3600-second query window. Human-readable output shows the schedule start, rate unit, and every returned period. `--json` prints the structured charger response for higher-level tooling. A composite schedule is an effective result, not a reconstruction of the individual profiles that produced it.
 
+Some chargers accept station-wide profiles on connector `0` but reject `GetCompositeSchedule` for connector `0`. In that case the CSMS first preserves the standards-defined connector-0 attempt, then automatically queries every known nonzero physical connector with the same duration and rate unit. A fully successful fan-out still exits `0` and the human output clearly reports that aggregate connector-0 inspection is incompatible before showing each physical connector schedule. JSON reports `compatibility_fallback: "physical_connectors"` and preserves every individual response rather than fabricating a station-level aggregate. If any physical connector query fails, the fallback remains non-successful and the per-connector evidence is still shown.
+
 `profile clear` sends OCPP `ClearChargingProfile`. With no filters it asks the charger to clear every profile the charger permits to be cleared:
 
 ```bash
@@ -357,47 +359,3 @@ To use another user-owned data directory:
 ```bash
 OCPP_CSMS_DATA_DIR="$HOME/my-csms-data" sh install.sh
 ```
-
-The daemon and control CLI must use the same data directory because that directory determines the local control-socket path.
-
-## Development and tests
-
-Install development dependencies and run the test suite with:
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pytest
-```
-
-Pytest reports the 10 slowest test phases taking at least 10 ms on every run. This applies locally and in CI, so test-duration regressions remain visible without changing the test command.
-
-CI exercises the project on the appliance target and a newer compatibility target:
-
-- Debian 12 Bookworm / Python 3.11 / ARM64;
-- Debian 13 / Python 3.13 / ARM64.
-
-Tests are organized around behavior and state invariants rather than exact human-readable wording. Recovery tests deliberately cover both archive-level invariants and session/SQLite integration so restart, collision, and synthetic-session regressions remain visible.
-
-Remote-control tests cover outbound OCPP payloads, live-session replacement, Unix-socket dispatch, CLI request/exit behavior, and the key state invariant: an accepted remote start or stop command does not itself create or close a transaction. GetConfiguration tests additionally cover all-key and selected-key requests, the active-transaction guard, forced bypass, per-charger isolation, structured responses, and guard-decision evidence. Smart Charging tests cover the protocol transport, template mapping, composite rendering, clear filters, and an in-process CLI-to-control set -> composite -> clear workflow. Separate evidence tests verify that requests and confirmations are preserved with the correct `out`/`in` direction.
-
-## Source layout
-
-```text
-src/ocpp_csms/
-  app.py               # CLI and process startup
-  control.py           # local Unix-socket control protocol and client
-  profile_templates.py # built-in stateless Smart Charging templates
-  server.py            # WebSocket accept loop and connection lifecycle
-  session.py           # direct OCPP 1.6J handlers and outbound commands
-  events.py            # SQLite event store and derived state
-  diagnostics.py       # direct event queries and formatting
-  status.py            # status queries and formatting
-  transaction_query.py # read-only transaction query/model layer
-  transaction_cli.py   # transaction list/detail formatting
-  transactions.py      # JSON transaction archive and recovery
-  time.py              # timestamp helper
-systemd/
-  ocpp-csms.service.in
-```
-
-This README is the project documentation. For a project this small, important operational information should remain here rather than being split across a separate documentation tree.
