@@ -281,6 +281,17 @@ def capture_passive_tcp(interface: str, seconds: float) -> str:
     return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-s0", "-A", "tcp"], seconds)
 
 
+def _write_capture_log(path: str | Path, capture: str) -> None:
+    """Preserve a diagnostic capture without overwriting an earlier result."""
+    destination = Path(path).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("x", encoding="utf-8") as handle:
+            handle.write(capture)
+    except FileExistsError:
+        raise RuntimeError("capture_log_exists") from None
+
+
 def _tcp_blocks(text: str) -> list[tuple[re.Match[str], str]]:
     matches = list(_TCP_PACKET.finditer(text))
     return [(match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)]) for index, match in enumerate(matches)]
@@ -363,11 +374,20 @@ def discover_tcp(candidate: DiscoveryCandidate, *, listen_port: int, seconds: fl
     return parse_tcp_websocket(capture_tcp(candidate, seconds), candidate, listen_port=listen_port)
 
 
-def discover_existing_endpoint(*, interface: str, listen_port: int, seconds: float = _DEFAULT_SECONDS) -> RedirectReceipt | None:
+def discover_existing_endpoint(
+    *,
+    interface: str,
+    listen_port: int,
+    seconds: float = _DEFAULT_SECONDS,
+    capture_log: str | Path | None = None,
+) -> RedirectReceipt | None:
     local_addresses = host_addresses()
+    capture = capture_passive_tcp(interface, seconds)
+    if capture_log is not None:
+        _write_capture_log(capture_log, capture)
     try:
         return parse_passive_websocket(
-            capture_passive_tcp(interface, seconds),
+            capture,
             interface=interface,
             local_addresses=local_addresses,
             listen_port=listen_port,
@@ -454,12 +474,17 @@ def run_discovery(
     connect_timeout: float = 30.0,
     min_requests: int = _MIN_REQUESTS,
     poll_interval: float = 0.5,
+    existing_endpoint_only: bool = False,
+    passive_diagnostic_only: bool = False,
+    force_passive_capture: bool = False,
+    passive_capture_log: str | Path | None = None,
 ) -> DiscoveryResult:
     require_root()
     _refuse_stale_files(state_dir)
-    existing = wait_for_charger(data_dir, grace_seconds, poll_interval)
-    if existing:
-        return DiscoveryResult("already_connected", existing)
+    if not force_passive_capture:
+        existing = wait_for_charger(data_dir, grace_seconds, poll_interval)
+        if existing:
+            return DiscoveryResult("already_connected", existing)
     if redirect_tools.table_exists():
         raise RuntimeError("redirect_table_exists")
 
@@ -467,10 +492,19 @@ def run_discovery(
     redirect_applied = False
     candidate: DiscoveryCandidate | None = None
     try:
-        receipt = discover_existing_endpoint(interface=interface, listen_port=listen_port, seconds=tcp_seconds)
+        receipt = discover_existing_endpoint(
+            interface=interface,
+            listen_port=listen_port,
+            seconds=tcp_seconds,
+            capture_log=passive_capture_log,
+        )
         if receipt is not None:
+            if passive_diagnostic_only:
+                return DiscoveryResult("existing_endpoint_observed", None, None, receipt)
             _write_state(state_dir, "existing_endpoint")
         else:
+            if existing_endpoint_only or passive_diagnostic_only:
+                raise RuntimeError("no_existing_endpoint_websocket_upgrade")
             candidate = discover(interface=interface, seconds=arp_seconds, min_requests=min_requests)
             _write_state(state_dir, "candidate", candidate)
             claim_address(candidate, state_dir)
@@ -514,6 +548,25 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--arp-seconds", type=float, default=_DEFAULT_SECONDS)
     run_parser.add_argument("--tcp-seconds", type=float, default=_DEFAULT_SECONDS)
     run_parser.add_argument("--connect-timeout", type=float, default=30.0)
+    run_parser.add_argument(
+        "--existing-endpoint-only",
+        action="store_true",
+        help="Capture only an existing host-local OCPP endpoint; never fall back to ARP/address claiming.",
+    )
+    run_parser.add_argument(
+        "--passive-diagnostic-only",
+        action="store_true",
+        help="Record and report an existing host-local endpoint without installing a redirect.",
+    )
+    run_parser.add_argument(
+        "--force-passive-capture",
+        action="store_true",
+        help="Bypass the current-session grace check and begin passive capture immediately.",
+    )
+    run_parser.add_argument(
+        "--passive-capture-log",
+        help="Write the bounded passive TCP capture to a new local file for diagnosis.",
+    )
     cleanup_parser = subparsers.add_parser("cleanup", help="Remove discovery-owned redirect and address state")
     cleanup_parser.add_argument("--state-dir", required=True)
     parser.add_argument("--interface", default=_DEFAULT_INTERFACE)
@@ -535,6 +588,10 @@ def main(argv: list[str] | None = None) -> int:
                 arp_seconds=args.arp_seconds,
                 tcp_seconds=args.tcp_seconds,
                 connect_timeout=args.connect_timeout,
+                existing_endpoint_only=args.existing_endpoint_only,
+                passive_diagnostic_only=args.passive_diagnostic_only,
+                force_passive_capture=args.force_passive_capture,
+                passive_capture_log=args.passive_capture_log,
             )
         except (RuntimeError, ValueError) as exc:
             print(str(exc))

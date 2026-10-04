@@ -129,6 +129,51 @@ def test_existing_endpoint_timeout_removes_redirect_without_address_cleanup(tmp_
     assert not (tmp_path / "discovery.json").exists()
 
 
+def test_existing_endpoint_only_stops_before_arp_or_address_claim(tmp_path, monkeypatch):
+    prepare_base(monkeypatch, waits=(None,))
+    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: None)
+    monkeypatch.setattr(discover, "discover", lambda **kwargs: pytest.fail("ARP fallback must not run"))
+    monkeypatch.setattr(discover, "claim_address", lambda *args: pytest.fail("address claim must not run"))
+
+    with pytest.raises(RuntimeError, match="no_existing_endpoint_websocket_upgrade"):
+        discover.run_discovery(data_dir="/data", state_dir=tmp_path, grace_seconds=0, existing_endpoint_only=True)
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_passive_diagnostic_returns_endpoint_without_redirect_or_state(tmp_path, monkeypatch):
+    existing = receipt("10.42.0.1")
+    prepare_base(monkeypatch, waits=(None,))
+    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: existing)
+    monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda *args: pytest.fail("redirect must not run"))
+
+    result = discover.run_discovery(
+        data_dir="/data", state_dir=tmp_path, grace_seconds=0, passive_diagnostic_only=True
+    )
+
+    assert result.status == "existing_endpoint_observed"
+    assert result.redirect == existing
+    assert not list(tmp_path.iterdir())
+
+
+def test_force_passive_capture_bypasses_current_connection_grace(tmp_path, monkeypatch):
+    existing = receipt("10.42.0.1")
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: pytest.fail("grace check must not run"))
+    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: False)
+    monkeypatch.setattr(discover, "discover_existing_endpoint", lambda **kwargs: existing)
+
+    result = discover.run_discovery(
+        data_dir="/data",
+        state_dir=tmp_path,
+        force_passive_capture=True,
+        passive_diagnostic_only=True,
+    )
+
+    assert result.status == "existing_endpoint_observed"
+    assert not list(tmp_path.iterdir())
+
+
 def test_successful_arp_fallback_preserves_discovered_network_state(tmp_path, monkeypatch):
     found = prepare_arp_fallback(tmp_path, monkeypatch, waits=(None, "CP1"))
     redirect = receipt()
