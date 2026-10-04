@@ -23,6 +23,23 @@ def receipt():
     )
 
 
+def prepare_attempt(tmp_path, monkeypatch, *, waits=(None,), redirect_table=False):
+    found = candidate()
+    wait_results = iter(waits)
+    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: next(wait_results))
+    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: redirect_table)
+    monkeypatch.setattr(discover, "discover", lambda **kwargs: found)
+
+    def claim(candidate_value, state_dir):
+        assert candidate_value == found
+        (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
+        return discover.AddressClaim("eth0", "192.168.129.1")
+
+    monkeypatch.setattr(discover, "claim_address", claim)
+    return found
+
+
 def test_connected_chargers_uses_live_status(monkeypatch):
     monkeypatch.setattr(
         discover,
@@ -48,21 +65,9 @@ def test_run_exits_during_grace_without_network_tools(tmp_path, monkeypatch):
 
 
 def test_successful_run_preserves_discovered_network_state(tmp_path, monkeypatch):
-    found = candidate()
+    found = prepare_attempt(tmp_path, monkeypatch, waits=(None, "CP1"))
     redirect = receipt()
-    waits = iter([None, "CP1"])
     calls = []
-    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: next(waits))
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(discover, "discover", lambda **kwargs: found)
-
-    def claim(candidate_value, state_dir):
-        (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
-        calls.append("claim")
-        return discover.AddressClaim("eth0", "192.168.129.1")
-
-    monkeypatch.setattr(discover, "claim_address", claim)
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: redirect)
     monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda state_dir: calls.append("apply"))
 
@@ -70,7 +75,8 @@ def test_successful_run_preserves_discovered_network_state(tmp_path, monkeypatch
 
     assert result.status == "connected"
     assert result.charger_id == "CP1"
-    assert calls == ["claim", "apply"]
+    assert result.candidate == found
+    assert calls == ["apply"]
     assert (tmp_path / "address.json").exists()
     assert json.loads((tmp_path / "redirect.json").read_text())["destination_port"] == 8888
     state = json.loads((tmp_path / "discovery.json").read_text())
@@ -79,18 +85,8 @@ def test_successful_run_preserves_discovered_network_state(tmp_path, monkeypatch
 
 
 def test_tcp_discovery_failure_rolls_back_claim(tmp_path, monkeypatch):
-    found = candidate()
+    prepare_attempt(tmp_path, monkeypatch)
     cleaned = []
-    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: None)
-    monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(discover, "discover", lambda **kwargs: found)
-
-    def claim(candidate_value, state_dir):
-        (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
-        return discover.AddressClaim("eth0", "192.168.129.1")
-
-    monkeypatch.setattr(discover, "claim_address", claim)
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("tcp_failed")))
     monkeypatch.setattr(discover, "cleanup_address", lambda state_dir: cleaned.append("address") or (tmp_path / "address.json").unlink())
 
@@ -102,19 +98,10 @@ def test_tcp_discovery_failure_rolls_back_claim(tmp_path, monkeypatch):
 
 
 def test_connection_timeout_removes_redirect_and_address(tmp_path, monkeypatch):
-    found = candidate()
+    prepare_attempt(tmp_path, monkeypatch, waits=(None, None))
     redirect = receipt()
     cleaned = []
     table_checks = iter([False, True])
-    monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(discover, "wait_for_charger", lambda *args: None)
-    monkeypatch.setattr(discover, "discover", lambda **kwargs: found)
-
-    def claim(candidate_value, state_dir):
-        (tmp_path / "address.json").write_text('{"interface":"eth0","address":"192.168.129.1"}')
-        return discover.AddressClaim("eth0", "192.168.129.1")
-
-    monkeypatch.setattr(discover, "claim_address", claim)
     monkeypatch.setattr(discover, "discover_tcp", lambda *args, **kwargs: redirect)
     monkeypatch.setattr(discover.redirect_tools, "apply_redirect", lambda state_dir: None)
     monkeypatch.setattr(discover.redirect_tools, "table_exists", lambda: next(table_checks))
@@ -130,7 +117,7 @@ def test_connection_timeout_removes_redirect_and_address(tmp_path, monkeypatch):
 
 def test_stale_state_is_refused_before_new_attempt(tmp_path, monkeypatch):
     monkeypatch.setattr(discover.os, "geteuid", lambda: 0)
-    (tmp_path / "address.json").write_text('{}')
+    (tmp_path / "address.json").write_text("{}")
     with pytest.raises(RuntimeError, match="discovery_state_exists"):
         discover.run_discovery(data_dir="/data", state_dir=tmp_path, grace_seconds=0)
 
