@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import shutil
@@ -20,6 +21,8 @@ _GET = re.compile(r"GET\s+(?P<path>\S+)\s+HTTP/1\.[01]", re.IGNORECASE)
 _HOST = re.compile(r"(?im)^Host:\s*(?P<host>\S+)\s*$")
 _UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
 _CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
+_INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
+_TABLE = "ocpp_field_redirect"
 
 
 @dataclass(frozen=True)
@@ -166,10 +169,110 @@ def capture(interface: str, listen_port: int, seconds: float, run_dir: str | Pat
     return receipt
 
 
+def receipt_from_json(payload: object) -> RedirectReceipt:
+    if not isinstance(payload, dict):
+        raise ValueError("invalid_redirect_receipt")
+    try:
+        requests_payload = payload["requests"]
+        if not isinstance(requests_payload, list):
+            raise TypeError
+        requests = [
+            WebSocketRequest(
+                destination_ip=str(request["destination_ip"]),
+                host=str(request["host"]),
+                path=str(request["path"]),
+            )
+            for request in requests_payload
+            if isinstance(request, dict)
+        ]
+        if len(requests) != len(requests_payload):
+            raise TypeError
+        receipt = RedirectReceipt(
+            interface=str(payload["interface"]),
+            listen_port=int(payload["listen_port"]),
+            source_ip=str(payload["source_ip"]),
+            destination_ips=[str(item) for item in payload["destination_ips"]],
+            requests=requests,
+            captured_at=str(payload["captured_at"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("invalid_redirect_receipt") from None
+    validate_receipt(receipt)
+    return receipt
+
+
+def load_receipt(run_dir: str | Path) -> RedirectReceipt:
+    path = Path(run_dir).expanduser() / "redirect.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RuntimeError("redirect_receipt_not_found") from None
+    except json.JSONDecodeError:
+        raise ValueError("invalid_redirect_receipt") from None
+    return receipt_from_json(payload)
+
+
+def _ipv4(value: str, error: str) -> str:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        raise ValueError(error) from None
+    if address.version != 4:
+        raise ValueError(error)
+    return str(address)
+
+
+def validate_receipt(receipt: RedirectReceipt) -> None:
+    if not _INTERFACE.fullmatch(receipt.interface):
+        raise ValueError("invalid_interface")
+    if not 1 <= receipt.listen_port <= 65535:
+        raise ValueError("invalid_listen_port")
+    _ipv4(receipt.source_ip, "invalid_source_ip")
+    if not receipt.destination_ips:
+        raise ValueError("no_destination_ips")
+    normalized = [_ipv4(destination, "invalid_destination_ip") for destination in receipt.destination_ips]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("duplicate_destination_ip")
+    request_destinations = {_ipv4(request.destination_ip, "invalid_request_destination_ip") for request in receipt.requests}
+    if not request_destinations.issubset(set(normalized)):
+        raise ValueError("request_destination_not_captured")
+
+
+def render_ruleset(receipt: RedirectReceipt) -> str:
+    validate_receipt(receipt)
+    destinations = ", ".join(sorted(receipt.destination_ips, key=ipaddress.ip_address))
+    return (
+        f"table ip {_TABLE} {{\n"
+        "  chain prerouting {\n"
+        "    type nat hook prerouting priority dstnat; policy accept;\n"
+        f'    iifname "{receipt.interface}" ip saddr {receipt.source_ip} '
+        f"ip daddr {{ {destinations} }} tcp dport 80 redirect to :{receipt.listen_port}\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def validate_ruleset(receipt: RedirectReceipt) -> str:
+    ruleset = render_ruleset(receipt)
+    if shutil.which("nft") is None:
+        raise RuntimeError("nft_not_found")
+    result = subprocess.run(
+        ["nft", "-c", "-f", "-"],
+        input=ruleset,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "nft_validation_failed"
+        raise RuntimeError(detail)
+    return ruleset
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m field.redirect",
-        description="Passive field discovery for plaintext OCPP WebSocket redirect candidates.",
+        description="Passive field discovery and validation for plaintext OCPP WebSocket redirects.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     capture_parser = subparsers.add_parser("capture", help="Observe a bounded passive capture and write redirect.json")
@@ -177,6 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--listen-port", type=int, required=True)
     capture_parser.add_argument("--seconds", type=float, required=True)
     capture_parser.add_argument("--run-dir", required=True)
+    validate_parser = subparsers.add_parser("validate", help="Render redirect.json as nftables rules and check with nft -c")
+    validate_parser.add_argument("run_dir")
     return parser
 
 
@@ -189,6 +294,14 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc))
             return 1
         print(json.dumps(receipt.to_json(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "validate":
+        try:
+            ruleset = validate_ruleset(load_receipt(args.run_dir))
+        except (RuntimeError, ValueError) as exc:
+            print(str(exc))
+            return 1
+        print(ruleset, end="")
         return 0
     return 2
 
