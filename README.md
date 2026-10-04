@@ -14,6 +14,14 @@ sh install.sh
 
 Do not run the installer itself with `sudo`. The installed `ocpp-csms.service` runs as the installing user, listens on `0.0.0.0:9000` by default, starts at boot, and restarts on failure.
 
+Before changing an existing appliance, the installer performs a read-only usage preflight. An active transaction always blocks installation. If the current CSMS has connected but idle chargers, installation also stops unless the operator explicitly authorizes an idle handoff with:
+
+```bash
+sh install.sh --rollover
+```
+
+`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS; the staged handoff mechanics are kept separate from this safety policy.
+
 Check the appliance with:
 
 ```bash
