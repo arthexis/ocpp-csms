@@ -87,10 +87,10 @@ ensure_user_bin_on_path() {
 
     shell_name=$(basename "${SHELL:-sh}")
     case "$shell_name" in
-        bash) rc="$HOME/.bashrc"; path_line='export PATH="$HOME/.local/bin:$PATH"' ;;
-        zsh) rc="$HOME/.zshrc"; path_line='export PATH="$HOME/.local/bin:$PATH"' ;;
-        fish) rc="$HOME/.config/fish/config.fish"; path_line='fish_add_path "$HOME/.local/bin"' ;;
-        *) rc="$HOME/.profile"; path_line='export PATH="$HOME/.local/bin:$PATH"' ;;
+        bash) rc="$HOME/.bashrc"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        zsh) rc="$HOME/.zshrc"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        fish) rc="$HOME/.config/fish/config.fish"; path_line="fish_add_path \"$BIN_DIR\"" ;;
+        *) rc="$HOME/.profile"; path_line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
     esac
 
     mkdir -p "$(dirname "$rc")"
