@@ -63,6 +63,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         "chargers": [],
         "active_chargers": active_chargers,
     }
+    live_since_id: int | None = None
     if database.exists():
         try:
             with _connect(database) as connection:
@@ -74,23 +75,29 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
                     if running:
                         row = connection.execute(
                             """
-                            SELECT occurred_at FROM runtime_events
+                            SELECT id, occurred_at FROM runtime_events
                             WHERE event = 'server_started'
                             ORDER BY id DESC LIMIT 1
                             """
                         ).fetchone()
                         if row:
+                            live_since_id = int(row["id"])
                             result["started_at"] = row["occurred_at"]
         except sqlite3.Error:
             result["database"] = "error"
     if transactions.exists():
         result["transactions"] = "ok" if transactions.is_dir() else "error"
     if result["database"] == "ok":
-        result["chargers"] = charger_statuses(database)
+        result["chargers"] = charger_statuses(database, live_since_id=live_since_id)
     return result
 
 
-def charger_statuses(database: Path, charger_id: str | None = None) -> list[ChargerStatus]:
+def charger_statuses(
+    database: Path,
+    charger_id: str | None = None,
+    *,
+    live_since_id: int | None = None,
+) -> list[ChargerStatus]:
     if not database.exists():
         return []
     with _connect(database) as connection:
@@ -106,19 +113,31 @@ def charger_statuses(database: Path, charger_id: str | None = None) -> list[Char
             charger_ids = sorted(row[0] for row in rows if row[0])
         else:
             charger_ids = [charger_id]
-        return [_charger_status(connection, value) for value in charger_ids]
+        return [
+            _charger_status(connection, value, live_since_id=live_since_id)
+            for value in charger_ids
+        ]
 
 
-def _charger_status(connection: sqlite3.Connection, charger_id: str) -> ChargerStatus:
+def _charger_status(
+    connection: sqlite3.Connection,
+    charger_id: str,
+    *,
+    live_since_id: int | None = None,
+) -> ChargerStatus:
     runtime = connection.execute(
         """
-        SELECT occurred_at, event FROM runtime_events
+        SELECT id, occurred_at, event FROM runtime_events
         WHERE charger_id = ? AND event IN ('charger_connected', 'charger_disconnected')
         ORDER BY id DESC LIMIT 1
         """,
         (charger_id,),
     ).fetchone()
-    connected = bool(runtime and runtime["event"] == "charger_connected")
+    connected = bool(
+        runtime
+        and runtime["event"] == "charger_connected"
+        and (live_since_id is None or int(runtime["id"]) > live_since_id)
+    )
 
     connection_event = connection.execute(
         """
