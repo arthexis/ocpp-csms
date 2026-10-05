@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from field import handoff
-from field.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_discover import handoff
+from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 
 
 def receipt():
