@@ -1,0 +1,15 @@
+---
+# The live unit task notifies daemon reload only after the final safety and
+# schema gates have passed. Service start/restart remains explicit in cutover.
+- name: Reload systemd daemon
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+# Reserved for verification/rollback flows that deliberately need a restart;
+# ordinary cutover starts the service explicitly after promotion.
+- name: Restart OCPP CSMS
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_csms_service_name }}"
+    state: restarted

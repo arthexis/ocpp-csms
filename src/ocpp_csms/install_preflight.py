@@ -14,7 +14,6 @@ from ocpp_csms.transaction_query import TransactionQuery
 @dataclass(frozen=True)
 class InstallPreflight:
     allowed: bool
-    mode: str
     connected_chargers: tuple[str, ...]
     active_chargers: tuple[str, ...]
     reason: str | None = None
@@ -65,16 +64,15 @@ def _database_active_chargers(data_dir: Path, schema_version: int | None) -> tup
     return tuple(sorted(str(row[0]) for row in rows if row[0]))
 
 
-def evaluate_preflight(data_dir: str | Path, *, rollover: bool = False) -> InstallPreflight:
+def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
     root = Path(data_dir).expanduser()
     schema = inspect_schema(root)
 
     if schema.exists and schema.version == 0:
-        return InstallPreflight(False, "blocked", (), (), "events database is unversioned")
+        return InstallPreflight(False, (), (), "events database is unversioned")
     if schema.exists and schema.version is not None and schema.version > CURRENT_SCHEMA_VERSION:
         return InstallPreflight(
             False,
-            "blocked",
             (),
             (),
             f"events database schema {schema.version} is newer than supported {CURRENT_SCHEMA_VERSION}",
@@ -88,7 +86,6 @@ def evaluate_preflight(data_dir: str | Path, *, rollover: bool = False) -> Insta
         active = tuple(sorted(set(active_database) | set(active_archive)))
         return InstallPreflight(
             False,
-            "blocked",
             connected,
             active,
             "active transaction state disagrees between SQLite and transaction archive",
@@ -97,41 +94,27 @@ def evaluate_preflight(data_dir: str | Path, *, rollover: bool = False) -> Insta
     if active_archive:
         return InstallPreflight(
             False,
-            "blocked",
             connected,
             active_archive,
-            "active charging detected; --rollover cannot override active charging",
+            "active charging detected; service handoff is blocked",
         )
 
-    if connected and not rollover:
-        return InstallPreflight(
-            False,
-            "rollover-required",
-            connected,
-            (),
-            "idle chargers are connected; re-run with --rollover to authorize handoff",
-        )
-
-    return InstallPreflight(True, "rollover" if connected else "normal", connected, ())
+    return InstallPreflight(True, connected, ())
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only install safety preflight")
     parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--rollover", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    result = evaluate_preflight(args.data_dir, rollover=args.rollover)
+    result = evaluate_preflight(args.data_dir)
     if args.json:
         print(json.dumps(asdict(result), sort_keys=True))
-    elif result.allowed:
-        if result.mode == "rollover":
-            print("Rollover authorized for idle connected charger(s): " + ", ".join(result.connected_chargers))
-    else:
+    elif not result.allowed:
         print(f"Installation refused: {result.reason}")
         if result.connected_chargers:
             print("Connected charger(s): " + ", ".join(result.connected_chargers))

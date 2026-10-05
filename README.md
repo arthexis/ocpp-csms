@@ -14,6 +14,10 @@ sh install.sh
 
 Do not run the installer itself with `sudo`. The installed `ocpp-csms.service` runs as the installing user, listens on `0.0.0.0:9000` by default, starts at boot, and restarts on failure.
 
+Before changing an existing appliance, the installer performs a read-only safety preflight. Active charging always blocks installation. Connected but idle chargers are expected and are handed to the replacement service automatically: the installer stages the replacement while the old CSMS stays live, repeats the active-charge check immediately before cutover, then requires fresh reconnect evidence from every charger that was connected at the final gate.
+
+Normal upgrades use the same staged cutover machinery even when no charger is connected. Expensive work is done in `venv.next`; the previous environment is retained as `venv.previous` after promotion so startup failures can be recovered without rebuilding the old environment.
+
 Check the appliance with:
 
 ```bash
@@ -22,84 +26,47 @@ sudo systemctl status ocpp-csms
 sudo journalctl -u ocpp-csms -f
 ```
 
-If the charger is already configured for this CSMS, nothing else is required.
+If the charger is already configured for this CSMS, that is all that is required.
 
-Before replacing an existing appliance, installation performs a read-only usage preflight. Active charging always blocks replacement. Connected but idle chargers require explicit handoff authorization:
+## Installation and OCPP Discover
+
+Choose another listener endpoint during installation with:
 
 ```bash
-sh install.sh --rollover
+sh install.sh --host 0.0.0.0 --port 8888
 ```
 
-`--rollover` never overrides active charging. The installer stages the replacement, repeats the charging check immediately before cutover, and requires fresh reconnect evidence from chargers connected at the final gate.
+or equivalent environment values:
 
-## OCPP Discover
+```bash
+OCPP_CSMS_HOST=0.0.0.0 OCPP_CSMS_PORT=8888 sh install.sh
+```
 
-Some chargers retain an old CSMS endpoint that cannot easily be reconfigured. OCPP Discover is the companion service for those installations.
+The selected host and port are written into the installed systemd service and reused after reboot. Use `OCPP_CSMS_DATA_DIR` to choose another user-owned data directory.
 
-Install it with the appliance:
+### Optional network discovery
+
+Some field chargers remember an old server or gateway address and cannot simply be pointed at the new CSMS. OCPP Discover is an optional network-bootstrap helper for those cases.
+
+Install the appliance together with discovery:
 
 ```bash
 sh install.sh --with-discover
 ```
 
-or manage it directly:
+Idle connected chargers are handed off automatically. If any transaction is active, installation is refused.
+
+This keeps the normal CSMS unprivileged and installs a separate root `ocpp-discover.service`. At boot, Discover first gives the charger a short chance to connect normally. If no charger appears, it passively watches for validated plaintext WebSocket traffic to an IPv4 address already owned by the selected Ethernet interface. When that existing endpoint is visible, Discover applies only the narrow source/destination/port redirect needed to reach the local CSMS and does not claim another address. If no usable local endpoint is visible, it falls back to repeated unresolved-ARP discovery, temporarily claims only that exact IPv4 address as an additive `/32`, observes the charger's destination and port, installs the narrow redirect, and stops once the CSMS reports a real charger session.
+
+Discover defaults to `eth0`. Its standalone management surface is:
 
 ```bash
 ./discover.sh                         # run discovery now
-./discover.sh --interface eno1       # select charger-facing interface
-./discover.sh --install              # install and enable at boot
-./discover.sh --cleanup              # remove transient Discover-owned state
-./discover.sh --uninstall            # remove Discover and its owned state
+./discover.sh --interface eno1       # use another Ethernet interface
+./discover.sh --install              # install and enable discovery at boot
+./discover.sh --cleanup              # remove discovery-owned network state
+./discover.sh --uninstall            # disable/remove discovery and clean its state
 ```
-
-The installed Python command is also available as `ocpp-discover`. `ocpp-discover run ...` performs an explicit discovery attempt; `ocpp-discover service ...` is the boot observation and reconciliation path used by systemd.
-
-### Discover operating model
-
-Discover separates three kinds of truth:
-
-```text
-expected     /var/lib/ocpp-discover/discovered.json
-configured   /etc/ocpp-discover/nftables.conf
-observed     live charger traffic and current-process CSMS evidence
-```
-
-`discovered.json` records **what adaptation was proven**. It does not contain runtime health such as `healthy`, `offline`, or `last_status`.
-
-The nftables fragment is executable persistent host configuration. Installation adds a managed include to `/etc/nftables.conf`; Debian loads the fragment during normal boot. Discover does not replay the adaptation itself and does not restart or replace the global nftables ruleset.
-
-A normal boot is deliberately optimistic:
-
-1. Debian loads the previously proven Discover fragment.
-2. The CSMS starts normally.
-3. Discover reads and validates `discovered.json`.
-4. Fresh current-process connection evidence plus fresh inbound OCPP proves the adaptation for this boot.
-5. Discover exits successfully without rewriting networking or persistent state.
-
-If the expected charger is not observed during the startup window, Discover emits one clear error and enters passive waiting. **Charger absence is evidence to investigate, never permission to mutate networking.** It does not repeatedly rediscover, rewrite nftables, manipulate addresses, or restart services merely because the charger is offline.
-
-If charger activity appears later, Discover validates it again. A normal late connection still requires fresh inbound OCPP. A positively observed different plaintext WebSocket endpoint can enter safe reconciliation.
-
-Reconciliation is intentionally narrow:
-
-1. observe positive contradictory endpoint evidence;
-2. refuse reconciliation while any transaction is active;
-3. replace only Discover's owned live nftables table with the candidate;
-4. require fresh reconnect and fresh inbound OCPP;
-5. only after proof, replace the persistent fragment and `discovered.json`;
-6. if proof fails, restore the previously proven live and durable adaptation.
-
-Configuration mismatch by itself does not authorize reconciliation. Discover waits for charger evidence rather than guessing.
-
-### First discovery
-
-When no proven adaptation exists, Discover first looks for validated plaintext HTTP WebSocket Upgrade traffic. If the charger is already targeting an IPv4 address owned by the host, Discover can install only the narrow source/destination/port redirect and does not claim another address.
-
-If no usable host-local endpoint is visible, the discovery path can fall back to unresolved-ARP evidence, temporarily claim only the exact required IPv4 address as an additive `/32`, observe the charger endpoint, and install the narrow redirect. Temporary state is rolled back on failure. Only a candidate proven by fresh CSMS connection and inbound OCPP is promoted to persistent adaptation.
-
-TLS/WSS traffic is opaque to this mechanism and is refused rather than guessed.
-
-### Discover dependencies and ownership
 
 `discover.sh --install` installs missing Debian runtime dependencies when necessary:
 
@@ -109,18 +76,19 @@ nftables
 iproute2
 ```
 
-A plain discovery run never installs packages automatically.
+A plain `./discover.sh` never installs packages automatically; if dependencies are missing it prints the Debian installation command instead.
 
-Discover owns only:
+The base installer deliberately treats discovery as an optional feature:
 
-```text
-/etc/ocpp-discover/nftables.conf
-/var/lib/ocpp-discover/discovered.json
-/run/ocpp-discover/
-/etc/systemd/system/ocpp-discover.service
+```bash
+sh install.sh --with-discover       # install/enable it
+sh install.sh --without-discover    # disable/remove it
+sh install.sh                       # preserve its current enabled/disabled state
 ```
 
-Install/upgrade is the normal place where the managed `/etc/nftables.conf` include is changed. Runtime discovery never edits that global file. Uninstall removes only Discover-owned integration and state and does not remove packages that may be used elsewhere.
+Discovery changes are processed only after the base CSMS cutover succeeds. The installer checks active charging again before applying an explicit Discover install/uninstall request.
+
+Discovery only redirects **validated plaintext HTTP WebSocket Upgrade traffic**. TLS/WSS traffic is detected as opaque and refused rather than guessed. The invariant is to apply the minimum network mutation necessary: an existing host address is never re-claimed or removed, while the ARP fallback owns and later cleans only the exact `/32` it added. Failed attempts roll back only state created by that attempt. Details and field-only primitives live in `field/README.md`.
 
 ## Operating model
 
@@ -139,11 +107,13 @@ The WebSocket listener uses a single direct event loop. Normal OCPP handling wri
 
 The built-in listener is intended for a trusted charger LAN or equivalent private network boundary. It uses plain `ws://`; it does not terminate TLS or authenticate clients itself.
 
-**Do not expose the built-in listener directly to an untrusted network or the public Internet.** Use an appropriate private network, VPN, firewall, or TLS-terminating boundary when chargers must cross a broader network.
+**Do not expose the built-in listener directly to an untrusted network or the public Internet.**
 
-OCPP Discover does not change this trust model. It is a local bootstrap mechanism for a charger-facing Ethernet network.
+When chargers must reach the CSMS across a broader network, put an appropriate boundary in front of it, such as a private VPN/WireGuard network, a TLS-terminating reverse proxy exposing `wss://`, or an equivalent private routed network/firewall.
 
-Operator commands use `<data-dir>/control.sock`, a Unix-domain socket created mode `0660`; they do not expose a second TCP control service.
+OCPP Discover does not change this trust model. It is a local bootstrap mechanism for a charger-facing Ethernet network, not a public-network interception service.
+
+Operator control commands do not open another TCP service. The CLI talks to the running daemon through `<data-dir>/control.sock`, a Unix-domain socket created mode `0660`. Local filesystem ownership and permissions are therefore the control boundary.
 
 ## Commands
 
@@ -170,105 +140,240 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-All commands accept `--data-dir PATH` before the command name. `--cp` is the lowercase alias for `--connector`; `--txn` is the lowercase alias for `--transaction`. Diagnostic timestamps accept ISO-8601 and treat timestamps without an offset as UTC.
+All commands accept `--data-dir PATH` before the command name. Diagnostic timestamps accept ISO-8601; timestamps without an offset are treated as UTC. `--cp` is the lowercase alias for `--connector`; `--txn` is the lowercase alias for `--transaction`.
 
-`status` is read-only. `transactions` is the canonical transaction inspector and `txn` is its exact alias. `events` reads recorded evidence; `explain` presents evidence for one charger and incident window without inventing a root cause.
+`init` creates the SQLite database and JSON transaction archive. `status` is read-only. `transactions` is the canonical transaction inspector and `txn` is its exact alias. `events` reads recorded OCPP/runtime evidence, while `explain` presents the same evidence for one charger and incident window without inventing a root cause.
 
-Control-command exit behavior is simple: success returns `0`, OCPP rejection/disconnection/guard/control-socket failure returns `1`, and invalid arguments use normal `argparse` behavior and return `2`.
+Control-command exit behavior is intentionally simple:
 
-## Transactions and remote control
+- OCPP `Accepted` and successful queries return `0`;
+- OCPP rejection, disconnected chargers, guarded operations, and control-socket failures return `1`;
+- invalid command-line arguments use normal `argparse` behavior and return `2`.
 
-`txn --active` shows unfinished transactions and agrees with `status --charging`. `txn --last` shows the newest matching completed transaction. A positional transaction ID opens detail; `--events` adds its OCPP timeline.
+## Transactions and status
 
-Remote control stays inside the daemon that owns the live charger WebSocket. Supported commands include `GetConfiguration`, Smart Charging profile operations, remote start/stop, and Soft/Hard reset. Commands are sent only to chargers connected to the current process and are never queued for later delivery.
+Transaction inspection defaults to recent transactions newest first. `--active` shows unfinished transactions; `--last` shows the newest matching non-active transaction. A positional transaction ID opens the detailed read-only view. Add `--events` to append its transaction-scoped OCPP timeline.
 
-An accepted remote command and the resulting charger state are separate facts. For example, an accepted `RemoteStartTransaction` does not create a transaction until the charger sends `StartTransaction`.
+```bash
+ocpp-csms txn
+ocpp-csms txn --active
+ocpp-csms txn --last
+ocpp-csms txn --charger charger-01 --last
+ocpp-csms txn --cp 1 --active
+ocpp-csms txn 17 --events
+```
 
-`config` is blocked by default for a charger with an active transaction because some field chargers behave unreliably when configuration traffic is interleaved with charging. `--force` deliberately bypasses that appliance safety guard.
+`status --charging` uses the same archived transaction-activity model as `txn --active`, so the two commands agree on which chargers have unfinished transactions. SQLite remains the source for live connector/status detail.
 
-Smart Charging remains stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own business/site policy.
+A remote command confirmation and an actual transaction state change are separate facts. An accepted `RemoteStartTransaction` does not create a transaction; the transaction appears only when the charger sends `StartTransaction`. An accepted remote stop likewise does not close the transaction until `StopTransaction` arrives.
+
+## Remote charger control
+
+The control path stays inside the daemon that owns the live charger WebSocket:
+
+```text
+ocpp-csms CLI
+    |
+    | Unix socket: <data-dir>/control.sock
+    v
+running CSMS daemon
+    |
+    | current ChargePointSession
+    v
+charger WebSocket
+```
+
+Supported mappings include:
+
+- `config` -> `GetConfiguration`;
+- `profile set` -> `SetChargingProfile`;
+- `profile composite` -> `GetCompositeSchedule`;
+- `profile clear` -> `ClearChargingProfile`;
+- `start` -> `RemoteStartTransaction`;
+- `stop` -> `RemoteStopTransaction`;
+- `reboot` -> `Reset`, Soft by default and Hard with `--hard`.
+
+Commands are only sent to chargers currently connected to this process; they are not queued for later delivery.
+
+Examples:
+
+```bash
+ocpp-csms start charger-01 --cp 1 --id-tag REMOTE
+ocpp-csms stop charger-01 --txn 42
+ocpp-csms reboot charger-01
+ocpp-csms reboot charger-01 --hard
+```
+
+The event stream preserves both the outbound CSMS request and inbound charger confirmation so diagnostics can distinguish “command issued,” “command accepted,” and “charger actually changed state.”
+
+## GetConfiguration safety policy
+
+`config` sends live OCPP `GetConfiguration` and displays what the charger reports. The CSMS does not coerce values, infer defaults, or maintain a desired configuration model.
+
+```bash
+ocpp-csms config charger-01
+ocpp-csms config charger-01 HeartbeatInterval MeterValueSampleInterval
+```
+
+Because some field chargers behave unreliably when configuration traffic is interleaved with transaction traffic, `GetConfiguration` is blocked by default when that charger has an active transaction. This is appliance safety policy, not an OCPP protocol requirement. `-f` / `--force` bypasses the guard when the operator deliberately accepts that risk.
+
+```bash
+ocpp-csms config charger-01 HeartbeatInterval --force
+```
+
+Blocked and forced decisions are preserved as runtime evidence; actual requests and confirmations are preserved as normal OCPP events.
+
+## Smart Charging
+
+Smart Charging is intentionally **stateless on the CSMS side**. The charger owns its installed profiles and is the source of truth; site/business policy belongs in an upper layer that invokes these commands when needed.
+
+The current built-in template is `max-power`:
+
+```bash
+ocpp-csms profile list
+ocpp-csms profile help TEMPLATE
+ocpp-csms profile set max-power --watts 60000
+```
+
+It sends a station-wide `ChargePointMaxProfile` on connector `0`, profile ID `1`, stack level `0`, Absolute kind, with a watt-based schedule beginning at period `0`.
+
+`profile composite` uses `GetCompositeSchedule` to inspect the **effective schedule** reported by the charger:
+
+```bash
+ocpp-csms profile composite
+ocpp-csms profile composite --cp 1 --duration 7200
+ocpp-csms profile composite --json
+```
+
+Some chargers accept station-wide profiles on connector `0` but reject `GetCompositeSchedule` there. In that case the CSMS preserves the rejected connector-0 attempt and queries each known physical connector. A fully successful fan-out is reported as a compatibility fallback; the CSMS never fabricates a station-level aggregate from those schedules.
+
+`profile clear` sends `ClearChargingProfile` and accepts the OCPP filters exposed by the CLI:
+
+```bash
+ocpp-csms profile clear
+ocpp-csms profile clear --id 7
+ocpp-csms profile clear --cp 1
+ocpp-csms profile clear --purpose ChargePointMaxProfile
+ocpp-csms profile clear --stack-level 2
+```
+
+These Smart Charging commands use the same live-session control path and evidence recording as other outbound commands. They are not blocked merely because a transaction is active.
 
 ## Transaction recovery
 
-Queued OCPP traffic can outlive the CSMS instance that issued a transaction ID. Recovery preserves evidence without silently merging unrelated activity. Historical IDs can be adopted when free, recovered IDs do not advance the local sequence, unknown historical stops create recovered stopped records, and collisions with unrelated local transactions remain unresolved rather than overwriting either transaction.
+Queued OCPP 1.6 traffic can outlive the CSMS instance that originally issued its transaction ID. Recovery preserves evidence without silently merging unrelated activity:
+
+- a retried `StartTransaction` that was never acknowledged follows bounded idempotency handling;
+- queued `MeterValues` or `StopTransaction` for an unknown historical ID can adopt that exact ID when it is free locally;
+- recovered historical IDs do not advance the normal local ID sequence;
+- later evidence for the same recovered ID attaches to that recovered transaction;
+- an unknown historical `StopTransaction` creates a recovered stopped record rather than a synthetic open session;
+- collisions with an unrelated local transaction are kept unresolved instead of overwriting either transaction.
+
+Collision evidence includes a different charge point, a different connector when both are known, or an incoming transaction timestamp that predates the local transaction start. Recovery decisions are also recorded as structured runtime events.
 
 ## Data and evidence
 
-By default:
+By default the appliance stores:
 
 ```text
 ~/ocpp-csms-data/
   control.sock
   ocpp-csms.sqlite3
-  ocpp-csms.sqlite3.schema-<old-version>.bak
+  ocpp-csms.sqlite3.schema-<old-version>.bak   # only when a schema upgrade occurs
   transactions/
+    YYYY-MM-DD/
+      <charger>-<transaction>.json
   transactions-unresolved/
+    YYYY-MM-DD/
+      <charger>-<transaction>-<message>-<suffix>.json
 ```
 
-SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and diagnostic state. JSON transaction archives remain directly readable and copyable.
+`control.sock` exists only while the daemon is running. JSON archives remain directly readable and copyable. SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and the small amount of operational state needed by diagnostics.
 
-Schema versions are independent of application releases. New databases are created at the current schema; normal CSMS startup never upgrades an old database implicitly. Installation performs explicit compatibility inspection and creates a SQLite-safe backup before a supported upgrade. Unknown, unversioned, or newer schemas are refused rather than guessed.
+SQLite schema versions are independent of application releases. The current schema is version `2`, recorded with `PRAGMA user_version`; it changes only when the database structure changes. Brand-new databases are created directly at the current schema. Normal CSMS startup never upgrades an older database implicitly. During installation, schema compatibility is inspected before cutover; a supported older schema is upgraded explicitly only after the old CSMS has stopped, and a SQLite-safe versioned backup is created first. Unknown/unversioned databases and schemas newer than the running code are refused rather than guessed.
+
+Incoming OCPP calls and replies are preserved together with CSMS-initiated requests and charger confirmations. Connection lifecycle, configuration guard decisions, Smart Charging evidence, transaction recovery, and unresolved collisions are recorded rather than reduced to human-readable logs.
 
 ## Installed layout
 
-The normal appliance runs as the installing user. The base installer uses `sudo` only for system installation/management.
+The normal appliance runs as the installing user, not root. The base installer uses `sudo` only for systemd installation/management.
 
 ```text
-~/.local/share/ocpp-csms/venv/
-~/.local/share/ocpp-csms/venv.previous/
-~/.local/share/ocpp-csms/venv.next/
-~/.local/bin/ocpp-csms
-~/.local/bin/csms
-~/ocpp-csms-data/
+~/.local/share/ocpp-csms/venv/          active private Python environment
+~/.local/share/ocpp-csms/venv.previous/ previous environment retained after cutover
+~/.local/share/ocpp-csms/venv.next/     temporary staging environment during install
+~/.local/bin/ocpp-csms                  stable command
+~/.local/bin/csms                       short command alias
+~/ocpp-csms-data/                       user-owned appliance data
 /etc/systemd/system/ocpp-csms.service
-
-/etc/ocpp-discover/nftables.conf
-/var/lib/ocpp-discover/discovered.json
-/run/ocpp-discover/
-/etc/systemd/system/ocpp-discover.service
 ```
 
-`venv.next` is staging. `venv.previous` is retained after promotion so startup failures can restore the previous binary environment when the database schema has not changed.
+`venv.next` is removed when staging fails before promotion. `venv.previous` is retained after a successful promotion so a startup failure can restore the prior binary environment when the database schema has not changed. If a schema upgrade has already occurred, automatic rollback is intentionally disabled because restoring the old binary would also require an evidence-sensitive database restore.
+
+When OCPP Discover is installed, its small field runtime is copied under the appliance prefix and the separate root service is added:
+
+```text
+~/.local/share/ocpp-csms/discover/
+/etc/systemd/system/ocpp-discover.service
+/run/ocpp-discover/                  transient discovery receipts/state
+```
+
+Uninstalling Discover does not uninstall the CSMS or remove `tcpdump`, `nftables`, or `iproute2` packages that may be used elsewhere.
 
 ## Development and tests
 
-Install development dependencies with:
+Install development dependencies and run the normal suite with:
 
 ```bash
 python -m pip install -e ".[dev]"
+python -m pytest
 ```
 
-The suites are intentionally separated:
+Field-harness self-tests are explicit:
 
 ```bash
-python -m pytest tests --ignore=tests/ocpp_discover
-python -m pytest tests/ocpp_discover
 python -m pytest field/tests
 ```
 
-CI runs all three boundaries on Debian 12 / Python 3.11 as the primary appliance target and Debian 13 / Python 3.13 as the compatibility target.
+CI exercises:
 
-Tests favor behavioral and state invariants over exact human-readable output. Discover tests cover ARP and TCP/WebSocket evidence, ownership, narrow redirects, persistence, boot observation, passive offline waiting, positive contradiction, active-charge refusal, proof-before-persist, and rollback.
+- Debian 12 Bookworm / Python 3.11 / ARM64 as the primary appliance target;
+- Debian 13 / Python 3.13 / ARM64 as the compatibility target.
+
+Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Schema/handoff tests cover read-only preflight, active-charge refusal, explicit schema upgrades and backups, staged promotion, startup rollback boundaries, reconnect baselines, and fresh post-cutover connection evidence. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
 
 ## Source layout
 
 ```text
-src/
-  ocpp_csms/          # OCPP server, evidence, status, diagnostics, transactions and control
-  ocpp_discover/
-    discover.py       # network evidence and first discovery
-    redirect.py       # narrow nftables adaptation
-    handoff.py        # proof and promotion of a discovered adaptation
-    persistence.py    # owned persistent nftables integration
-    service.py        # boot observation and passive waiting
-    diagnosis.py      # compare expected/configured/observed state
-    reconcile.py      # prove and replace a contradicted adaptation
-    lifecycle.py      # install/uninstall owned persistent integration
+src/ocpp_csms/
+  app.py               # CLI and process startup
+  control.py           # local Unix-socket control protocol and client
+  profile_templates.py # built-in stateless Smart Charging templates
+  server.py            # WebSocket accept loop and connection lifecycle
+  session.py           # direct OCPP 1.6J handlers and outbound commands
+  events.py            # SQLite event store and derived state
+  schema.py            # SQLite schema identity, inspection, backup, and explicit upgrade
+  install_preflight.py # read-only install/service-handoff safety policy
+  install_cutover.py   # schema-aware staged cutover and reconnect helpers
+  diagnostics.py       # direct event queries and formatting
+  status.py            # status queries and formatting
+  transaction_query.py # read-only transaction query/model layer
+  transaction_cli.py   # transaction list/detail formatting
+  transactions.py      # JSON transaction archive and recovery
+  time.py              # timestamp helper
 
-field/                # field harness and compatibility helpers
-systemd/              # appliance service templates
-discover.sh            # Discover run/install/cleanup/uninstall helper
-install.sh             # staged appliance installer
+field/
+  discover.py          # passive discovery and transactional bootstrap
+  redirect.py          # validated temporary nftables redirect primitive
+  README.md            # field workflows and lower-level operational details
+
+systemd/
+  ocpp-csms.service.in
+  ocpp-discover.service.in
+
+discover.sh            # run/install/uninstall optional OCPP Discover
+install.sh             # staged appliance installer and safe handoff entry point
 ```
 
-This README is the canonical project documentation. Field-only procedures belong in `field/README.md`; production behavior belongs here.
+This README is the canonical project documentation. Important operator information belongs here; detailed field-harness procedures stay in `field/README.md` so the main path remains easy to scan.
