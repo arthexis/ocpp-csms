@@ -21,7 +21,7 @@ dev = [
 
 [project.scripts]
 ocpp-csms = "ocpp_csms.app:main"
-ocpp-discover = "ocpp_discover.discover:main"
+ocpp-discover = "ocpp_discover.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ocpp_csms", "src/ocpp_discover"]
