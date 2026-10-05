@@ -27,7 +27,7 @@ def seed_persistent(tmp_path, value=None):
 def configure_runtime(monkeypatch, *, interface=True, addresses=None, listener=True, table=False):
     monkeypatch.setattr(restore.os, "geteuid", lambda: 0)
     monkeypatch.setattr(restore, "_interface_exists", lambda name: interface)
-    monkeypatch.setattr(restore, "_host_addresses", lambda: set(addresses or {"172.16.5.1"}))
+    monkeypatch.setattr(restore, "host_addresses", lambda: set(addresses or {"172.16.5.1"}))
     monkeypatch.setattr(restore.redirect_tools, "listener_available", lambda port: listener)
     monkeypatch.setattr(restore.redirect_tools, "table_exists", lambda: table)
 
