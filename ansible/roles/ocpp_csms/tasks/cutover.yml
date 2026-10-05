@@ -31,9 +31,9 @@
             (ocpp_csms_candidate_service_state.stat.checksum | default('candidate-missing')))
       }}
 
-# Persist the exact final preflight output and convert its connected-charger set
-# into reconnect markers before the old process is stopped.
-- name: Save final preflight payload for cutover
+# Persist exactly what passed the final safety gate and preserve the existing
+# unit before downtime begins. These files are only handoff state, not policy.
+- name: Save final preflight payload for handoff
   ansible.builtin.copy:
     dest: "{{ ocpp_csms_final_preflight_path }}"
     content: "{{ ocpp_csms_final_preflight.stdout }}\n"
@@ -56,79 +56,230 @@
   changed_when: true
   when: ocpp_csms_activation_required | bool
 
-# Downtime starts here. Everything fallible that can be prepared safely has
-# already completed, and schema mutation happens only after the old writer stops.
-- name: Stop existing OCPP CSMS service
+- name: Preserve previous live systemd unit
   become: true
-  ansible.builtin.systemd_service:
-    name: "{{ ocpp_csms_service_name }}"
-    state: stopped
+  ansible.builtin.copy:
+    src: "{{ ocpp_csms_service_path }}"
+    dest: "{{ ocpp_csms_previous_service_path }}"
+    remote_src: true
+    mode: "0644"
   when:
     - ocpp_csms_activation_required | bool
     - ocpp_csms_live_service_state.stat.exists | default(false)
 
-- name: Upgrade database schema after service stop
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - ocpp_csms.install_cutover
-      - schema-upgrade
-      - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+- name: Remove stale previous service snapshot on first install
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_previous_service_path }}"
+    state: absent
   when:
     - ocpp_csms_activation_required | bool
-    - ocpp_csms_schema_action == 'upgrade'
+    - not (ocpp_csms_live_service_state.stat.exists | default(false))
 
-# Preserve the old immutable release only when current actually points to a
-# different release. Configuration-only changes on the same release do not
-# rewrite previous to point back to itself.
-- name: Point previous at old current release
-  ansible.builtin.file:
-    src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
-    dest: "{{ ocpp_csms_previous_link }}"
-    state: link
-    force: true
-  when:
-    - ocpp_csms_activation_required | bool
-    - ocpp_csms_current_state.stat.islnk | default(false)
-    - (ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir
-
-- name: Activate immutable release
-  ansible.builtin.file:
-    src: "{{ ocpp_csms_release_dir }}"
-    dest: "{{ ocpp_csms_current_link }}"
-    state: link
-    force: true
+# Downtime-sensitive activation and verification are one transaction-like block.
+# Rescue may restore the old runtime only when no schema upgrade occurred.
+- name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
+  block:
+    - name: Stop existing OCPP CSMS service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_service_name }}"
+        state: stopped
+      when: ocpp_csms_live_service_state.stat.exists | default(false)
 
-- name: Install live OCPP CSMS systemd unit
-  become: true
-  ansible.builtin.copy:
-    src: "{{ ocpp_csms_candidate_service_path }}"
-    dest: "{{ ocpp_csms_service_path }}"
-    remote_src: true
-    mode: "0644"
-  notify: Reload systemd daemon
-  when: ocpp_csms_activation_required | bool
+    - name: Upgrade database schema after service stop
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - schema-upgrade
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+      when: ocpp_csms_schema_action == 'upgrade'
 
-- name: Apply pending systemd daemon reload
-  ansible.builtin.meta: flush_handlers
-  when: ocpp_csms_activation_required | bool
+    - name: Point previous at old current release
+      ansible.builtin.file:
+        src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
+        dest: "{{ ocpp_csms_previous_link }}"
+        state: link
+        force: true
+      when:
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - (ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir
 
-- name: Initialize OCPP CSMS storage with active release
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_runtime_command }}"
-      - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
-      - init
-  when: ocpp_csms_activation_required | bool
+    - name: Activate immutable release
+      ansible.builtin.file:
+        src: "{{ ocpp_csms_release_dir }}"
+        dest: "{{ ocpp_csms_current_link }}"
+        state: link
+        force: true
 
-- name: Enable and start activated OCPP CSMS service
+    - name: Install live OCPP CSMS systemd unit
+      become: true
+      ansible.builtin.copy:
+        src: "{{ ocpp_csms_candidate_service_path }}"
+        dest: "{{ ocpp_csms_service_path }}"
+        remote_src: true
+        mode: "0644"
+      notify: Reload systemd daemon
+
+    - name: Apply pending systemd daemon reload
+      ansible.builtin.meta: flush_handlers
+
+    - name: Initialize OCPP CSMS storage with active release
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_runtime_command }}"
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+          - init
+
+    - name: Enable and start activated OCPP CSMS service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_service_name }}"
+        enabled: true
+        state: started
+
+    - name: Wait for OCPP CSMS listener
+      ansible.builtin.wait_for:
+        host: "{{ ocpp_csms_verify_host }}"
+        port: "{{ ocpp_csms_port }}"
+        timeout: "{{ ocpp_csms_listener_timeout }}"
+        state: started
+
+    - name: Verify OCPP CSMS application status
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_runtime_command }}"
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+          - status
+      changed_when: false
+
+    - name: Verify previously connected chargers reconnect
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - wait-reconnect
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+          - --baseline
+          - "{{ ocpp_csms_reconnect_baseline_path }}"
+          - --timeout
+          - "{{ ocpp_csms_reconnect_timeout }}"
+      changed_when: false
+
+  rescue:
+    - name: Stop failed replacement before rollback
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_service_name }}"
+        state: stopped
+      failed_when: false
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+
+    - name: Restore previous current release
+      ansible.builtin.file:
+        src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
+        dest: "{{ ocpp_csms_current_link }}"
+        state: link
+        force: true
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+
+    - name: Restore previous live systemd unit
+      become: true
+      ansible.builtin.copy:
+        src: "{{ ocpp_csms_previous_service_path }}"
+        dest: "{{ ocpp_csms_service_path }}"
+        remote_src: true
+        mode: "0644"
+      notify: Reload systemd daemon
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    - name: Apply rollback systemd daemon reload
+      ansible.builtin.meta: flush_handlers
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+
+    - name: Restart previous OCPP CSMS service
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_service_name }}"
+        enabled: true
+        state: started
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    - name: Verify rollback listener
+      ansible.builtin.wait_for:
+        host: "{{ ocpp_csms_verify_host }}"
+        port: "{{ ocpp_csms_port }}"
+        timeout: "{{ ocpp_csms_listener_timeout }}"
+        state: started
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    - name: Report handoff failure after safe rollback
+      ansible.builtin.fail:
+        msg: >-
+          OCPP CSMS handoff verification failed and the previous release was
+          restored: {{ ansible_failed_result.msg | default('verification failure') }}
+      when:
+        - ocpp_csms_schema_action != 'upgrade'
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    - name: Report handoff failure without automatic rollback
+      ansible.builtin.fail:
+        msg: >-
+          OCPP CSMS handoff verification failed. Automatic rollback was not
+          attempted because {{ 'the database schema was upgraded' if ocpp_csms_schema_action == 'upgrade' else 'there is no previous managed release/service to restore' }}:
+          {{ ansible_failed_result.msg | default('verification failure') }}
+      when: >-
+        (ocpp_csms_schema_action == 'upgrade')
+        or not (ocpp_csms_current_state.stat.islnk | default(false))
+        or not (ocpp_csms_live_service_state.stat.exists | default(false))
+
+# Desired state also covers a converged rerun: do not interrupt it, but ensure
+# the service remains enabled/running and its local health checks still pass.
+- name: Ensure converged OCPP CSMS service is enabled and running
   become: true
   ansible.builtin.systemd_service:
     name: "{{ ocpp_csms_service_name }}"
     enabled: true
     state: started
-  when: ocpp_csms_activation_required | bool
+  when: not (ocpp_csms_activation_required | bool)
+
+- name: Verify converged OCPP CSMS listener
+  ansible.builtin.wait_for:
+    host: "{{ ocpp_csms_verify_host }}"
+    port: "{{ ocpp_csms_port }}"
+    timeout: "{{ ocpp_csms_listener_timeout }}"
+    state: started
+  when: not (ocpp_csms_activation_required | bool)
+
+- name: Verify converged OCPP CSMS application status
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_runtime_command }}"
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - status
+  changed_when: false
+  when: not (ocpp_csms_activation_required | bool)
