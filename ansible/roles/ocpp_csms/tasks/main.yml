@@ -90,3 +90,21 @@
   ansible.builtin.command:
     cmd: "{{ ocpp_csms_stage_venv }}/bin/ocpp-csms --help"
   changed_when: false
+
+- name: Resolve OCPP CSMS service group
+  ansible.builtin.command:
+    cmd: id -gn
+  register: ocpp_csms_service_group_result
+  changed_when: false
+
+- name: Resolve OCPP CSMS service identity
+  ansible.builtin.set_fact:
+    ocpp_csms_service_user: "{{ ansible_user_id }}"
+    ocpp_csms_service_group: "{{ ocpp_csms_service_group_result.stdout }}"
+    ocpp_csms_service_home: "{{ ansible_env.HOME }}"
+
+- name: Render candidate OCPP CSMS systemd unit
+  ansible.builtin.template:
+    src: ocpp-csms.service.j2
+    dest: "{{ ocpp_csms_candidate_service_path }}"
+    mode: "0644"
