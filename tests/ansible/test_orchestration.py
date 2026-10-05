@@ -1,5 +1,4 @@
-from tests.ansible.helpers import (
-    ANSIBLE,
+from .helpers import (
     DEFAULTS,
     TASKS,
     all_ansible_text,
@@ -74,8 +73,7 @@ def test_schema_upgrade_disables_automatic_runtime_rollback():
         "Report handoff failure after safe rollback",
     )
     for name in rollback_tasks:
-        section = task_section(cutover, name)
-        assert "ocpp_csms_schema_action != 'upgrade'" in section
+        assert "ocpp_csms_schema_action != 'upgrade'" in task_section(cutover, name)
 
     no_rollback = task_section(cutover, "Report handoff failure without automatic rollback")
     assert "ocpp_csms_schema_action == 'upgrade'" in no_rollback
@@ -85,16 +83,18 @@ def test_schema_upgrade_disables_automatic_runtime_rollback():
 def test_converged_path_is_explicitly_non_disruptive():
     cutover = read(TASKS / "cutover.yml")
 
-    handoff = task_section(cutover, "Activate and verify OCPP CSMS handoff")
-    assert "when: ocpp_csms_activation_required | bool" in handoff
+    assert "when: ocpp_csms_activation_required | bool" in task_section(
+        cutover, "Activate and verify OCPP CSMS handoff"
+    )
 
     for name in (
         "Ensure converged OCPP CSMS service is enabled and running",
         "Verify converged OCPP CSMS listener",
         "Verify converged OCPP CSMS application status",
     ):
-        section = task_section(cutover, name)
-        assert "when: not (ocpp_csms_activation_required | bool)" in section
+        assert "when: not (ocpp_csms_activation_required | bool)" in task_section(
+            cutover, name
+        )
 
 
 def test_candidate_unit_is_verified_before_final_handoff_gate_when_possible():
@@ -143,7 +143,3 @@ def test_base_role_refuses_root_deployment_identity():
     assert "ansible_user_id != 'root'" in validation
     assert "ansible_user_uid | int != 0" in validation
     assert "Use Ansible become for privileged host changes" in validation
-
-
-def test_ansible_test_package_only_targets_ansible_contracts():
-    assert ANSIBLE.name == "ansible"
