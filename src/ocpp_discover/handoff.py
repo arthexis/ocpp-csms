@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from ocpp_discover import persistence
 from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.discover import discover_existing_endpoint, require_root
 from ocpp_discover.redirect import RedirectReceipt, receipt_from_json, validate_receipt
@@ -17,8 +18,8 @@ from ocpp_csms.schema import DATABASE_FILENAME
 
 _HANDOFF_RECEIPT = "handoff-endpoint.json"
 _REDIRECT_RECEIPT = "redirect.json"
-_PERSISTENT_RECEIPT = "path-a.json"
-_PERSISTENT_KIND = "ocpp-path-a"
+_PERSISTENT_RECEIPT = "discovered.json"
+_PERSISTENT_KIND = "ocpp-discovered"
 _PERSISTENT_VERSION = 1
 _DEFAULT_PERSISTENT_STATE_DIR = "/var/lib/ocpp-discover"
 _RECEIPT_KEYS = {
@@ -94,38 +95,38 @@ def _persistent_payload(receipt: RedirectReceipt) -> dict[str, object]:
 
 def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
     if not isinstance(payload, dict) or set(payload) != {"kind", "version", "receipt"}:
-        raise RuntimeError("invalid_persistent_path_a_receipt")
+        raise RuntimeError("invalid_discovered_receipt")
     if payload["kind"] != _PERSISTENT_KIND or payload["version"] != _PERSISTENT_VERSION:
-        raise RuntimeError("incompatible_persistent_path_a_receipt")
+        raise RuntimeError("incompatible_discovered_receipt")
     receipt_payload = payload["receipt"]
     if not isinstance(receipt_payload, dict) or set(receipt_payload) != _RECEIPT_KEYS:
-        raise RuntimeError("invalid_persistent_path_a_receipt")
+        raise RuntimeError("invalid_discovered_receipt")
     requests = receipt_payload.get("requests")
     if not isinstance(requests, list) or any(
         not isinstance(request, dict) or set(request) != _REQUEST_KEYS for request in requests
     ):
-        raise RuntimeError("invalid_persistent_path_a_receipt")
+        raise RuntimeError("invalid_discovered_receipt")
     try:
         receipt = receipt_from_json(receipt_payload)
         _validate_persistent_path_a(receipt)
     except (TypeError, ValueError):
-        raise RuntimeError("invalid_persistent_path_a_receipt") from None
+        raise RuntimeError("invalid_discovered_receipt") from None
     return receipt
 
 
 def persist_validated_path_a(state_dir: str | Path, receipt: RedirectReceipt) -> Path:
-    """Persist only an already-successful exact Path A adaptation."""
+    """Persist the evidence for an already-successful exact Path A adaptation."""
     payload = _persistent_payload(receipt)
     path = persistent_receipt_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        raise RuntimeError("persistent_path_a_receipt_exists")
+        raise RuntimeError("discovered_receipt_exists")
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
         descriptor = os.open(temporary, flags, 0o600)
     except FileExistsError:
-        raise RuntimeError("persistent_path_a_temporary_exists") from None
+        raise RuntimeError("discovered_receipt_temporary_exists") from None
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
@@ -135,7 +136,7 @@ def persist_validated_path_a(state_dir: str | Path, receipt: RedirectReceipt) ->
         try:
             os.link(temporary, path)
         except FileExistsError:
-            raise RuntimeError("persistent_path_a_receipt_exists") from None
+            raise RuntimeError("discovered_receipt_exists") from None
     finally:
         temporary.unlink(missing_ok=True)
     return path
@@ -146,9 +147,9 @@ def load_persistent_path_a(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise RuntimeError("persistent_path_a_receipt_not_found") from None
+        raise RuntimeError("discovered_receipt_not_found") from None
     except json.JSONDecodeError:
-        raise RuntimeError("invalid_persistent_path_a_receipt") from None
+        raise RuntimeError("invalid_discovered_receipt") from None
     return _receipt_from_persistent_payload(payload)
 
 
@@ -284,6 +285,21 @@ def _rollback_cutover(state_dir: str | Path, old_service: str) -> None:
         raise RuntimeError("; ".join(errors))
 
 
+def _promote_persistent_adaptation(persistent_state_dir: str | Path, receipt: RedirectReceipt) -> None:
+    ruleset_existed = persistence.DEFAULT_RULESET_PATH.exists()
+    include_added = False
+    try:
+        persistence.persist_ruleset(receipt)
+        include_added = persistence.ensure_nftables_include()
+        persist_validated_path_a(persistent_state_dir, receipt)
+    except Exception:
+        if not ruleset_existed:
+            persistence.remove_ruleset()
+        if include_added:
+            persistence.remove_nftables_include()
+        raise
+
+
 def cutover(
     *,
     data_dir: str | Path,
@@ -310,7 +326,7 @@ def cutover(
     if redirect_path(state_dir).exists():
         raise RuntimeError("redirect_receipt_exists")
     if persistent_receipt_path(persistent_state_dir).exists():
-        raise RuntimeError("persistent_path_a_receipt_exists")
+        raise RuntimeError("discovered_receipt_exists")
 
     connection_baseline = connection_markers(data_dir, expected)
     ocpp_baseline = _ocpp_markers(data_dir, expected)
@@ -344,7 +360,7 @@ def cutover(
         if missing_ocpp:
             raise RuntimeError("fresh_ocpp_timeout: " + ", ".join(missing_ocpp))
 
-        persist_validated_path_a(persistent_state_dir, receipt)
+        _promote_persistent_adaptation(persistent_state_dir, receipt)
         return expected
     except Exception as original:
         try:
