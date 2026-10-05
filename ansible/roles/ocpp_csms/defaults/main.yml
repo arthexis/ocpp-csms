@@ -6,10 +6,6 @@ ocpp_csms_host: "0.0.0.0"
 ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 
-# Rollover is explicit authorization for handing off idle connected chargers.
-# The Python preflight remains authoritative and never permits active charging.
-ocpp_csms_rollover: false
-
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.
 ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
@@ -28,8 +24,18 @@ ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
 ocpp_csms_final_preflight_path: "{{ ocpp_csms_prefix }}/preflight.final.json"
 ocpp_csms_reconnect_baseline_path: "{{ ocpp_csms_prefix }}/reconnect-baseline.json"
 
+# Preserve the live unit during activation so a schema-compatible failure can
+# restore both the previous release and its service configuration.
+ocpp_csms_previous_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.previous"
+
 # The candidate unit is rendered harmlessly under the appliance prefix and is
 # promoted to the live systemd path only inside the controlled cutover section.
 ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
 ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
 ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
+
+# Verification is local to the appliance even when the listener binds all
+# interfaces. Connected chargers get a separate fresh-reconnect verification.
+ocpp_csms_verify_host: "{{ '127.0.0.1' if ocpp_csms_host in ['0.0.0.0', '::'] else ocpp_csms_host }}"
+ocpp_csms_listener_timeout: 10
+ocpp_csms_reconnect_timeout: 30
