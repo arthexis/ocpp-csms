@@ -14,28 +14,21 @@ def receipt(*, port=8080, path="/ocpp/CP7"):
     )
 
 
-def test_inspection_compares_expected_fragment_and_live_table(tmp_path, monkeypatch):
+def test_inspection_reports_persistent_and_live_configuration(tmp_path, monkeypatch):
     expected = receipt()
     ruleset = tmp_path / "nftables.conf"
     ruleset.write_text(persistence.render_persistent_ruleset(expected))
     monkeypatch.setattr(diagnosis.redirect, "table_exists", lambda: True)
 
-    result = diagnosis.inspect_configuration(expected, ruleset_path=ruleset)
-
-    assert result.configured_matches is True
-    assert result.live_table_present is True
-    assert result.contradiction is False
+    assert diagnosis.inspect_configuration(expected, ruleset_path=ruleset) == (True, True)
 
 
-def test_inspection_reports_configured_mismatch_without_mutation(tmp_path, monkeypatch):
+def test_inspection_reports_configuration_mismatch_without_mutation(tmp_path, monkeypatch):
     ruleset = tmp_path / "nftables.conf"
     ruleset.write_text("# different\n")
     monkeypatch.setattr(diagnosis.redirect, "table_exists", lambda: False)
 
-    result = diagnosis.inspect_configuration(receipt(), ruleset_path=ruleset)
-
-    assert result.configured_matches is False
-    assert result.live_table_present is False
+    assert diagnosis.inspect_configuration(receipt(), ruleset_path=ruleset) == (False, False)
 
 
 def test_passive_observation_ignores_absence(monkeypatch):
