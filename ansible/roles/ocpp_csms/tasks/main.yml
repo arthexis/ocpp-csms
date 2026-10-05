@@ -42,11 +42,16 @@
     state: latest
     virtualenv: "{{ ocpp_csms_stage_venv }}"
 
+# With a local connection the controller and managed host are the same Pi, so
+# the checkout containing the playbook is already a valid target-side source.
 - name: Use current checkout as install source for local execution
   ansible.builtin.set_fact:
     ocpp_csms_install_source: "{{ ocpp_csms_controller_source_dir }}"
   when: (ansible_connection | default('ssh')) == 'local'
 
+# Remote execution cannot install from a controller-side path. Stage only the
+# inputs needed to build/install the Python package; do not create a second Git
+# checkout on the managed host.
 - name: Create remote staged source directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_stage_source_dir }}"
