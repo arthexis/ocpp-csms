@@ -55,7 +55,6 @@ def test_base_installer_stages_before_disruptive_cutover():
     promote = installer.index('mv "$STAGE_VENV" "$VENV"')
     install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
     reconnect = installer.index("wait-reconnect")
-
     assert first_preflight < stage_venv < schema_check < final_preflight
     assert final_preflight < stop_service < schema_upgrade < promote < install_service < reconnect
     assert 'STAGE_VENV="$PREFIX/venv.next"' in installer
@@ -123,15 +122,17 @@ def test_discover_service_uses_installed_package_and_owned_state():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_discover_install_uses_installed_package_and_separates_cleanup_from_uninstall():
+def test_discover_install_uses_debian_nftables_boot_loader_and_installed_package():
     script = read("discover.sh")
     assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
     assert "sudo apt-get install -y tcpdump nftables iproute2" in script
     assert "Automatic dependency installation is supported only on Debian" in script
+    assert "sudo systemctl enable nftables.service" in script
+    assert "systemctl restart nftables" not in script
     assert 'sudo systemctl enable "$SERVICE_NAME"' in script
     assert 'sudo systemctl start --no-block "$SERVICE_NAME"' in script
     assert 'sudo systemctl disable "$SERVICE_NAME"' in script
-    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle migrate' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle prepare' in script
     assert 'sudo "$PYTHON" -m ocpp_discover cleanup --state-dir /run/ocpp-discover' in script
     assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle remove' in script
     assert 'set -- "$PYTHON" -m ocpp_discover run' in script
