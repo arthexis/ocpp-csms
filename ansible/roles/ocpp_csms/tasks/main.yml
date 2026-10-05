@@ -2,14 +2,18 @@
 - name: Validate supported OCPP CSMS appliance host
   ansible.builtin.assert:
     that:
+      - ansible_user_id != 'root'
+      - ansible_user_uid | int != 0
       - ansible_facts.os_family == 'Debian'
       - ansible_facts.architecture in ['aarch64', 'arm64']
       - ocpp_csms_host | length > 0
       - ocpp_csms_port | int >= 1
       - ocpp_csms_port | int <= 65535
     fail_msg: >-
-      OCPP CSMS installation requires a Debian-family ARM64 host and a valid
-      listener host/port configuration.
+      OCPP CSMS installation must run as a non-root deployment user on a
+      Debian-family ARM64 host with a valid listener host/port configuration.
+      Use Ansible become for privileged host changes instead of running the
+      playbook itself as root.
 
 - name: Resolve release revision from controller checkout
   ansible.builtin.command:
@@ -98,7 +102,6 @@
     mode: "0755"
   loop:
     - "{{ ocpp_csms_prefix }}"
-    - "{{ ocpp_csms_bin_dir }}"
     - "{{ ocpp_csms_data_dir }}"
     - "{{ ocpp_csms_releases_dir }}"
 
@@ -254,3 +257,13 @@
 
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
+
+# Keep the public appliance command independent of the deployment user's shell
+# configuration. The stable system link follows the current immutable release.
+- name: Install stable OCPP CSMS command
+  become: true
+  ansible.builtin.file:
+    src: "{{ ocpp_csms_runtime_command }}"
+    dest: "{{ ocpp_csms_command_path }}"
+    state: link
+    force: true
