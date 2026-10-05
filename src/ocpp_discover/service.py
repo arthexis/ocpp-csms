@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 
-from ocpp_discover import diagnosis, discover, handoff, reconcile
+from ocpp_discover import diagnosis, first_contact as discover, handoff, reconcile
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 
 _DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
