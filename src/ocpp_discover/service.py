@@ -22,26 +22,15 @@ def _validate(data_dir: str | Path, chargers: tuple[str, ...], *, timeout: float
     return missing or handoff.wait_for_fresh_ocpp(data_dir, ocpp, timeout=timeout)
 
 
-def _wait_for_recovery(
-    data_dir: str | Path,
-    persistent_dir: str | Path,
-    receipt: object,
-    *,
-    diagnosis_seconds: float,
-    timeout: float,
-) -> dict[str, object]:
+def _wait_for_recovery(data_dir: str | Path, persistent_dir: str | Path, receipt: object, *, diagnosis_seconds: float, timeout: float) -> dict[str, object]:
     chargers = reconcile.charger_ids(receipt)
     configuration = diagnosis.inspect_configuration(receipt)
     if not configuration.configured_matches:
         _LOG.error("Discover persistent nftables fragment does not match discovered adaptation")
     if not configuration.live_table_present:
         _LOG.error("Discover live nftables adaptation is absent")
-
     while True:
-        # This is deliberately an indefinite, event-driven wait. With an offline
-        # charger there is no timer, repeated capture, diagnosis, or mutation.
         evidence = diagnosis.wait_for_discovery_evidence(receipt.interface, expected=receipt)
-
         connections = connection_markers(data_dir, chargers)
         ocpp = handoff._ocpp_markers(data_dir, chargers)
         if not wait_for_reconnect(data_dir, connections, timeout=0):
@@ -49,71 +38,27 @@ def _wait_for_recovery(
                 return {"status": "persistent", "chargers": list(chargers)}
             _LOG.error("charger reconnected without fresh inbound OCPP; returning to passive wait")
             continue
-
-        candidate = diagnosis.observe_endpoint(
-            receipt.interface,
-            listen_port=receipt.listen_port,
-            seconds=diagnosis_seconds,
-        )
-        if candidate is None:
+        candidate = diagnosis.observe_endpoint(receipt.interface, listen_port=receipt.listen_port, seconds=diagnosis_seconds)
+        if candidate is None or diagnosis.adaptation_identity(candidate) == diagnosis.adaptation_identity(receipt):
             continue
-        if diagnosis.adaptation_identity(candidate) == diagnosis.adaptation_identity(receipt):
-            continue
-
-        _LOG.error(
-            "positive endpoint contradiction observed after %s activity; attempting safe reconciliation",
-            evidence.kind,
-        )
-        candidate = reconcile.reconcile(
-            data_dir=data_dir,
-            persistent_dir=persistent_dir,
-            expected=receipt,
-            candidate=candidate,
-            timeout=timeout,
-        )
+        _LOG.error("positive endpoint contradiction observed after %s activity; attempting safe reconciliation", evidence.kind)
+        candidate = reconcile.reconcile(data_dir=data_dir, persistent_dir=persistent_dir, expected=receipt, candidate=candidate, timeout=timeout)
         return {"status": "reconciled", "chargers": list(reconcile.charger_ids(candidate))}
 
 
-def _observe_persistent(
-    data_dir: str | Path,
-    persistent_dir: str | Path,
-    *,
-    boot_timeout: float,
-    diagnosis_seconds: float,
-    validation_timeout: float,
-) -> dict[str, object]:
+def _observe_persistent(data_dir: str | Path, persistent_dir: str | Path, *, boot_timeout: float, diagnosis_seconds: float, validation_timeout: float) -> dict[str, object]:
     receipt = handoff.load_discovered(persistent_dir)
     chargers = reconcile.charger_ids(receipt)
     missing = _validate(data_dir, chargers, timeout=boot_timeout)
     if not missing:
         return {"status": "persistent", "chargers": list(chargers)}
-
-    _LOG.error(
-        "expected charger(s) not observed during startup window: %s; persistent adaptation unchanged; entering passive offline wait",
-        ", ".join(missing),
-    )
-    return _wait_for_recovery(
-        data_dir,
-        persistent_dir,
-        receipt,
-        diagnosis_seconds=diagnosis_seconds,
-        timeout=validation_timeout,
-    )
+    _LOG.error("expected charger(s) not observed during startup window: %s; persistent adaptation unchanged; entering passive offline wait", ", ".join(missing))
+    return _wait_for_recovery(data_dir, persistent_dir, receipt, diagnosis_seconds=diagnosis_seconds, timeout=validation_timeout)
 
 
-def _wait_then_discover(
-    *,
-    data_dir: str | Path,
-    runtime_dir: str | Path,
-    interface: str,
-    listen_port: int,
-    grace_seconds: float,
-    arp_seconds: float,
-    tcp_seconds: float,
-    connect_timeout: float,
-) -> dict[str, object]:
-    """Wait silently for first charger evidence before starting discovery."""
-    diagnosis.wait_for_discovery_evidence(interface)
+def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float) -> dict[str, object]:
+    """Wait silently for first charger evidence and carry it into discovery."""
+    evidence = diagnosis.wait_for_discovery_evidence(interface)
     result = discover.run_discovery(
         data_dir=data_dir,
         state_dir=runtime_dir,
@@ -123,51 +68,20 @@ def _wait_then_discover(
         arp_seconds=arp_seconds,
         tcp_seconds=tcp_seconds,
         connect_timeout=connect_timeout,
+        initial_evidence=evidence.capture,
     )
     return {"status": "discovered", "result": result.to_json()}
 
 
-def run_service(
-    *,
-    data_dir: str | Path,
-    runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR,
-    persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR,
-    interface: str = "eth0",
-    listen_port: int = 9000,
-    grace_seconds: float = 10.0,
-    arp_seconds: float = 15.0,
-    tcp_seconds: float = 15.0,
-    connect_timeout: float = 30.0,
-    boot_timeout: float = _DEFAULT_BOOT_TIMEOUT,
-    wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS,
-):
+def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR, persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR, interface: str = "eth0", listen_port: int = 9000, grace_seconds: float = 10.0, arp_seconds: float = 15.0, tcp_seconds: float = 15.0, connect_timeout: float = 30.0, boot_timeout: float = _DEFAULT_BOOT_TIMEOUT, wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS):
     """Observe known state; reconcile contradictions; discover only after positive evidence."""
     if handoff.discovered_path(persistent_dir).exists():
-        return _observe_persistent(
-            data_dir,
-            persistent_dir,
-            boot_timeout=boot_timeout,
-            diagnosis_seconds=wait_interval,
-            validation_timeout=connect_timeout,
-        )
-
-    return _wait_then_discover(
-        data_dir=data_dir,
-        runtime_dir=runtime_dir,
-        interface=interface,
-        listen_port=listen_port,
-        grace_seconds=grace_seconds,
-        arp_seconds=arp_seconds,
-        tcp_seconds=tcp_seconds,
-        connect_timeout=connect_timeout,
-    )
+        return _observe_persistent(data_dir, persistent_dir, boot_timeout=boot_timeout, diagnosis_seconds=wait_interval, validation_timeout=connect_timeout)
+    return _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m ocpp_discover service",
-        description="Observe, diagnose, and safely reconcile a persistent OCPP adaptation.",
-    )
+    parser = argparse.ArgumentParser(prog="python -m ocpp_discover service", description="Observe, diagnose, and safely reconcile a persistent OCPP adaptation.")
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--runtime-dir", default=_DEFAULT_RUNTIME_DIR)
     parser.add_argument("--persistent-dir", default=_DEFAULT_PERSISTENT_DIR)
@@ -186,19 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     try:
-        outcome = run_service(
-            data_dir=args.data_dir,
-            runtime_dir=args.runtime_dir,
-            persistent_dir=args.persistent_dir,
-            interface=args.interface,
-            listen_port=args.listen_port,
-            grace_seconds=args.grace_seconds,
-            arp_seconds=args.arp_seconds,
-            tcp_seconds=args.tcp_seconds,
-            connect_timeout=args.connect_timeout,
-            boot_timeout=args.boot_timeout,
-            wait_interval=args.wait_interval,
-        )
+        outcome = run_service(data_dir=args.data_dir, runtime_dir=args.runtime_dir, persistent_dir=args.persistent_dir, interface=args.interface, listen_port=args.listen_port, grace_seconds=args.grace_seconds, arp_seconds=args.arp_seconds, tcp_seconds=args.tcp_seconds, connect_timeout=args.connect_timeout, boot_timeout=args.boot_timeout, wait_interval=args.wait_interval)
     except (RuntimeError, ValueError, OSError) as exc:
         _LOG.error("%s", exc)
         return 1
