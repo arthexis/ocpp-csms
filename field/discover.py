@@ -1,8 +1,7 @@
-"""Compatibility wrapper for the graduated OCPP Discover package."""
+"""Compatibility alias for the graduated OCPP Discover package."""
 
-from ocpp_discover.discover import *  # noqa: F401,F403
-from ocpp_discover.discover import main
+import sys
 
+from ocpp_discover import discover as _implementation
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+sys.modules[__name__] = _implementation
