@@ -5,10 +5,9 @@ ocpp_csms_data_dir: "{{ ansible_env.HOME }}/ocpp-csms-data"
 ocpp_csms_host: "0.0.0.0"
 ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
-ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
-ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
-ocpp_csms_runtime_venv: "{{ ocpp_csms_prefix }}/venv"
-ocpp_csms_runtime_command: "{{ ocpp_csms_runtime_venv }}/bin/ocpp-csms"
+
+# Rollover is explicit authorization for handing off idle connected chargers.
+# The Python preflight remains authoritative and never permits active charging.
 ocpp_csms_rollover: false
 
 # Staging paths. Local bootstrap installs directly from the checkout containing
@@ -16,3 +15,10 @@ ocpp_csms_rollover: false
 ocpp_csms_stage_venv: "{{ ocpp_csms_prefix }}/venv.next"
 ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
 ocpp_csms_stage_source_dir: "{{ ocpp_csms_prefix }}/source.next"
+
+# The candidate unit is rendered harmlessly under the appliance prefix. Later
+# cutover work will promote it to the live systemd path only after safety gates.
+ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
+ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
+ocpp_csms_runtime_venv: "{{ ocpp_csms_prefix }}/venv"
+ocpp_csms_runtime_command: "{{ ocpp_csms_runtime_venv }}/bin/ocpp-csms"
