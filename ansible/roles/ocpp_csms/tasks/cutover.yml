@@ -1,0 +1,134 @@
+---
+# Compare the desired release/unit to the live appliance before entering the
+# critical section. A converged rerun must not stop an otherwise healthy CSMS.
+- name: Inspect current release link
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_current_link }}"
+    follow: false
+  register: ocpp_csms_current_state
+
+- name: Inspect candidate systemd unit
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_candidate_service_path }}"
+    checksum_algorithm: sha256
+  register: ocpp_csms_candidate_service_state
+
+- name: Inspect live systemd unit
+  become: true
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_service_path }}"
+    checksum_algorithm: sha256
+  register: ocpp_csms_live_service_state
+
+- name: Decide whether release activation is required
+  ansible.builtin.set_fact:
+    ocpp_csms_activation_required: >-
+      {{
+        (not (ocpp_csms_current_state.stat.islnk | default(false)))
+        or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
+        or (not (ocpp_csms_live_service_state.stat.exists | default(false)))
+        or ((ocpp_csms_live_service_state.stat.checksum | default('')) !=
+            (ocpp_csms_candidate_service_state.stat.checksum | default('candidate-missing')))
+      }}
+
+# Persist the exact final preflight output and convert its connected-charger set
+# into reconnect markers before the old process is stopped.
+- name: Save final preflight payload for cutover
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_final_preflight_path }}"
+    content: "{{ ocpp_csms_final_preflight.stdout }}\n"
+    mode: "0600"
+  when: ocpp_csms_activation_required | bool
+
+- name: Capture charger reconnect baseline
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - capture-baseline
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - --preflight-json
+      - "{{ ocpp_csms_final_preflight_path }}"
+      - --output
+      - "{{ ocpp_csms_reconnect_baseline_path }}"
+  changed_when: true
+  when: ocpp_csms_activation_required | bool
+
+# Downtime starts here. Everything fallible that can be prepared safely has
+# already completed, and schema mutation happens only after the old writer stops.
+- name: Stop existing OCPP CSMS service
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_csms_service_name }}"
+    state: stopped
+  when:
+    - ocpp_csms_activation_required | bool
+    - ocpp_csms_live_service_state.stat.exists | default(false)
+
+- name: Upgrade database schema after service stop
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-upgrade
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+  when:
+    - ocpp_csms_activation_required | bool
+    - ocpp_csms_schema_action == 'upgrade'
+
+# Preserve the old immutable release only when current actually points to a
+# different release. Configuration-only changes on the same release do not
+# rewrite previous to point back to itself.
+- name: Point previous at old current release
+  ansible.builtin.file:
+    src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
+    dest: "{{ ocpp_csms_previous_link }}"
+    state: link
+    force: true
+  when:
+    - ocpp_csms_activation_required | bool
+    - ocpp_csms_current_state.stat.islnk | default(false)
+    - (ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir
+
+- name: Activate immutable release
+  ansible.builtin.file:
+    src: "{{ ocpp_csms_release_dir }}"
+    dest: "{{ ocpp_csms_current_link }}"
+    state: link
+    force: true
+  when: ocpp_csms_activation_required | bool
+
+- name: Install live OCPP CSMS systemd unit
+  become: true
+  ansible.builtin.copy:
+    src: "{{ ocpp_csms_candidate_service_path }}"
+    dest: "{{ ocpp_csms_service_path }}"
+    remote_src: true
+    mode: "0644"
+  notify: Reload systemd daemon
+  when: ocpp_csms_activation_required | bool
+
+- name: Apply pending systemd daemon reload
+  ansible.builtin.meta: flush_handlers
+  when: ocpp_csms_activation_required | bool
+
+- name: Initialize OCPP CSMS storage with active release
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_runtime_command }}"
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - init
+  when: ocpp_csms_activation_required | bool
+
+- name: Enable and start activated OCPP CSMS service
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_csms_service_name }}"
+    enabled: true
+    state: started
+  when: ocpp_csms_activation_required | bool
