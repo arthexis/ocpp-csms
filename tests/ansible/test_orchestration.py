@@ -45,19 +45,20 @@ def test_schema_upgrade_happens_only_after_old_service_stops():
         cutover,
         "Stop existing OCPP CSMS service",
         "Upgrade database schema after service stop",
-        "Activate immutable release",
+        "Install live OCPP CSMS systemd unit",
     )
 
 
-def test_replacement_health_is_proven_before_handoff_succeeds():
+def test_replacement_health_is_proven_before_current_is_promoted():
     cutover = read(TASKS / "cutover.yml")
 
     assert_task_order(
         cutover,
-        "Enable and start activated OCPP CSMS service",
+        "Enable and start candidate OCPP CSMS service",
         "Wait for OCPP CSMS listener",
-        "Verify OCPP CSMS application status",
+        "Verify candidate OCPP CSMS application status",
         "Verify previously connected chargers reconnect",
+        "Promote verified release to current",
     )
 
 
@@ -66,7 +67,6 @@ def test_schema_upgrade_disables_automatic_runtime_rollback():
 
     rollback_tasks = (
         "Stop failed replacement before rollback",
-        "Restore previous current release",
         "Restore previous live systemd unit",
         "Restart previous OCPP CSMS service",
         "Verify rollback listener",
@@ -97,11 +97,20 @@ def test_converged_path_is_explicitly_non_disruptive():
         )
 
 
-def test_candidate_unit_is_verified_before_final_handoff_gate_when_possible():
+def test_candidate_unit_uses_valid_service_filename_and_is_verified_early():
+    defaults = read(DEFAULTS)
     main = read(TASKS / "main.yml")
+
+    assert 'ocpp_csms_candidate_dir: "{{ ocpp_csms_prefix }}/candidate"' in defaults
+    assert (
+        'ocpp_csms_candidate_service_path: '
+        '"{{ ocpp_csms_candidate_dir }}/{{ ocpp_csms_service_name }}"'
+    ) in defaults
+    assert ".service.next" not in defaults
 
     assert_task_order(
         main,
+        "Render candidate OCPP CSMS systemd unit",
         "Verify candidate systemd unit before handoff",
         "Run final install safety preflight",
     )
@@ -110,16 +119,25 @@ def test_candidate_unit_is_verified_before_final_handoff_gate_when_possible():
     )
 
 
+def test_candidate_runs_directly_from_immutable_release():
+    template = read(
+        DEFAULTS.parent.parent / "templates" / "ocpp-csms.service.j2"
+    )
+
+    assert "{{ ocpp_csms_release_command }}" in template
+    assert "{{ ocpp_csms_runtime_command }}" not in template
+
+
 def test_initialized_storage_is_validated_before_service_start():
     cutover = read(TASKS / "cutover.yml")
 
     assert_task_order(
         cutover,
-        "Initialize OCPP CSMS storage with active release",
+        "Initialize OCPP CSMS storage with candidate release",
         "Inspect initialized OCPP CSMS database",
         "Inspect initialized OCPP CSMS transaction archive",
         "Verify OCPP CSMS data directory is writable",
-        "Enable and start activated OCPP CSMS service",
+        "Enable and start candidate OCPP CSMS service",
     )
 
 
