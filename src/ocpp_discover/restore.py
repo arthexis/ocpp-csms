@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m ocpp_discover.restore",
         description="Restore a previously validated persistent Path A redirect without discovery.",
     )
-    parser.add_argument("--persistent-dir", default="/var/lib/ocpp-csms/discover")
+    parser.add_argument("--persistent-dir", default="/var/lib/ocpp-discover")
     parser.add_argument("--runtime-dir", default="/run/ocpp-discover")
     parser.add_argument("--listen-port", type=int, required=True)
     return parser
