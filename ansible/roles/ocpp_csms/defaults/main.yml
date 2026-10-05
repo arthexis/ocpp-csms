@@ -16,6 +16,7 @@ ocpp_csms_releases_dir: "{{ ocpp_csms_prefix }}/releases"
 ocpp_csms_release_dir: "{{ ocpp_csms_releases_dir }}/{{ ocpp_csms_release_id }}"
 ocpp_csms_release_venv: "{{ ocpp_csms_release_dir }}/venv"
 ocpp_csms_release_source_dir: "{{ ocpp_csms_release_dir }}/source"
+ocpp_csms_release_command: "{{ ocpp_csms_release_venv }}/bin/ocpp-csms"
 ocpp_csms_current_link: "{{ ocpp_csms_prefix }}/current"
 ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
 
@@ -33,10 +34,11 @@ ocpp_csms_reconnect_baseline_path: "{{ ocpp_csms_prefix }}/reconnect-baseline.js
 # restore both the previous release and its service configuration.
 ocpp_csms_previous_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.previous"
 
-# The candidate unit is rendered harmlessly under the appliance prefix and is
-# promoted to the live systemd path only inside the controlled cutover section.
+# Stage the candidate under a real systemd unit filename. systemd-analyze
+# validates unit suffixes, so keep the candidate state in the directory name.
 ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
-ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
+ocpp_csms_candidate_dir: "{{ ocpp_csms_prefix }}/candidate"
+ocpp_csms_candidate_service_path: "{{ ocpp_csms_candidate_dir }}/{{ ocpp_csms_service_name }}"
 ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
 
 # Verification is local to the appliance even when the listener binds all
