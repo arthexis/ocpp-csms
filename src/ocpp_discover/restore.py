@@ -6,9 +6,9 @@ import os
 import subprocess
 from pathlib import Path
 
-from field import handoff
-from field import redirect as redirect_tools
-from field.discover import host_addresses
+from ocpp_discover import handoff
+from ocpp_discover import redirect as redirect_tools
+from ocpp_discover.discover import host_addresses
 
 
 def _interface_exists(interface: str) -> bool:
@@ -68,7 +68,7 @@ def restore_path_a(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m field.restore",
+        prog="python -m ocpp_discover.restore",
         description="Restore a previously validated persistent Path A redirect without discovery.",
     )
     parser.add_argument("--persistent-dir", default="/var/lib/ocpp-csms/discover")
