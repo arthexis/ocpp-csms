@@ -10,7 +10,7 @@ from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 from ocpp_csms.install_preflight import evaluate_preflight
 
 
-def _charger_ids(receipt: RedirectReceipt) -> tuple[str, ...]:
+def charger_ids(receipt: RedirectReceipt) -> tuple[str, ...]:
     ids = {request.path.rstrip("/").rsplit("/", 1)[-1] for request in receipt.requests}
     ids.discard("")
     if not ids:
@@ -26,7 +26,10 @@ def _replace_live(receipt: RedirectReceipt) -> None:
         raise RuntimeError("listener_unavailable")
     redirect.validate_ruleset(receipt)
     prefix = "delete table ip ocpp_field_redirect\n" if redirect.table_exists() else ""
-    result = redirect._run_nft(["nft", "-f", "-"], input_text=prefix + redirect.render_ruleset(receipt))
+    result = redirect._run_nft(
+        ["nft", "-f", "-"],
+        input_text=prefix + redirect.render_ruleset(receipt),
+    )
     if result.returncode != 0:
         raise redirect._nft_error(result, "nft_reconciliation_failed")
 
@@ -68,43 +71,34 @@ def reconcile(
     if not preflight.allowed:
         raise RuntimeError(preflight.reason or "reconciliation_preflight_failed")
 
-    chargers = _charger_ids(candidate)
+    chargers = charger_ids(candidate)
     connection_baseline = connection_markers(data_dir, chargers)
     ocpp_baseline = handoff._ocpp_markers(data_dir, chargers)
     ruleset = Path(ruleset_path)
     old_ruleset = ruleset.read_text(encoding="utf-8") if ruleset.exists() else persistence.EMPTY_RULESET
     old_mode = (ruleset.stat().st_mode & 0o777) if ruleset.exists() else 0o600
 
-    live_changed = False
-    durable_changed = False
+    _replace_live(candidate)
     try:
-        _replace_live(candidate)
-        live_changed = True
         missing = wait_for_reconnect(data_dir, connection_baseline, timeout=timeout)
         if missing:
             raise RuntimeError("reconciliation_reconnect_timeout: " + ", ".join(missing))
-        missing_ocpp = handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=timeout)
-        if missing_ocpp:
-            raise RuntimeError("reconciliation_ocpp_timeout: " + ", ".join(missing_ocpp))
+        missing = handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=timeout)
+        if missing:
+            raise RuntimeError("reconciliation_ocpp_timeout: " + ", ".join(missing))
 
         new_ruleset = persistence.render_persistent_ruleset(candidate)
         persistence.check_nftables_text(new_ruleset)
         persistence.replace_ruleset(new_ruleset, ruleset_path=ruleset)
-        durable_changed = True
-        _replace_discovered(persistent_dir, candidate)
+        try:
+            _replace_discovered(persistent_dir, candidate)
+        except Exception:
+            persistence.replace_ruleset(old_ruleset, ruleset_path=ruleset, mode=old_mode)
+            raise
         return candidate
     except Exception as exc:
-        rollback_errors: list[str] = []
-        if durable_changed:
-            try:
-                persistence.replace_ruleset(old_ruleset, ruleset_path=ruleset, mode=old_mode)
-            except Exception as rollback_exc:
-                rollback_errors.append(f"persistent rollback failed: {rollback_exc}")
-        if live_changed:
-            try:
-                _replace_live(expected)
-            except Exception as rollback_exc:
-                rollback_errors.append(f"live rollback failed: {rollback_exc}")
-        if rollback_errors:
-            raise RuntimeError(f"{exc}; " + "; ".join(rollback_errors)) from exc
+        try:
+            _replace_live(expected)
+        except Exception as rollback_exc:
+            raise RuntimeError(f"{exc}; live rollback failed: {rollback_exc}") from exc
         raise
