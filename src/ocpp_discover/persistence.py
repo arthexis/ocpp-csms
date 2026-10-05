@@ -39,12 +39,24 @@ def _atomic_write(path: Path, content: str, *, mode: int) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def replace_ruleset(
+    content: str,
+    *,
+    ruleset_path: str | Path = DEFAULT_RULESET_PATH,
+    mode: int = 0o600,
+) -> Path:
+    """Atomically replace only Discover's owned persistent nftables fragment."""
+    path = Path(ruleset_path)
+    _atomic_write(path, content, mode=mode)
+    return path
+
+
 def ensure_ruleset_file(*, ruleset_path: str | Path = DEFAULT_RULESET_PATH) -> bool:
     """Create Discover's initially inert nftables fragment without replacing existing state."""
     path = Path(ruleset_path)
     if path.exists():
         return False
-    _atomic_write(path, EMPTY_RULESET, mode=0o600)
+    replace_ruleset(EMPTY_RULESET, ruleset_path=path)
     return True
 
 
@@ -93,8 +105,7 @@ def persist_ruleset(
         if existing != EMPTY_RULESET:
             raise RuntimeError("conflicting_persistent_nftables_adaptation")
     check_nftables_text(ruleset, nft=nft)
-    _atomic_write(path, ruleset, mode=0o600)
-    return path
+    return replace_ruleset(ruleset, ruleset_path=path)
 
 
 def ensure_nftables_include(
