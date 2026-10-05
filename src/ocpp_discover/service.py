@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ocpp_discover import discover, handoff, restore
 
-_DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-csms/discover"
+_DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
 _DEFAULT_RUNTIME_DIR = "/run/ocpp-discover"
 
 
