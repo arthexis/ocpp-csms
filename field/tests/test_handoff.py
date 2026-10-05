@@ -32,19 +32,42 @@ def blocked(reason="active charging detected"):
     return SimpleNamespace(allowed=False, connected_chargers=("CP1",), reason=reason)
 
 
-def prepare_cutover(tmp_path, monkeypatch, *, calls=None):
+def configure_cutover(
+    tmp_path,
+    monkeypatch,
+    *,
+    preflights=None,
+    calls=None,
+    listener_available=True,
+    connection_marker=1,
+    ocpp_marker=2,
+):
     seed_receipt(tmp_path)
-    preflights = iter((allowed("CP1"), allowed("CP1")))
+    outcomes = iter(preflights or (allowed("CP1"), allowed("CP1")))
     monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(preflights))
-    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: True)
+    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(outcomes))
+    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: listener_available)
     monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": 1})
-    monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": 2})
+    monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": connection_marker})
+    monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": ocpp_marker})
     if calls is None:
         monkeypatch.setattr(handoff, "_stop_service", lambda service: None)
     else:
         monkeypatch.setattr(handoff, "_stop_service", lambda service: calls.append(("stop", service)))
+
+
+def configure_successful_rollback(tmp_path, monkeypatch, calls):
+    table_states = iter((False, True))
+    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: next(table_states))
+    monkeypatch.setattr(handoff, "_start_service", lambda service: calls.append(("start", service)))
+    monkeypatch.setattr(handoff, "_service_active", lambda service: True)
+    monkeypatch.setattr(handoff.redirect_tools, "apply_redirect", lambda state_dir: calls.append(("apply", str(state_dir))))
+    monkeypatch.setattr(handoff.redirect_tools, "remove_redirect", lambda state_dir: calls.append(("remove", str(state_dir))))
+
+
+def assert_preserved_handoff_only(tmp_path):
+    assert (tmp_path / "handoff-endpoint.json").exists()
+    assert not (tmp_path / "redirect.json").exists()
 
 
 def test_prepare_persists_validated_endpoint_without_mutation(tmp_path, monkeypatch):
@@ -124,16 +147,14 @@ def test_load_receipt_rejects_invalid_evidence(tmp_path):
 
 
 def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocpp(tmp_path, monkeypatch):
-    seed_receipt(tmp_path)
     calls = []
-    preflights = iter((allowed("CP1"), allowed("CP1")))
-    monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(preflights))
-    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: port == 9000)
-    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": 7})
-    monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": 11})
-    monkeypatch.setattr(handoff, "_stop_service", lambda service: calls.append(("stop", service)))
+    configure_cutover(
+        tmp_path,
+        monkeypatch,
+        calls=calls,
+        connection_marker=7,
+        ocpp_marker=11,
+    )
 
     def apply(state_dir):
         assert json.loads((tmp_path / "redirect.json").read_text())["destination_port"] == 8888
@@ -170,14 +191,11 @@ def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocp
 
 
 def test_cutover_final_charging_gate_runs_before_service_stop(tmp_path, monkeypatch):
-    seed_receipt(tmp_path)
-    preflights = iter((allowed("CP1"), blocked()))
-    monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(preflights))
-    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: True)
-    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": 1})
-    monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": 2})
+    configure_cutover(
+        tmp_path,
+        monkeypatch,
+        preflights=(allowed("CP1"), blocked()),
+    )
     monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
 
     with pytest.raises(RuntimeError, match="active charging detected"):
@@ -187,14 +205,11 @@ def test_cutover_final_charging_gate_runs_before_service_stop(tmp_path, monkeypa
 
 
 def test_cutover_refuses_if_connected_set_changes_before_disruption(tmp_path, monkeypatch):
-    seed_receipt(tmp_path)
-    preflights = iter((allowed("CP1"), allowed("CP2")))
-    monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(preflights))
-    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: True)
-    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
-    monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": 1})
-    monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": 2})
+    configure_cutover(
+        tmp_path,
+        monkeypatch,
+        preflights=(allowed("CP1"), allowed("CP2")),
+    )
     monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
 
     with pytest.raises(RuntimeError, match="connected_chargers_changed_before_cutover"):
@@ -202,10 +217,7 @@ def test_cutover_refuses_if_connected_set_changes_before_disruption(tmp_path, mo
 
 
 def test_cutover_refuses_before_disruption_when_target_listener_is_missing(tmp_path, monkeypatch):
-    seed_receipt(tmp_path)
-    monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: allowed("CP1"))
-    monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: False)
+    configure_cutover(tmp_path, monkeypatch, listener_available=False)
     monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
 
     with pytest.raises(RuntimeError, match="target_listener_unavailable"):
@@ -214,7 +226,7 @@ def test_cutover_refuses_before_disruption_when_target_listener_is_missing(tmp_p
 
 def test_cutover_rolls_back_if_redirect_apply_fails(tmp_path, monkeypatch):
     calls = []
-    prepare_cutover(tmp_path, monkeypatch, calls=calls)
+    configure_cutover(tmp_path, monkeypatch, calls=calls)
     monkeypatch.setattr(handoff, "_start_service", lambda service: calls.append(("start", service)))
     monkeypatch.setattr(handoff, "_service_active", lambda service: True)
     monkeypatch.setattr(
@@ -227,19 +239,13 @@ def test_cutover_rolls_back_if_redirect_apply_fails(tmp_path, monkeypatch):
         handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
 
     assert calls == [("stop", "old.service"), ("start", "old.service")]
-    assert (tmp_path / "handoff-endpoint.json").exists()
-    assert not (tmp_path / "redirect.json").exists()
+    assert_preserved_handoff_only(tmp_path)
 
 
 def test_cutover_rolls_back_redirect_and_old_service_on_reconnect_timeout(tmp_path, monkeypatch):
     calls = []
-    prepare_cutover(tmp_path, monkeypatch, calls=calls)
-    table_states = iter((False, True))
-    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: next(table_states))
-    monkeypatch.setattr(handoff, "_start_service", lambda service: calls.append(("start", service)))
-    monkeypatch.setattr(handoff, "_service_active", lambda service: True)
-    monkeypatch.setattr(handoff.redirect_tools, "apply_redirect", lambda state_dir: calls.append(("apply", str(state_dir))))
-    monkeypatch.setattr(handoff.redirect_tools, "remove_redirect", lambda state_dir: calls.append(("remove", str(state_dir))))
+    configure_cutover(tmp_path, monkeypatch, calls=calls)
+    configure_successful_rollback(tmp_path, monkeypatch, calls)
     monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ("CP1",))
 
     with pytest.raises(RuntimeError, match="charger_reconnect_timeout"):
@@ -251,19 +257,13 @@ def test_cutover_rolls_back_redirect_and_old_service_on_reconnect_timeout(tmp_pa
         ("remove", str(tmp_path)),
         ("start", "old.service"),
     ]
-    assert (tmp_path / "handoff-endpoint.json").exists()
-    assert not (tmp_path / "redirect.json").exists()
+    assert_preserved_handoff_only(tmp_path)
 
 
 def test_cutover_rolls_back_on_fresh_ocpp_timeout(tmp_path, monkeypatch):
     calls = []
-    prepare_cutover(tmp_path, monkeypatch, calls=calls)
-    table_states = iter((False, True))
-    monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: next(table_states))
-    monkeypatch.setattr(handoff, "_start_service", lambda service: calls.append(("start", service)))
-    monkeypatch.setattr(handoff, "_service_active", lambda service: True)
-    monkeypatch.setattr(handoff.redirect_tools, "apply_redirect", lambda state_dir: calls.append(("apply", str(state_dir))))
-    monkeypatch.setattr(handoff.redirect_tools, "remove_redirect", lambda state_dir: calls.append(("remove", str(state_dir))))
+    configure_cutover(tmp_path, monkeypatch, calls=calls)
+    configure_successful_rollback(tmp_path, monkeypatch, calls)
     monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ())
     monkeypatch.setattr(handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ("CP1",))
 
@@ -271,12 +271,11 @@ def test_cutover_rolls_back_on_fresh_ocpp_timeout(tmp_path, monkeypatch):
         handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
 
     assert calls[-2:] == [("remove", str(tmp_path)), ("start", "old.service")]
-    assert (tmp_path / "handoff-endpoint.json").exists()
-    assert not (tmp_path / "redirect.json").exists()
+    assert_preserved_handoff_only(tmp_path)
 
 
 def test_cutover_reports_rollback_failure_without_losing_original_error(tmp_path, monkeypatch):
-    prepare_cutover(tmp_path, monkeypatch)
+    configure_cutover(tmp_path, monkeypatch)
     monkeypatch.setattr(handoff.redirect_tools, "apply_redirect", lambda state_dir: None)
     monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ("CP1",))
     monkeypatch.setattr(handoff, "_start_service", lambda service: (_ for _ in ()).throw(RuntimeError("start_failed")))
