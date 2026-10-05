@@ -36,7 +36,7 @@ def observe_contradiction(expected: RedirectReceipt, *, seconds: float) -> Redir
     """Passively look for the expected charger attempting a different plaintext endpoint."""
     capture = discover.capture_passive_tcp(expected.interface, seconds)
     try:
-        observed = discover.parse_source_websocket(
+        observed = discover._websocket_receipt(
             capture,
             interface=expected.interface,
             source_ip=expected.source_ip,
