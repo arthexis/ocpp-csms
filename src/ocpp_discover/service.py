@@ -3,10 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import time
 from pathlib import Path
 
-from ocpp_discover import discover, handoff
+from ocpp_discover import diagnosis, discover, handoff, reconcile
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 
 _DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
@@ -41,22 +40,54 @@ def _validate_observed_adaptation(
     return handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=timeout)
 
 
-def _wait_after_boot_timeout(
+def _diagnose_and_wait(
     data_dir: str | Path,
+    persistent_dir: str | Path,
+    receipt: object,
     expected: tuple[str, ...],
     *,
     interval: float,
-) -> None:
-    """Wait passively for a later connection without diagnosing or mutating networking."""
+    validation_timeout: float,
+) -> dict[str, object]:
+    """Diagnose once, then passively wait for either a valid reconnect or positive contradiction."""
+    configured = diagnosis.inspect_configuration(receipt)
+    if not configured.configured_matches:
+        _LOG.error("Discover persistent nftables fragment does not match discovered adaptation")
+    if not configured.live_table_present:
+        _LOG.error("Discover live nftables adaptation is absent")
+
     while True:
         connection_baseline = connection_markers(data_dir, expected)
-        missing = wait_for_reconnect(data_dir, connection_baseline, timeout=interval)
+        ocpp_baseline = handoff._ocpp_markers(data_dir, expected)
+        candidate = diagnosis.observe_contradiction(receipt, seconds=interval)
+
+        missing = wait_for_reconnect(data_dir, connection_baseline, timeout=0)
         if not missing:
-            # Chunk 8 owns diagnosis/revalidation after an abnormal late arrival.
-            _LOG.warning(
-                "expected charger appeared after startup timeout; diagnosis required before accepting adaptation"
+            missing_ocpp = handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=validation_timeout)
+            if not missing_ocpp:
+                return {"status": "persistent", "chargers": list(expected)}
+            _LOG.error(
+                "charger reconnected but fresh inbound OCPP was not observed; returning to passive wait"
             )
-            return
+            continue
+
+        if candidate is None:
+            continue
+
+        _LOG.error(
+            "positive endpoint contradiction observed for expected charger; attempting safe reconciliation"
+        )
+        reconciled = reconcile.reconcile(
+            data_dir=data_dir,
+            persistent_dir=persistent_dir,
+            expected=receipt,
+            candidate=candidate,
+            timeout=validation_timeout,
+        )
+        return {
+            "status": "reconciled",
+            "chargers": list(_expected_chargers(reconciled)),
+        }
 
 
 def _observe_persistent(
@@ -65,6 +96,7 @@ def _observe_persistent(
     *,
     boot_timeout: float,
     wait_interval: float,
+    validation_timeout: float,
 ) -> dict[str, object]:
     receipt = handoff.load_discovered(persistent_dir)
     expected = _expected_chargers(receipt)
@@ -76,8 +108,14 @@ def _observe_persistent(
         "expected charger(s) not observed during startup window: %s; persistent adaptation unchanged; entering passive offline wait",
         ", ".join(missing),
     )
-    _wait_after_boot_timeout(data_dir, expected, interval=wait_interval)
-    return {"status": "diagnosis_required", "chargers": list(expected)}
+    return _diagnose_and_wait(
+        data_dir,
+        persistent_dir,
+        receipt,
+        expected,
+        interval=wait_interval,
+        validation_timeout=validation_timeout,
+    )
 
 
 def run_service(
@@ -94,7 +132,7 @@ def run_service(
     boot_timeout: float = _DEFAULT_BOOT_TIMEOUT,
     wait_interval: float = _DEFAULT_WAIT_INTERVAL,
 ):
-    """Observe a known adaptation without mutation; discover only when none exists."""
+    """Observe known state; reconcile only positive contradictions; discover only when none exists."""
     state_path = handoff.discovered_path(persistent_dir)
     if state_path.exists():
         return _observe_persistent(
@@ -102,6 +140,7 @@ def run_service(
             persistent_dir,
             boot_timeout=boot_timeout,
             wait_interval=wait_interval,
+            validation_timeout=connect_timeout,
         )
 
     result = discover.run_discovery(
@@ -120,7 +159,7 @@ def run_service(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ocpp_discover service",
-        description="Observe a validated persistent OCPP adaptation or discover one when none exists.",
+        description="Observe, diagnose, and safely reconcile a persistent OCPP adaptation.",
     )
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--runtime-dir", default=_DEFAULT_RUNTIME_DIR)
