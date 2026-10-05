@@ -117,7 +117,7 @@ def test_initialized_storage_is_validated_before_service_start():
         cutover,
         "Initialize OCPP CSMS storage with active release",
         "Inspect initialized OCPP CSMS database",
-        "Inspect initialized transaction archive",
+        "Inspect initialized OCPP CSMS transaction archive",
         "Verify OCPP CSMS data directory is writable",
         "Enable and start activated OCPP CSMS service",
     )
