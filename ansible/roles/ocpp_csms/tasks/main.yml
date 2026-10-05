@@ -11,6 +11,23 @@
       OCPP CSMS installation requires a Debian-family ARM64 host and a valid
       listener host/port configuration.
 
+- name: Resolve release revision from controller checkout
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ ocpp_csms_controller_source_dir }}"
+      - rev-parse
+      - --short=12
+      - HEAD
+  delegate_to: localhost
+  register: ocpp_csms_release_revision
+  changed_when: false
+
+- name: Capture immutable release identifier
+  ansible.builtin.set_fact:
+    ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout }}"
+
 # The first safety gate must run before appliance mutation. Local bootstrap can
 # execute the preflight directly from the checkout.
 - name: Run local initial install safety preflight
@@ -72,7 +89,7 @@
     state: present
     update_cache: true
 
-- name: Create OCPP CSMS directories
+- name: Create OCPP CSMS base directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -81,66 +98,99 @@
     - "{{ ocpp_csms_prefix }}"
     - "{{ ocpp_csms_bin_dir }}"
     - "{{ ocpp_csms_data_dir }}"
+    - "{{ ocpp_csms_releases_dir }}"
 
-- name: Create staged Python virtual environment
+- name: Check whether immutable release is already complete
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_release_dir }}/.ready"
+  register: ocpp_csms_release_ready
+
+- name: Create immutable release directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_release_dir }}"
+    state: directory
+    mode: "0755"
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Create release Python virtual environment
   ansible.builtin.command:
-    cmd: "python3 -m venv {{ ocpp_csms_stage_venv }}"
-    creates: "{{ ocpp_csms_stage_venv }}/bin/python"
+    cmd: "python3 -m venv {{ ocpp_csms_release_venv }}"
+    creates: "{{ ocpp_csms_release_venv }}/bin/python"
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Ensure current pip in staged virtual environment
+- name: Ensure current pip in release virtual environment
   ansible.builtin.pip:
     name: pip
     state: latest
-    virtualenv: "{{ ocpp_csms_stage_venv }}"
+    virtualenv: "{{ ocpp_csms_release_venv }}"
+  when: not ocpp_csms_release_ready.stat.exists
 
 # With a local connection the controller and managed host are the same Pi, so
 # the checkout containing the playbook is already a valid target-side source.
 - name: Use current checkout as install source for local execution
   ansible.builtin.set_fact:
     ocpp_csms_install_source: "{{ ocpp_csms_controller_source_dir }}"
-  when: (ansible_connection | default('ssh')) == 'local'
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - (ansible_connection | default('ssh')) == 'local'
 
 # Remote execution cannot install from a controller-side path. Stage only the
-# inputs needed to build/install the Python package; do not create a second Git
-# checkout on the managed host.
-- name: Create remote staged source directory
+# inputs needed to build/install the Python package inside the immutable release.
+- name: Create remote release source directory
   ansible.builtin.file:
-    path: "{{ ocpp_csms_stage_source_dir }}"
+    path: "{{ ocpp_csms_release_source_dir }}"
     state: directory
     mode: "0755"
-  when: (ansible_connection | default('ssh')) != 'local'
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - (ansible_connection | default('ssh')) != 'local'
 
 - name: Copy remote package metadata
   ansible.builtin.copy:
     src: "{{ ocpp_csms_controller_source_dir }}/{{ item }}"
-    dest: "{{ ocpp_csms_stage_source_dir }}/{{ item }}"
+    dest: "{{ ocpp_csms_release_source_dir }}/{{ item }}"
     mode: "0644"
   loop:
     - pyproject.toml
     - README.md
-  when: (ansible_connection | default('ssh')) != 'local'
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - (ansible_connection | default('ssh')) != 'local'
 
 - name: Copy remote Python package source
   ansible.builtin.copy:
     src: "{{ ocpp_csms_controller_source_dir }}/src/"
-    dest: "{{ ocpp_csms_stage_source_dir }}/src/"
+    dest: "{{ ocpp_csms_release_source_dir }}/src/"
     mode: preserve
-  when: (ansible_connection | default('ssh')) != 'local'
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - (ansible_connection | default('ssh')) != 'local'
 
-- name: Use staged source as install source for remote execution
+- name: Use release source as install source for remote execution
   ansible.builtin.set_fact:
-    ocpp_csms_install_source: "{{ ocpp_csms_stage_source_dir }}"
-  when: (ansible_connection | default('ssh')) != 'local'
+    ocpp_csms_install_source: "{{ ocpp_csms_release_source_dir }}"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - (ansible_connection | default('ssh')) != 'local'
 
-- name: Install OCPP CSMS into staged virtual environment
+- name: Install OCPP CSMS into immutable release
   ansible.builtin.pip:
     name: "{{ ocpp_csms_install_source }}"
-    virtualenv: "{{ ocpp_csms_stage_venv }}"
+    virtualenv: "{{ ocpp_csms_release_venv }}"
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Verify staged OCPP CSMS command
+- name: Verify immutable release command
   ansible.builtin.command:
-    cmd: "{{ ocpp_csms_stage_venv }}/bin/ocpp-csms --help"
+    cmd: "{{ ocpp_csms_release_venv }}/bin/ocpp-csms --help"
   changed_when: false
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Mark immutable release ready
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_release_dir }}/.ready"
+    content: "{{ ocpp_csms_release_id }}\n"
+    mode: "0644"
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Resolve OCPP CSMS service group
   ansible.builtin.command:
@@ -166,7 +216,7 @@
   ansible.builtin.command:
     argv: >-
       {{
-        [ocpp_csms_stage_venv ~ '/bin/python', '-m',
+        [ocpp_csms_release_venv ~ '/bin/python', '-m',
          'ocpp_csms.install_preflight', '--data-dir', ocpp_csms_data_dir,
          '--json']
         + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
@@ -181,7 +231,7 @@
 - name: Inspect database schema cutover action
   ansible.builtin.command:
     argv:
-      - "{{ ocpp_csms_stage_venv }}/bin/python"
+      - "{{ ocpp_csms_release_venv }}/bin/python"
       - -m
       - ocpp_csms.install_cutover
       - schema-check
