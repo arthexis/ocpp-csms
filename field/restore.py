@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 from pathlib import Path
 
 from field import handoff
 from field import redirect as redirect_tools
+from field.discover import host_addresses
 
 
 def _interface_exists(interface: str) -> bool:
@@ -18,28 +18,6 @@ def _interface_exists(interface: str) -> bool:
         check=False,
     )
     return result.returncode == 0
-
-
-def _host_addresses() -> set[str]:
-    result = subprocess.run(
-        ["ip", "-j", "address", "show"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "host_address_query_failed"
-        raise RuntimeError(detail)
-    try:
-        payload = json.loads(result.stdout)
-        return {
-            str(info["local"])
-            for item in payload
-            for info in item.get("addr_info", [])
-            if info.get("family") == "inet" and "local" in info
-        }
-    except (TypeError, KeyError, ValueError):
-        raise RuntimeError("invalid_ip_address_output") from None
 
 
 def restore_path_a(
@@ -64,7 +42,7 @@ def restore_path_a(
     if len(destinations) != 1:
         raise RuntimeError("invalid_persistent_path_a_receipt")
     destination = destinations[0]
-    if destination not in _host_addresses():
+    if destination not in host_addresses():
         raise RuntimeError("persistent_path_a_destination_not_host_owned")
     if not redirect_tools.listener_available(receipt.listen_port):
         raise RuntimeError("target_listener_unavailable")
@@ -77,7 +55,7 @@ def restore_path_a(
     if runtime_receipt.exists():
         raise RuntimeError("redirect_receipt_exists")
     runtime_receipt.write_text(
-        json.dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n",
+        __import__("json").dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     try:
