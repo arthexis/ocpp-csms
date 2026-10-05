@@ -15,7 +15,7 @@ def forbid_discovery(monkeypatch):
 
 
 def configured(monkeypatch):
-    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: SimpleNamespace(configured_matches=True, live_table_present=True))
+    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: (True, True))
 
 
 def test_service_runs_discovery_when_durable_adaptation_is_absent(tmp_path, monkeypatch):
@@ -90,7 +90,7 @@ def test_configuration_mismatch_is_logged_but_does_not_mutate_without_endpoint_e
     persistent = tmp_path / "persistent"
     handoff.persist_discovered(persistent, receipt())
     forbid_discovery(monkeypatch)
-    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: SimpleNamespace(configured_matches=False, live_table_present=False))
+    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: (False, False))
     monkeypatch.setattr(service, "connection_markers", lambda data_dir, expected: {"CP7": 0})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda data_dir, expected: {"CP7": 0})
     reconnect_results = iter((("CP7",), ()))
