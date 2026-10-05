@@ -88,7 +88,7 @@ def _run_observer(monkeypatch, lines, *, expected=None):
     return evidence, commands[0], process
 
 
-def test_passive_observer_uses_syn_without_ack_kernel_filter(monkeypatch):
+def test_passive_observer_uses_one_syn_as_immediate_evidence(monkeypatch):
     line = "12:00:00.000000 IP 172.16.5.40.50000 > 172.16.5.1.8080: Flags [S], seq 1\n"
     evidence, command, process = _run_observer(monkeypatch, [line], expected=receipt())
 
@@ -105,12 +105,33 @@ def test_passive_observer_classifies_syn_from_replacement_charger(monkeypatch):
     assert evidence.kind == "candidate"
 
 
-def test_passive_observer_keeps_arp_as_candidate_wake_evidence(monkeypatch):
-    line = "12:00:00.000000 aa:bb:cc:dd:ee:ff > ff:ff:ff:ff:ff:ff, ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
-    evidence, command, _ = _run_observer(monkeypatch, [line], expected=receipt())
+def test_passive_observer_requires_repeated_unanswered_arp(monkeypatch):
+    first = "12:00:00.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
+    second = "12:00:01.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
+    evidence, command, _ = _run_observer(monkeypatch, [first, second], expected=receipt())
 
     assert "arp" in command[-1]
     assert evidence.kind == "candidate"
+    assert evidence.capture == first + second
+
+
+def test_passive_observer_ignores_self_arp_before_qualified_candidate(monkeypatch):
+    self_arp = "12:00:00.000000 ARP, Request who-has 10.42.0.50 tell 10.42.0.50, length 28\n"
+    first = "12:00:01.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
+    second = "12:00:02.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
+    evidence, _, _ = _run_observer(monkeypatch, [self_arp, first, second])
+
+    assert evidence.capture == self_arp + first + second
+
+
+def test_passive_observer_does_not_accept_answered_arp(monkeypatch):
+    request = "12:00:00.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
+    reply = "12:00:00.500000 ARP, Reply 10.42.0.1 is-at aa:bb:cc:dd:ee:ff, length 28\n"
+    other1 = "12:00:01.000000 ARP, Request who-has 10.42.0.2 tell 10.42.0.50, length 28\n"
+    other2 = "12:00:02.000000 ARP, Request who-has 10.42.0.2 tell 10.42.0.50, length 28\n"
+    evidence, _, _ = _run_observer(monkeypatch, [request, reply, request, other1, other2])
+
+    assert evidence.capture.endswith(other2)
 
 
 def test_tcp_ack_and_payload_are_excluded_before_python(monkeypatch):
