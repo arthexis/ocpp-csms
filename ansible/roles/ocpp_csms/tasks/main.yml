@@ -28,16 +28,17 @@
   ansible.builtin.set_fact:
     ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout }}"
 
-# The first safety gate must run before appliance mutation. Local bootstrap can
-# execute the preflight directly from the checkout.
+# The first safety gate must run before appliance mutation. Idle connected
+# chargers are expected; only active charging or unsafe persistence state blocks.
 - name: Run local initial install safety preflight
   ansible.builtin.command:
-    argv: >-
-      {{
-        ['python3', '-m', 'ocpp_csms.install_preflight',
-         '--data-dir', ocpp_csms_data_dir, '--json']
-        + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
-      }}
+    argv:
+      - python3
+      - -m
+      - ocpp_csms.install_preflight
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - --json
   environment:
     PYTHONPATH: "{{ ocpp_csms_controller_source_dir }}/src"
   changed_when: false
@@ -63,12 +64,13 @@
 
     - name: Execute remote initial install safety preflight
       ansible.builtin.command:
-        argv: >-
-          {{
-            ['python3', '-m', 'ocpp_csms.install_preflight',
-             '--data-dir', ocpp_csms_data_dir, '--json']
-            + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
-          }}
+        argv:
+          - python3
+          - -m
+          - ocpp_csms.install_preflight
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+          - --json
       environment:
         PYTHONPATH: "{{ ocpp_csms_remote_preflight_dir.path }}/src"
       changed_when: false
@@ -214,13 +216,13 @@
 # repeat the Python-owned safety check immediately after staging is complete.
 - name: Run final install safety preflight
   ansible.builtin.command:
-    argv: >-
-      {{
-        [ocpp_csms_release_venv ~ '/bin/python', '-m',
-         'ocpp_csms.install_preflight', '--data-dir', ocpp_csms_data_dir,
-         '--json']
-        + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
-      }}
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_preflight
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - --json
   register: ocpp_csms_final_preflight
   changed_when: false
 
@@ -250,5 +252,5 @@
   ansible.builtin.set_fact:
     ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
 
-- name: Perform controlled OCPP CSMS cutover
+- name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
