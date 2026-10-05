@@ -11,6 +11,52 @@
       OCPP CSMS installation requires a Debian-family ARM64 host and a valid
       listener host/port configuration.
 
+# The first safety gate must run before appliance mutation. Local bootstrap can
+# execute the preflight directly from the checkout. Remote execution uses a
+# temporary source copy only for this read-only Python inspection.
+- name: Use current checkout for local initial preflight
+  ansible.builtin.set_fact:
+    ocpp_csms_initial_preflight_source: "{{ ocpp_csms_controller_source_dir }}"
+  when: (ansible_connection | default('ssh')) == 'local'
+
+- name: Create temporary remote preflight source directory
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: -ocpp-csms-preflight
+  register: ocpp_csms_remote_preflight_dir
+  when: (ansible_connection | default('ssh')) != 'local'
+
+- name: Copy Python source for remote initial preflight
+  ansible.builtin.copy:
+    src: "{{ ocpp_csms_controller_source_dir }}/src/"
+    dest: "{{ ocpp_csms_remote_preflight_dir.path }}/src/"
+    mode: preserve
+  when: (ansible_connection | default('ssh')) != 'local'
+
+- name: Use temporary source for remote initial preflight
+  ansible.builtin.set_fact:
+    ocpp_csms_initial_preflight_source: "{{ ocpp_csms_remote_preflight_dir.path }}"
+  when: (ansible_connection | default('ssh')) != 'local'
+
+- name: Run initial install safety preflight
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', '-m', 'ocpp_csms.install_preflight',
+         '--data-dir', ocpp_csms_data_dir, '--json']
+        + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
+      }}
+  environment:
+    PYTHONPATH: "{{ ocpp_csms_initial_preflight_source }}/src"
+  register: ocpp_csms_initial_preflight
+  changed_when: false
+
+- name: Remove temporary remote preflight source
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_remote_preflight_dir.path }}"
+    state: absent
+  when: (ansible_connection | default('ssh')) != 'local'
+
 - name: Install Python prerequisites
   become: true
   ansible.builtin.apt:
@@ -108,3 +154,35 @@
     src: ocpp-csms.service.j2
     dest: "{{ ocpp_csms_candidate_service_path }}"
     mode: "0644"
+
+# Charging state can change while the candidate environment is being built, so
+# repeat the Python-owned safety check immediately after staging is complete.
+- name: Run final install safety preflight
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [ocpp_csms_stage_venv ~ '/bin/python', '-m',
+         'ocpp_csms.install_preflight', '--data-dir', ocpp_csms_data_dir,
+         '--json']
+        + (((ocpp_csms_rollover | bool) | ternary(['--rollover'], [])))
+      }}
+  register: ocpp_csms_final_preflight
+  changed_when: false
+
+- name: Inspect database schema cutover action
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_stage_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-check
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+  register: ocpp_csms_schema_check
+  changed_when: false
+
+- name: Validate schema cutover action
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_schema_check.stdout in ['create', 'current', 'upgrade']
+    fail_msg: "Unexpected schema cutover action: {{ ocpp_csms_schema_check.stdout }}"
