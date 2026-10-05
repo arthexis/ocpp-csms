@@ -10,9 +10,9 @@ DEFAULT_PERSISTENT_DIR = Path("/var/lib/ocpp-discover")
 
 def prepare_persistent_state(*, persistent_dir: str | Path = DEFAULT_PERSISTENT_DIR) -> str:
     """Validate existing Discover state and establish static Debian nftables integration."""
-    path = handoff.persistent_receipt_path(persistent_dir)
+    path = handoff.discovered_path(persistent_dir)
     if path.exists():
-        handoff.load_persistent_path_a(persistent_dir)
+        handoff.load_discovered(persistent_dir)
         state = "preserved"
     else:
         state = "absent"
@@ -24,7 +24,7 @@ def remove_persistent_state(*, persistent_dir: str | Path = DEFAULT_PERSISTENT_D
     """Remove only Discover-owned durable state and persistent nftables integration."""
     removed: list[Path] = []
     root = Path(persistent_dir).expanduser()
-    path = handoff.persistent_receipt_path(root)
+    path = handoff.discovered_path(root)
     if path.exists():
         path.unlink()
         removed.append(path)
