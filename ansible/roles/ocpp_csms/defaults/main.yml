@@ -1,1 +1,9 @@
 ---
+ocpp_csms_prefix: "{{ ansible_env.HOME }}/.local/share/ocpp-csms"
+ocpp_csms_bin_dir: "{{ ansible_env.HOME }}/.local/bin"
+ocpp_csms_data_dir: "{{ ansible_env.HOME }}/ocpp-csms-data"
+ocpp_csms_host: "0.0.0.0"
+ocpp_csms_port: 9000
+ocpp_csms_service_name: "ocpp-csms.service"
+ocpp_csms_rollover: false
+ocpp_csms_stage_venv: "{{ ocpp_csms_prefix }}/venv.next"
