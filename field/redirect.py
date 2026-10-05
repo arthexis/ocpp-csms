@@ -1,3 +1,7 @@
-"""Compatibility wrapper for the graduated OCPP Discover package."""
+"""Compatibility alias for the graduated OCPP Discover package."""
 
-from ocpp_discover.redirect import *  # noqa: F401,F403
+import sys
+
+from ocpp_discover import redirect as _implementation
+
+sys.modules[__name__] = _implementation
