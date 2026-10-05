@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ocpp-csms"
 version = "0.1.0"
-description = "A small Python OCPP CSMS"
+description = "A small Python OCPP CSMS with a companion network discovery service"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
