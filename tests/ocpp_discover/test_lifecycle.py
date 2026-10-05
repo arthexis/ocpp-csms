@@ -14,17 +14,23 @@ def receipt():
     )
 
 
-def test_prepare_reports_absent_without_creating_state(tmp_path):
+def test_prepare_reports_absent_without_creating_state(tmp_path, monkeypatch):
     persistent = tmp_path / "persistent"
+    prepared = []
+    monkeypatch.setattr(lifecycle.persistence, "prepare_nftables_integration", lambda: prepared.append(True))
     assert lifecycle.prepare_persistent_state(persistent_dir=persistent) == "absent"
+    assert prepared == [True]
     assert not persistent.exists()
 
 
-def test_prepare_preserves_valid_discovered_receipt(tmp_path):
+def test_prepare_preserves_valid_discovered_receipt(tmp_path, monkeypatch):
     persistent = tmp_path / "persistent"
     handoff.persist_validated_path_a(persistent, receipt())
+    prepared = []
+    monkeypatch.setattr(lifecycle.persistence, "prepare_nftables_integration", lambda: prepared.append(True))
 
     assert lifecycle.prepare_persistent_state(persistent_dir=persistent) == "preserved"
+    assert prepared == [True]
     assert handoff.load_persistent_path_a(persistent) == receipt()
 
 
