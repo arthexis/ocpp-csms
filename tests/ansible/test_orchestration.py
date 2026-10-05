@@ -148,9 +148,25 @@ def test_stable_command_is_exposed_only_after_handoff_processing():
         main,
         "Perform controlled OCPP CSMS handoff",
         "Install stable OCPP CSMS command",
+        "Resolve stable OCPP CSMS command target",
+        "Resolve active OCPP CSMS release command",
         "Assert stable OCPP CSMS command target",
     )
     assert "/usr/local/bin/ocpp-csms" in read(DEFAULTS)
+
+
+def test_stable_command_assertion_uses_canonical_paths():
+    main = read(TASKS / "main.yml")
+
+    stable = task_section(main, "Resolve stable OCPP CSMS command target")
+    active = task_section(main, "Resolve active OCPP CSMS release command")
+    assertion = task_section(main, "Assert stable OCPP CSMS command target")
+
+    assert "readlink" in stable and "- -f" in stable
+    assert "readlink" in active and "- -f" in active
+    assert "lnk_source" not in assertion
+    assert "ocpp_csms_command_resolved.stdout" in assertion
+    assert "ocpp_csms_release_command_resolved.stdout" in assertion
 
 
 def test_base_role_refuses_root_deployment_identity():
