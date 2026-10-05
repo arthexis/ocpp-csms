@@ -31,14 +31,14 @@ def test_base_service_runs_unprivileged_and_restarts():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_base_installer_help_explains_optional_discovery_and_rollover():
+def test_base_installer_help_explains_safe_handoff_and_optional_discovery():
     help_output = help_text("install.sh")
     assert "--host HOST" in help_output
     assert "--port PORT" in help_output
-    assert "--rollover" in help_output
-    assert "idle chargers" in help_output
-    assert "never overrides" in help_output
-    assert "staged cutover" in help_output
+    assert "--rollover" not in help_output
+    assert "Idle connected chargers are expected" in help_output
+    assert "Active charging always blocks installation" in help_output
+    assert "safe staged handoff" in help_output
     assert "--with-discover" in help_output
     assert "--without-discover" in help_output
     assert "preserved" in help_output
@@ -65,6 +65,7 @@ def test_base_installer_stages_before_disruptive_cutover():
 def test_base_installer_keeps_active_charge_gate_and_conditional_rollback():
     installer = read("install.sh")
     assert "run_preflight --json" in installer
+    assert "--rollover" not in installer
     assert 'if [ "$SCHEMA_ACTION" != upgrade ]' in installer
     assert "automatic rollback is intentionally disabled" in installer
     assert 'mv "$PREVIOUS_VENV" "$VENV"' in installer
@@ -80,7 +81,7 @@ def test_base_installer_preserves_and_delegates_discovery_after_cutover():
     assert 'DISCOVER_MODE=uninstall' in installer
     assert reconnect < discover
     assert 'sh "$ROOT/discover.sh" --uninstall' in installer
-    assert 'ocpp_csms.install_preflight --data-dir "$DATA_DIR" --rollover' in installer
+    assert 'ocpp_csms.install_preflight --data-dir "$DATA_DIR" >/dev/null' in installer
 
 
 def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():

@@ -1,0 +1,17 @@
+[Unit]
+Description=OCPP CSMS appliance service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ ocpp_csms_service_user }}
+Group={{ ocpp_csms_service_group }}
+Environment="HOME={{ ocpp_csms_service_home }}"
+ExecStart="{{ ocpp_csms_runtime_command }}" --data-dir "{{ ocpp_csms_data_dir }}" serve --host "{{ ocpp_csms_host }}" --port {{ ocpp_csms_port }}
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

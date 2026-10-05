@@ -60,46 +60,32 @@ def test_new_install_is_allowed(tmp_path, monkeypatch):
     result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is True
-    assert result.mode == "normal"
     assert result.connected_chargers == ()
     assert result.active_chargers == ()
 
 
-def test_idle_connected_charger_requires_rollover(tmp_path, monkeypatch):
+def test_idle_connected_charger_allows_safe_handoff(tmp_path, monkeypatch):
     _record_connection(tmp_path)
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
 
     result = install_preflight.evaluate_preflight(tmp_path)
 
-    assert result.allowed is False
-    assert result.mode == "rollover-required"
-    assert result.connected_chargers == ("charger-a",)
-    assert "--rollover" in result.reason
-
-
-def test_rollover_allows_idle_connected_charger(tmp_path, monkeypatch):
-    _record_connection(tmp_path)
-    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
-
-    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
-
     assert result.allowed is True
-    assert result.mode == "rollover"
     assert result.connected_chargers == ("charger-a",)
+    assert result.active_chargers == ()
 
 
-def test_active_transaction_blocks_even_with_rollover(tmp_path, monkeypatch):
+def test_active_transaction_blocks_service_handoff(tmp_path, monkeypatch):
     _record_connection(tmp_path)
     _record_active_archive(tmp_path)
     _record_active_database(tmp_path)
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
 
-    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+    result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is False
-    assert result.mode == "blocked"
     assert result.active_chargers == ("charger-a",)
-    assert "cannot override active charging" in result.reason
+    assert "service handoff is blocked" in result.reason
 
 
 def test_disagreement_between_sqlite_and_archive_blocks_install(tmp_path, monkeypatch):
@@ -107,10 +93,9 @@ def test_disagreement_between_sqlite_and_archive_blocks_install(tmp_path, monkey
     _record_active_database(tmp_path)
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
 
-    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+    result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is False
-    assert result.mode == "blocked"
     assert result.active_chargers == ("charger-a",)
     assert "disagrees" in result.reason
 
@@ -122,7 +107,6 @@ def test_preflight_ignores_stale_connected_event_when_server_is_stopped(tmp_path
     result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is True
-    assert result.mode == "normal"
     assert result.connected_chargers == ()
 
 
@@ -130,7 +114,7 @@ def test_unversioned_existing_database_is_blocked(tmp_path, monkeypatch):
     (tmp_path / DATABASE_FILENAME).touch()
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: False)
 
-    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+    result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is False
     assert "unversioned" in result.reason
@@ -141,7 +125,7 @@ def test_newer_database_schema_is_blocked(tmp_path, monkeypatch):
         connection.execute("PRAGMA user_version = 99")
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: False)
 
-    result = install_preflight.evaluate_preflight(tmp_path, rollover=True)
+    result = install_preflight.evaluate_preflight(tmp_path)
 
     assert result.allowed is False
     assert "newer than supported" in result.reason

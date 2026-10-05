@@ -1,0 +1,46 @@
+---
+ocpp_csms_prefix: "{{ ansible_env.HOME }}/.local/share/ocpp-csms"
+ocpp_csms_data_dir: "{{ ansible_env.HOME }}/ocpp-csms-data"
+ocpp_csms_host: "0.0.0.0"
+ocpp_csms_port: 9000
+ocpp_csms_service_name: "ocpp-csms.service"
+ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
+
+# Source location on the Ansible controller. Local bootstrap installs directly
+# from this checkout; remote execution copies package inputs to the target.
+ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
+
+# Immutable releases are keyed by the controller checkout's Git commit. The
+# role resolves ocpp_csms_release_id at runtime before creating these paths.
+ocpp_csms_releases_dir: "{{ ocpp_csms_prefix }}/releases"
+ocpp_csms_release_dir: "{{ ocpp_csms_releases_dir }}/{{ ocpp_csms_release_id }}"
+ocpp_csms_release_venv: "{{ ocpp_csms_release_dir }}/venv"
+ocpp_csms_release_source_dir: "{{ ocpp_csms_release_dir }}/source"
+ocpp_csms_current_link: "{{ ocpp_csms_prefix }}/current"
+ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
+
+# Application-owned storage is created by `ocpp-csms init`; Ansible verifies
+# these expected artifacts after initialization without owning their schema.
+ocpp_csms_database_path: "{{ ocpp_csms_data_dir }}/ocpp-csms.sqlite3"
+ocpp_csms_transactions_dir: "{{ ocpp_csms_data_dir }}/transactions"
+
+# The final preflight payload and reconnect markers bridge the safe staging
+# phase to post-start verification without recomputing which chargers mattered.
+ocpp_csms_final_preflight_path: "{{ ocpp_csms_prefix }}/preflight.final.json"
+ocpp_csms_reconnect_baseline_path: "{{ ocpp_csms_prefix }}/reconnect-baseline.json"
+
+# Preserve the live unit during activation so a schema-compatible failure can
+# restore both the previous release and its service configuration.
+ocpp_csms_previous_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.previous"
+
+# The candidate unit is rendered harmlessly under the appliance prefix and is
+# promoted to the live systemd path only inside the controlled cutover section.
+ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
+ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
+ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
+
+# Verification is local to the appliance even when the listener binds all
+# interfaces. Connected chargers get a separate fresh-reconnect verification.
+ocpp_csms_verify_host: "{{ '127.0.0.1' if ocpp_csms_host in ['0.0.0.0', '::'] else ocpp_csms_host }}"
+ocpp_csms_listener_timeout: 10
+ocpp_csms_reconnect_timeout: 30

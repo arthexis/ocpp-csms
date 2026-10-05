@@ -190,7 +190,7 @@ def cutover(
     """Perform the controlled Path A handoff using prevalidated endpoint evidence."""
     require_root()
     receipt = load_receipt(state_dir)
-    preflight = evaluate_preflight(data_dir, rollover=True)
+    preflight = evaluate_preflight(data_dir)
     if not preflight.allowed:
         raise RuntimeError(preflight.reason or "handoff_preflight_blocked")
     expected = preflight.connected_chargers
@@ -206,7 +206,7 @@ def cutover(
     connection_baseline = connection_markers(data_dir, expected)
     ocpp_baseline = _ocpp_markers(data_dir, expected)
 
-    final_preflight = evaluate_preflight(data_dir, rollover=True)
+    final_preflight = evaluate_preflight(data_dir)
     if not final_preflight.allowed:
         raise RuntimeError(final_preflight.reason or "handoff_preflight_blocked")
     if final_preflight.connected_chargers != expected:

@@ -19,21 +19,19 @@ SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
 DISCOVER_MODE=preserve
-ROLLOVER=0
 PROMOTED=0
 
 usage() {
     cat <<'EOF'
-Usage: sh install.sh [--host HOST] [--port PORT] [--rollover] [--with-discover|--without-discover]
+Usage: sh install.sh [--host HOST] [--port PORT] [--with-discover|--without-discover]
 
-Install or update the OCPP CSMS appliance service using a staged cutover.
+Install or update the OCPP CSMS appliance service using a safe staged handoff.
+Idle connected chargers are expected and are handed to the replacement service.
+Active charging always blocks installation.
 
 Options:
   --host HOST          Listener address for the CSMS (default: 0.0.0.0).
   --port PORT          Listener port for the CSMS (default: 9000).
-  --rollover           Allow replacement while idle chargers are connected to the
-                       existing CSMS. Active charging always blocks installation;
-                       --rollover never overrides that safety gate.
   --with-discover      Also install and enable OCPP Discover. Discover can learn the
                        charger-facing Ethernet address/port at boot and adapt the
                        local network so plaintext OCPP reaches this CSMS.
@@ -50,7 +48,6 @@ while [ "$#" -gt 0 ]; do
         --host=*) HOST=${1#*=}; shift ;;
         --port) [ "$#" -ge 2 ] || { printf 'Missing value for --port\n' >&2; exit 2; }; PORT=$2; shift 2 ;;
         --port=*) PORT=${1#*=}; shift ;;
-        --rollover) ROLLOVER=1; shift ;;
         --with-discover)
             [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
             DISCOVER_MODE=install; shift ;;
@@ -78,11 +75,7 @@ need() {
 }
 
 run_preflight() {
-    if [ "$ROLLOVER" -eq 1 ]; then
-        PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" --rollover "$@"
-    else
-        PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" "$@"
-    fi
+    PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" "$@"
 }
 
 ensure_user_bin_on_path() {
@@ -183,7 +176,7 @@ ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"
 ensure_user_bin_on_path
 
 rollback_startup() {
-    printf 'Replacement CSMS failed during cutover.\n' >&2
+    printf 'Replacement CSMS failed during handoff.\n' >&2
     if [ "$SCHEMA_ACTION" != upgrade ] && [ "$HAD_VENV" -eq 1 ] && [ -d "$PREVIOUS_VENV" ]; then
         sudo systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
         rm -rf "$VENV.failed"
@@ -235,10 +228,10 @@ then
     rollback_startup
 fi
 
-# A rollover succeeds only after every charger connected at the final gate emits a fresh connection event.
+# Every charger connected at the final gate must emit a fresh connection event.
 if ! "$VENV/bin/python" -m ocpp_csms.install_cutover wait-reconnect \
     --data-dir "$DATA_DIR" --baseline "$TMP_BASELINE" --timeout 30; then
-    printf 'Rollover incomplete: one or more previously connected chargers did not reconnect. The replacement CSMS remains running for diagnosis.\n' >&2
+    printf 'Service handoff incomplete: one or more previously connected chargers did not reconnect. The replacement CSMS remains running for diagnosis.\n' >&2
     exit 1
 fi
 
@@ -248,7 +241,7 @@ fi
 case "$DISCOVER_MODE" in
     install|uninstall)
         # Discover is a later network mutation: active charging still blocks it.
-        PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" --rollover >/dev/null
+        PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" >/dev/null
         if [ "$DISCOVER_MODE" = install ]; then
             OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" sh "$ROOT/discover.sh" --install
         else
