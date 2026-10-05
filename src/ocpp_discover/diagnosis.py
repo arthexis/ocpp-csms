@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -24,7 +25,10 @@ class DiscoveryEvidence:
     capture: str
 
 
-_ARP_TELL = re.compile(r"ARP, Request who-has \S+ tell (?P<source>\d+\.\d+\.\d+\.\d+)")
+_ARP_REQUEST = re.compile(
+    r"ARP, Request who-has (?P<target>\d+\.\d+\.\d+\.\d+) tell (?P<source>\d+\.\d+\.\d+\.\d+)"
+)
+_ARP_REPLY = re.compile(r"ARP, Reply (?P<source>\d+\.\d+\.\d+\.\d+) is-at ")
 
 
 def inspect_configuration(
@@ -45,11 +49,10 @@ def inspect_configuration(
 def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None) -> DiscoveryEvidence:
     """Block until positive charger-side evidence appears, without mutating the host.
 
-    The observer has no timer: an offline charger therefore causes no repeated
-    diagnosis. Only a new outbound TCP connection attempt (SYN without ACK) or
-    an ARP request wakes Discover. Established TCP traffic is ignored. The
-    bounded diagnostic pass after the wake decides whether the evidence is an
-    OCPP endpoint and whether any adaptation is warranted.
+    A single new outbound TCP connection attempt (SYN without ACK) is sufficient
+    to begin diagnosis and its capture is returned to the caller. ARP is a
+    fallback: it must show the same non-self unresolved request at least twice.
+    Established TCP traffic is excluded by BPF before Python sees it.
     """
     if not discover._INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
@@ -61,6 +64,8 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert process.stdout is not None
     captured: list[str] = []
+    arp_counts: Counter[tuple[str, str]] = Counter()
+    answered: set[str] = set()
     try:
         for line in process.stdout:
             captured.append(line)
@@ -69,11 +74,24 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 source = tcp.group("src")
                 kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
                 return DiscoveryEvidence(kind, "".join(captured))
-            arp = _ARP_TELL.search(line)
-            if arp is not None:
-                source = arp.group("source")
-                kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
-                return DiscoveryEvidence(kind, "".join(captured))
+
+            reply = _ARP_REPLY.search(line)
+            if reply is not None:
+                answered.add(reply.group("source"))
+                continue
+
+            arp = _ARP_REQUEST.search(line)
+            if arp is None:
+                continue
+            source = arp.group("source")
+            target = arp.group("target")
+            if source == target:
+                continue
+            arp_counts[(source, target)] += 1
+            if arp_counts[(source, target)] < 2 or target in answered:
+                continue
+            kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
+            return DiscoveryEvidence(kind, "".join(captured))
         detail = process.stderr.read().strip().splitlines()[-1] if process.stderr is not None else ""
         raise RuntimeError(detail or "passive_observer_stopped")
     finally:
