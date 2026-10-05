@@ -8,9 +8,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from field import redirect as redirect_tools
-from field.discover import discover_existing_endpoint, require_root
-from field.redirect import RedirectReceipt, receipt_from_json, validate_receipt
+from ocpp_discover import redirect as redirect_tools
+from ocpp_discover.discover import discover_existing_endpoint, require_root
+from ocpp_discover.redirect import RedirectReceipt, receipt_from_json, validate_receipt
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 from ocpp_csms.install_preflight import evaluate_preflight
 from ocpp_csms.schema import DATABASE_FILENAME
@@ -20,7 +20,7 @@ _REDIRECT_RECEIPT = "redirect.json"
 _PERSISTENT_RECEIPT = "path-a.json"
 _PERSISTENT_KIND = "ocpp-path-a"
 _PERSISTENT_VERSION = 1
-_DEFAULT_PERSISTENT_STATE_DIR = "/var/lib/ocpp-csms/discover"
+_DEFAULT_PERSISTENT_STATE_DIR = "/var/lib/ocpp-discover"
 _RECEIPT_KEYS = {
     "interface",
     "listen_port",
@@ -356,7 +356,7 @@ def cutover(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m field.handoff",
+        prog="python -m ocpp_discover.handoff",
         description="Prepare and execute a validated staged OCPP handoff.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
