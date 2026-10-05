@@ -83,20 +83,22 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 process.wait()
 
 
-def observe_contradiction(expected: RedirectReceipt, *, seconds: float) -> RedirectReceipt | None:
-    """Passively return a different plaintext endpoint attempted by the expected charger."""
-    capture = discover.capture_passive_tcp(expected.interface, seconds)
+def observe_endpoint(interface: str, *, listen_port: int, seconds: float) -> RedirectReceipt | None:
+    """Boundedly diagnose any plaintext WebSocket endpoint after a positive wake."""
+    capture = discover.capture_passive_tcp(interface, seconds)
     try:
-        observed = discover._websocket_receipt(
-            capture,
-            interface=expected.interface,
-            source_ip=expected.source_ip,
-            listen_port=expected.listen_port,
-        )
+        return discover._websocket_receipt(capture, interface=interface, listen_port=listen_port)
     except ValueError as exc:
         if str(exc) in {"no_plaintext_websocket_upgrade", "secure_or_opaque_traffic"}:
             return None
         raise
+
+
+def observe_contradiction(expected: RedirectReceipt, *, seconds: float) -> RedirectReceipt | None:
+    """Passively return a different plaintext endpoint attempted by the expected charger."""
+    observed = observe_endpoint(expected.interface, listen_port=expected.listen_port, seconds=seconds)
+    if observed is None:
+        return None
     return None if adaptation_identity(observed) == adaptation_identity(expected) else observed
 
 
