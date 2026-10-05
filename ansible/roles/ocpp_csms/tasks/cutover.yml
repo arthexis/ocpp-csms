@@ -76,7 +76,7 @@
     - not (ocpp_csms_live_service_state.stat.exists | default(false))
 
 # Downtime-sensitive activation and verification are one transaction-like block.
-# Rescue may restore the old runtime only when no schema upgrade occurred.
+# `current` is deliberately not changed until the candidate has proven healthy.
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
@@ -98,34 +98,6 @@
           - "{{ ocpp_csms_data_dir }}"
       when: ocpp_csms_schema_action == 'upgrade'
 
-    - name: Point previous at old current release
-      ansible.builtin.file:
-        src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
-        dest: "{{ ocpp_csms_previous_link }}"
-        state: link
-        force: true
-      when:
-        - ocpp_csms_current_state.stat.islnk | default(false)
-        - (ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir
-
-    - name: Activate immutable release
-      ansible.builtin.file:
-        src: "{{ ocpp_csms_release_dir }}"
-        dest: "{{ ocpp_csms_current_link }}"
-        state: link
-        force: true
-
-    # On first installation the candidate ExecStart path did not exist during
-    # staging. Validate it now that `current` resolves, before installing the unit.
-    - name: Verify candidate systemd unit on first install
-      ansible.builtin.command:
-        argv:
-          - systemd-analyze
-          - verify
-          - "{{ ocpp_csms_candidate_service_path }}"
-      changed_when: false
-      when: not (ocpp_csms_current_state.stat.islnk | default(false))
-
     - name: Install live OCPP CSMS systemd unit
       become: true
       ansible.builtin.copy:
@@ -138,10 +110,10 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    - name: Initialize OCPP CSMS storage with active release
+    - name: Initialize OCPP CSMS storage with candidate release
       ansible.builtin.command:
         argv:
-          - "{{ ocpp_csms_runtime_command }}"
+          - "{{ ocpp_csms_release_command }}"
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
           - init
@@ -175,7 +147,7 @@
           OCPP CSMS init did not produce the expected SQLite database and
           transaction archive directory.
 
-    - name: Enable and start activated OCPP CSMS service
+    - name: Enable and start candidate OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
         name: "{{ ocpp_csms_service_name }}"
@@ -189,10 +161,10 @@
         timeout: "{{ ocpp_csms_listener_timeout }}"
         state: started
 
-    - name: Verify OCPP CSMS application status
+    - name: Verify candidate OCPP CSMS application status
       ansible.builtin.command:
         argv:
-          - "{{ ocpp_csms_runtime_command }}"
+          - "{{ ocpp_csms_release_command }}"
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
           - status
@@ -213,6 +185,25 @@
           - "{{ ocpp_csms_reconnect_timeout }}"
       changed_when: false
 
+    # Only a fully verified candidate becomes the active release. Until here,
+    # `current` continues to name the last successfully active release.
+    - name: Point previous at successfully active release
+      ansible.builtin.file:
+        src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
+        dest: "{{ ocpp_csms_previous_link }}"
+        state: link
+        force: true
+      when:
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - (ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir
+
+    - name: Promote verified release to current
+      ansible.builtin.file:
+        src: "{{ ocpp_csms_release_dir }}"
+        dest: "{{ ocpp_csms_current_link }}"
+        state: link
+        force: true
+
   rescue:
     - name: Stop failed replacement before rollback
       become: true
@@ -220,16 +211,6 @@
         name: "{{ ocpp_csms_service_name }}"
         state: stopped
       failed_when: false
-      when:
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-
-    - name: Restore previous current release
-      ansible.builtin.file:
-        src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
-        dest: "{{ ocpp_csms_current_link }}"
-        state: link
-        force: true
       when:
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
