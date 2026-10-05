@@ -28,7 +28,10 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: CSMS tests
-        run: python -m pytest
+        run: python -m pytest tests --ignore=tests/ocpp_discover
+
+      - name: Discover tests
+        run: python -m pytest tests/ocpp_discover
 
       - name: Field harness tests
         run: python -m pytest field/tests
