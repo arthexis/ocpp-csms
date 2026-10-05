@@ -1,1 +1,97 @@
 ---
+- name: Validate OCPP Discover host integration
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - ocpp_discover_interface | length > 0
+      - ocpp_discover_port | int >= 1
+      - ocpp_discover_port | int <= 65535
+    fail_msg: >-
+      OCPP Discover requires a Debian-family appliance with a valid charger-facing
+      interface and listener port.
+
+- name: Verify active immutable CSMS Python runtime exists
+  ansible.builtin.stat:
+    path: "{{ ocpp_discover_python }}"
+  register: ocpp_discover_python_state
+
+- name: Require active immutable CSMS Python runtime
+  ansible.builtin.assert:
+    that:
+      - ocpp_discover_python_state.stat.exists
+      - ocpp_discover_python_state.stat.executable
+    fail_msg: >-
+      OCPP Discover requires the active Ansible-managed CSMS release runtime at
+      {{ ocpp_discover_python }}. Converge the ocpp_csms role first.
+
+- name: Install OCPP Discover runtime packages
+  become: true
+  ansible.builtin.apt:
+    name: "{{ ocpp_discover_packages }}"
+    state: present
+    update_cache: true
+
+- name: Prepare OCPP Discover persistent integration
+  become: true
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_discover_python }}"
+      - -m
+      - ocpp_discover.lifecycle
+      - prepare
+  changed_when: false
+
+# Discover owns only its included nftables fragment. Debian should load that
+# fragment on future boots, but convergence must not flush or restart the live
+# nftables ruleset merely to enable boot integration.
+- name: Enable nftables service for future boots
+  become: true
+  ansible.builtin.systemd_service:
+    name: nftables.service
+    enabled: true
+
+- name: Ensure OCPP Discover candidate directory exists
+  ansible.builtin.file:
+    path: "{{ ocpp_discover_candidate_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Render candidate OCPP Discover systemd unit
+  ansible.builtin.template:
+    src: ocpp-discover.service.j2
+    dest: "{{ ocpp_discover_candidate_service_path }}"
+    mode: "0644"
+
+- name: Verify candidate OCPP Discover systemd unit
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - verify
+      - "{{ ocpp_discover_candidate_service_path }}"
+  changed_when: false
+
+- name: Install live OCPP Discover systemd unit
+  become: true
+  ansible.builtin.copy:
+    src: "{{ ocpp_discover_candidate_service_path }}"
+    dest: "{{ ocpp_discover_service_path }}"
+    remote_src: true
+    mode: "0644"
+  register: ocpp_discover_unit_install
+
+- name: Enable OCPP Discover at boot
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_discover_service_name }}"
+    enabled: true
+    daemon_reload: "{{ ocpp_discover_unit_install.changed }}"
+
+- name: Confirm OCPP Discover service is enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-enabled
+      - "{{ ocpp_discover_service_name }}"
+  register: ocpp_discover_enabled
+  changed_when: false
+  failed_when: ocpp_discover_enabled.stdout.strip() != 'enabled'

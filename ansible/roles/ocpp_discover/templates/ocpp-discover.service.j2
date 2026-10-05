@@ -1,0 +1,14 @@
+[Unit]
+Description=OCPP Discover
+Wants=network-online.target ocpp-csms.service
+After=network-online.target ocpp-csms.service
+
+[Service]
+Type=oneshot
+ExecStart="{{ ocpp_discover_python }}" -m ocpp_discover service --data-dir "{{ ocpp_discover_data_dir }}" --runtime-dir "{{ ocpp_discover_runtime_dir }}" --persistent-dir "{{ ocpp_discover_persistent_dir }}" --interface "{{ ocpp_discover_interface }}" --listen-port {{ ocpp_discover_port }}
+RemainAfterExit=no
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
