@@ -10,15 +10,21 @@ ocpp_csms_service_name: "ocpp-csms.service"
 # The Python preflight remains authoritative and never permits active charging.
 ocpp_csms_rollover: false
 
-# Staging paths. Local bootstrap installs directly from the checkout containing
-# this playbook; remote execution copies only the package inputs here first.
-ocpp_csms_stage_venv: "{{ ocpp_csms_prefix }}/venv.next"
+# Source location on the Ansible controller. Local bootstrap installs directly
+# from this checkout; remote execution copies package inputs to the target.
 ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
-ocpp_csms_stage_source_dir: "{{ ocpp_csms_prefix }}/source.next"
+
+# Immutable releases are keyed by the controller checkout's Git commit. The
+# role resolves ocpp_csms_release_id at runtime before creating these paths.
+ocpp_csms_releases_dir: "{{ ocpp_csms_prefix }}/releases"
+ocpp_csms_release_dir: "{{ ocpp_csms_releases_dir }}/{{ ocpp_csms_release_id }}"
+ocpp_csms_release_venv: "{{ ocpp_csms_release_dir }}/venv"
+ocpp_csms_release_source_dir: "{{ ocpp_csms_release_dir }}/source"
+ocpp_csms_current_link: "{{ ocpp_csms_prefix }}/current"
+ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
 
 # The candidate unit is rendered harmlessly under the appliance prefix. Later
 # cutover work will promote it to the live systemd path only after safety gates.
 ocpp_csms_service_path: "/etc/systemd/system/{{ ocpp_csms_service_name }}"
 ocpp_csms_candidate_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.next"
-ocpp_csms_runtime_venv: "{{ ocpp_csms_prefix }}/venv"
-ocpp_csms_runtime_command: "{{ ocpp_csms_runtime_venv }}/bin/ocpp-csms"
+ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
