@@ -3,9 +3,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ANSIBLE = ROOT / "ansible"
+PLAYBOOK = ANSIBLE / "playbooks" / "satellite.yml"
 ROLE = ANSIBLE / "roles" / "ocpp_csms"
 TASKS = ROLE / "tasks"
 DEFAULTS = ROLE / "defaults" / "main.yml"
+SERVICE_TEMPLATE = ROLE / "templates" / "ocpp-csms.service.j2"
+DEPLOY_SCRIPT = ROOT / "ansible-deploy.sh"
 
 
 def read(path: Path) -> str:
@@ -33,9 +36,10 @@ def assert_task_order(text: str, *names: str) -> None:
     assert positions == sorted(positions), f"unexpected task order: {names}"
 
 
-def all_ansible_text() -> str:
+def role_text() -> str:
+    """Return only the implemented CSMS role, excluding future role scaffolds."""
     return "\n".join(
         path.read_text(encoding="utf-8")
-        for path in ANSIBLE.rglob("*")
+        for path in ROLE.rglob("*")
         if path.is_file()
     )
