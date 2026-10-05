@@ -73,11 +73,11 @@ sudo python -m field.handoff cutover \
   --timeout 30
 ```
 
-The cutover runs a read-only rollover preflight, baselines the currently connected idle charger set plus connection and inbound-OCPP evidence, and repeats the active-charge check immediately before disruption. It then stops the old listener, materializes the narrow redirect from the previously validated receipt, and requires both a fresh `charger_connected` event and fresh inbound OCPP traffic before success.
+The cutover runs a read-only service-handoff preflight, baselines the currently connected idle charger set plus connection and inbound-OCPP evidence, and repeats the active-charge check immediately before disruption. It then stops the old listener, materializes the narrow redirect from the previously validated receipt, and requires both a fresh `charger_connected` event and fresh inbound OCPP traffic before success.
 
 If anything fails after the old listener has stopped—including redirect application, charger reconnect, or fresh OCPP evidence—the handoff removes only the redirect owned by that attempt, restarts the old service, verifies it is active again, and preserves `handoff-endpoint.json` for diagnosis or a later retry. If rollback itself fails, the reported error includes both the original handoff failure and rollback failure.
 
-This handoff never overrides active charging and does not use ARP fallback or address claiming.
+This handoff always blocks active charging and does not use ARP fallback or address claiming.
 
 ## Plaintext OCPP redirect helper
 
