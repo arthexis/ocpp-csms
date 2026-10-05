@@ -205,6 +205,29 @@ def test_discover_existing_endpoint_accepts_host_local_destination_on_other_inte
     assert_redirect_scope(receipt, "10.42.0.1")
 
 
+def test_discover_existing_endpoint_writes_capture_log_before_parsing(tmp_path, monkeypatch):
+    capture_log = tmp_path / "passive-tcp.txt"
+    monkeypatch.setattr(discover, "host_addresses", lambda: {"10.42.0.1"})
+    monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: packet(destination="10.42.0.1", port=8888))
+
+    receipt = discover.discover_existing_endpoint(
+        interface="eth0", listen_port=9000, seconds=300, capture_log=capture_log
+    )
+
+    assert receipt is not None
+    assert capture_log.read_text() == packet(destination="10.42.0.1", port=8888)
+
+
+def test_discover_existing_endpoint_refuses_to_overwrite_capture_log(tmp_path, monkeypatch):
+    capture_log = tmp_path / "passive-tcp.txt"
+    capture_log.write_text("previous result")
+    monkeypatch.setattr(discover, "host_addresses", lambda: {"10.42.0.1"})
+    monkeypatch.setattr(discover, "capture_passive_tcp", lambda interface, seconds: "")
+
+    with pytest.raises(RuntimeError, match="capture_log_exists"):
+        discover.discover_existing_endpoint(interface="eth0", listen_port=9000, capture_log=capture_log)
+
+
 def test_redirect_ruleset_uses_discovered_destination_port():
     receipt = discover.parse_tcp_websocket(packet(port=8888), CANDIDATE, listen_port=9000)
 

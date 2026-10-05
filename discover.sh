@@ -6,6 +6,12 @@ PREFIX=${OCPP_CSMS_PREFIX:-"$HOME/.local/share/ocpp-csms"}
 DATA_DIR=${OCPP_CSMS_DATA_DIR:-"$HOME/ocpp-csms-data"}
 PORT=${OCPP_CSMS_PORT:-9000}
 INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}
+GRACE_SECONDS=${OCPP_DISCOVER_GRACE_SECONDS:-10}
+ARP_SECONDS=${OCPP_DISCOVER_ARP_SECONDS:-15}
+TCP_SECONDS=${OCPP_DISCOVER_TCP_SECONDS:-15}
+EXISTING_ENDPOINT_ONLY=0
+DIAGNOSTIC_ONLY=0
+PASSIVE_CAPTURE_LOG=
 VENV="$PREFIX/venv"
 PYTHON="$VENV/bin/python"
 DISCOVER_ROOT="$PREFIX/discover"
@@ -16,12 +22,18 @@ MODE=run
 
 usage() {
     cat <<'EOF'
-Usage: sh discover.sh [--interface IFACE] [--install|--uninstall|--cleanup]
+Usage: sh discover.sh [options] [--install|--uninstall|--cleanup]
 
 Run OCPP network discovery immediately by default.
 
 Options:
   --interface IFACE  Charger-facing Ethernet interface (default: eth0).
+  --grace-seconds N  Wait for a live charger before capture (default: 10).
+  --arp-seconds N    ARP capture duration if fallback is enabled (default: 15).
+  --tcp-seconds N    Passive TCP capture duration (default: 15; diagnostic max: 300).
+  --existing-endpoint-only  Do not fall back to ARP or claim an address.
+  --diagnostic-only  Observe and report an existing endpoint without network mutation.
+  --passive-capture-log PATH  Save the passive TCP transcript to a new local file.
   --install          Install dependencies and enable OCPP Discover at boot.
   --uninstall        Disable/remove OCPP Discover and clean discovery-owned state.
   --cleanup          Remove discovery-owned network state without uninstalling.
@@ -38,6 +50,35 @@ while [ "$#" -gt 0 ]; do
             ;;
         --interface=*)
             INTERFACE=${1#*=}
+            shift
+            ;;
+        --grace-seconds|--arp-seconds|--tcp-seconds|--passive-capture-log)
+            [ "$#" -ge 2 ] || { printf 'Missing value for %s\n' "$1" >&2; exit 2; }
+            case "$1" in
+                --grace-seconds) GRACE_SECONDS=$2 ;;
+                --arp-seconds) ARP_SECONDS=$2 ;;
+                --tcp-seconds) TCP_SECONDS=$2 ;;
+                --passive-capture-log) PASSIVE_CAPTURE_LOG=$2 ;;
+            esac
+            shift 2
+            ;;
+        --grace-seconds=*|--arp-seconds=*|--tcp-seconds=*|--passive-capture-log=*)
+            value=${1#*=}
+            case "$1" in
+                --grace-seconds=*) GRACE_SECONDS=$value ;;
+                --arp-seconds=*) ARP_SECONDS=$value ;;
+                --tcp-seconds=*) TCP_SECONDS=$value ;;
+                --passive-capture-log=*) PASSIVE_CAPTURE_LOG=$value ;;
+            esac
+            shift
+            ;;
+        --existing-endpoint-only)
+            EXISTING_ENDPOINT_ONLY=1
+            shift
+            ;;
+        --diagnostic-only)
+            DIAGNOSTIC_ONLY=1
+            EXISTING_ENDPOINT_ONLY=1
             shift
             ;;
         --install|--uninstall|--cleanup)
@@ -70,6 +111,16 @@ case "$PORT" in
 esac
 if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     printf 'OCPP listener port must be between 1 and 65535: %s\n' "$PORT" >&2
+    exit 2
+fi
+
+for value in "$GRACE_SECONDS" "$ARP_SECONDS" "$TCP_SECONDS"; do
+    case "$value" in
+        ''|*[!0-9]*) printf 'Discovery durations must be non-negative integer seconds: %s\n' "$value" >&2; exit 2 ;;
+    esac
+done
+if [ "$TCP_SECONDS" -gt 300 ]; then
+    printf 'Passive TCP capture is limited to 300 seconds: %s\n' "$TCP_SECONDS" >&2
     exit 2
 fi
 
@@ -139,7 +190,7 @@ install_discovery() {
     DISCOVER_ESC=$(escape_sed "$DISCOVER_ROOT")
     DATA_ESC=$(escape_sed "$DATA_DIR")
     INTERFACE_ESC=$(escape_sed "$INTERFACE")
-    TMP_SERVICE=$(mktemp)
+    TMP_SERVICE=$(mktemp --suffix=.service)
     trap 'rm -f "$TMP_SERVICE"' EXIT HUP INT TERM
     sed \
         -e "s|@PYTHON@|$PYTHON_ESC|g" \
@@ -193,11 +244,24 @@ run_discovery() {
     fi
     (
         cd "$ROOT"
-        sudo "$PYTHON" -m field.discover run \
+        set -- "$PYTHON" -m field.discover run \
             --data-dir "$DATA_DIR" \
             --state-dir /run/ocpp-discover \
             --interface "$INTERFACE" \
-            --listen-port "$PORT"
+            --listen-port "$PORT" \
+            --grace-seconds "$GRACE_SECONDS" \
+            --arp-seconds "$ARP_SECONDS" \
+            --tcp-seconds "$TCP_SECONDS"
+        if [ "$EXISTING_ENDPOINT_ONLY" -eq 1 ]; then
+            set -- "$@" --existing-endpoint-only
+        fi
+        if [ "$DIAGNOSTIC_ONLY" -eq 1 ]; then
+            set -- "$@" --passive-diagnostic-only
+        fi
+        if [ -n "$PASSIVE_CAPTURE_LOG" ]; then
+            set -- "$@" --passive-capture-log "$PASSIVE_CAPTURE_LOG"
+        fi
+        sudo "$@"
     )
 }
 

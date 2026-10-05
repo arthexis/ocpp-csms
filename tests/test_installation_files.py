@@ -130,7 +130,8 @@ def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
     assert 'sudo systemctl start --no-block "$SERVICE_NAME"' in script
     assert 'sudo systemctl disable "$SERVICE_NAME"' in script
     assert 'sudo "$PYTHON" -m field.discover cleanup' in script
-    assert 'sudo "$PYTHON" -m field.discover run' in script
+    assert 'set -- "$PYTHON" -m field.discover run' in script
+    assert 'sudo "$@"' in script
     assert 'cp "$ROOT/field/discover.py" "$DISCOVER_ROOT/field/discover.py"' in script
     assert 'cp "$ROOT/field/redirect.py" "$DISCOVER_ROOT/field/redirect.py"' in script
     assert "ocpp-csms.service" not in script
