@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -55,7 +56,7 @@ def restore_path_a(
     if runtime_receipt.exists():
         raise RuntimeError("redirect_receipt_exists")
     runtime_receipt.write_text(
-        __import__("json").dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n",
+        json.dumps(receipt.to_json(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     try:
