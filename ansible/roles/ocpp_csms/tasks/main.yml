@@ -104,6 +104,7 @@
     - "{{ ocpp_csms_prefix }}"
     - "{{ ocpp_csms_data_dir }}"
     - "{{ ocpp_csms_releases_dir }}"
+    - "{{ ocpp_csms_candidate_dir }}"
 
 - name: Check whether immutable release is already complete
   ansible.builtin.stat:
@@ -186,7 +187,7 @@
 
 - name: Verify immutable release command
   ansible.builtin.command:
-    cmd: "{{ ocpp_csms_release_venv }}/bin/ocpp-csms --help"
+    cmd: "{{ ocpp_csms_release_command }} --help"
   changed_when: false
   when: not ocpp_csms_release_ready.stat.exists
 
@@ -215,13 +216,8 @@
     dest: "{{ ocpp_csms_candidate_service_path }}"
     mode: "0644"
 
-# An existing appliance already has a valid `current` command path, so verify
-# the replacement unit before the final safety gate and before any downtime.
-- name: Inspect active OCPP CSMS runtime command
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_runtime_command }}"
-  register: ocpp_csms_runtime_command_state
-
+# The candidate points directly at its immutable release, so systemd can verify
+# it before `current` is changed and before the final safety gate or downtime.
 - name: Verify candidate systemd unit before handoff
   ansible.builtin.command:
     argv:
@@ -229,7 +225,6 @@
       - verify
       - "{{ ocpp_csms_candidate_service_path }}"
   changed_when: false
-  when: ocpp_csms_runtime_command_state.stat.exists | default(false)
 
 # Charging state can change while the candidate environment is being built, so
 # repeat the Python-owned safety check immediately after staging is complete.
@@ -284,16 +279,27 @@
     state: link
     force: true
 
-- name: Inspect stable OCPP CSMS command
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_command_path }}"
-    follow: false
-  register: ocpp_csms_command_state
+- name: Resolve stable OCPP CSMS command target
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ ocpp_csms_command_path }}"
+  register: ocpp_csms_command_resolved
+  changed_when: false
+
+- name: Resolve active OCPP CSMS release command
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ ocpp_csms_release_command }}"
+  register: ocpp_csms_release_command_resolved
+  changed_when: false
 
 - name: Assert stable OCPP CSMS command target
   ansible.builtin.assert:
     that:
-      - ocpp_csms_command_state.stat.islnk | default(false)
-      - ocpp_csms_command_state.stat.lnk_source == ocpp_csms_runtime_command
+      - ocpp_csms_command_resolved.stdout == ocpp_csms_release_command_resolved.stdout
     fail_msg: >-
-      Stable OCPP CSMS command does not point at the active current release.
+      Stable OCPP CSMS command does not resolve to the active current release.
