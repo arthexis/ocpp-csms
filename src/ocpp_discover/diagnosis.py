@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 from ocpp_discover import discover, persistence, redirect
 from ocpp_discover.redirect import RedirectReceipt
+
+
+class Configuration(NamedTuple):
+    configured_matches: bool
+    live_table_present: bool
 
 
 def inspect_configuration(
     expected: RedirectReceipt,
     *,
     ruleset_path: str | Path = persistence.DEFAULT_RULESET_PATH,
-) -> tuple[bool, bool]:
+) -> Configuration:
     """Return whether the owned persistent fragment matches and the live table exists."""
     path = Path(ruleset_path)
     configured_matches = (
@@ -18,7 +24,7 @@ def inspect_configuration(
         and path.read_text(encoding="utf-8")
         == persistence.render_persistent_ruleset(expected)
     )
-    return configured_matches, redirect.table_exists()
+    return Configuration(configured_matches, redirect.table_exists())
 
 
 def observe_contradiction(expected: RedirectReceipt, *, seconds: float) -> RedirectReceipt | None:
