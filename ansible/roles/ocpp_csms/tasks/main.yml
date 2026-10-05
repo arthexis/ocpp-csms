@@ -1,1 +1,43 @@
 ---
+- name: Resolve OCPP CSMS installation paths
+  ansible.builtin.set_fact:
+    ocpp_csms_effective_prefix: "{{ ocpp_csms_prefix | default(ansible_env.HOME ~ '/.local/share/ocpp-csms') }}"
+    ocpp_csms_effective_bin_dir: "{{ ocpp_csms_bin_dir | default(ansible_env.HOME ~ '/.local/bin') }}"
+    ocpp_csms_effective_data_dir: "{{ ocpp_csms_data_dir | default(ansible_env.HOME ~ '/ocpp-csms-data') }}"
+
+- name: Validate supported Debian host
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+    fail_msg: "OCPP CSMS Ansible installation currently supports Debian-family hosts only."
+
+- name: Install Python prerequisites
+  become: true
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+    state: present
+    update_cache: true
+
+- name: Create OCPP CSMS directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ocpp_csms_effective_prefix }}"
+    - "{{ ocpp_csms_effective_bin_dir }}"
+    - "{{ ocpp_csms_effective_data_dir }}"
+
+- name: Create staged Python virtual environment
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ ocpp_csms_effective_prefix }}/venv.next"
+    creates: "{{ ocpp_csms_effective_prefix }}/venv.next/bin/python"
+
+- name: Ensure current pip in staged virtual environment
+  ansible.builtin.pip:
+    name: pip
+    state: latest
+    virtualenv: "{{ ocpp_csms_effective_prefix }}/venv.next"
