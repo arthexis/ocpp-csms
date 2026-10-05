@@ -15,18 +15,11 @@ _DEFAULT_WAIT_INTERVAL = 5.0
 _LOG = logging.getLogger("ocpp-discover")
 
 
-def _validate(
-    data_dir: str | Path,
-    chargers: tuple[str, ...],
-    *,
-    timeout: float,
-) -> tuple[str, ...]:
+def _validate(data_dir: str | Path, chargers: tuple[str, ...], *, timeout: float) -> tuple[str, ...]:
     connections = connection_markers(data_dir, chargers)
     ocpp = handoff._ocpp_markers(data_dir, chargers)
     missing = wait_for_reconnect(data_dir, connections, timeout=timeout)
-    if missing:
-        return missing
-    return handoff.wait_for_fresh_ocpp(data_dir, ocpp, timeout=timeout)
+    return missing or handoff.wait_for_fresh_ocpp(data_dir, ocpp, timeout=timeout)
 
 
 def _wait_for_recovery(
@@ -38,10 +31,10 @@ def _wait_for_recovery(
     timeout: float,
 ) -> dict[str, object]:
     chargers = reconcile.charger_ids(receipt)
-    configured, live = diagnosis.inspect_configuration(receipt)
-    if not configured:
+    configuration = diagnosis.inspect_configuration(receipt)
+    if not configuration.configured_matches:
         _LOG.error("Discover persistent nftables fragment does not match discovered adaptation")
-    if not live:
+    if not configuration.live_table_present:
         _LOG.error("Discover live nftables adaptation is absent")
 
     while True:
