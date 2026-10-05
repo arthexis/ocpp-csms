@@ -15,7 +15,7 @@ def forbid_discovery(monkeypatch):
 
 
 def configured(monkeypatch):
-    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: (True, True))
+    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: diagnosis.Configuration(True, True))
 
 
 def wake(monkeypatch, kind="expected"):
@@ -90,7 +90,7 @@ def test_configuration_mismatch_does_not_mutate_without_endpoint_evidence(tmp_pa
     persistent = tmp_path / "persistent"
     handoff.persist_discovered(persistent, receipt())
     forbid_discovery(monkeypatch)
-    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: (False, False))
+    monkeypatch.setattr(service.diagnosis, "inspect_configuration", lambda expected: diagnosis.Configuration(False, False))
     wake(monkeypatch)
     monkeypatch.setattr(service, "connection_markers", lambda data_dir, expected: {"CP7": 0})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda data_dir, expected: {"CP7": 0})
