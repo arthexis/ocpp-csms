@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +24,9 @@ class DiscoveryEvidence:
     capture: str
 
 
+_ARP_TELL = re.compile(r"ARP, Request who-has \S+ tell (?P<source>\d+\.\d+\.\d+\.\d+)")
+
+
 def inspect_configuration(
     expected: RedirectReceipt,
     *,
@@ -42,7 +46,7 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
     """Block until positive charger-side evidence appears, without mutating the host.
 
     The observer has no timer: an offline charger therefore causes no repeated
-    diagnosis.  TCP can reveal an expected or replacement OCPP endpoint, while
+    diagnosis. TCP can reveal an expected or replacement OCPP endpoint, while
     ARP remains useful when a different/previously unknown charger is attached.
     """
     if not discover._INTERFACE.fullmatch(interface):
@@ -50,7 +54,7 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
 
-    command = ["tcpdump", "-i", interface, "-l", "-nn", "-e", "tcp or arp"]
+    command = ["tcpdump", "-i", interface, "-l", "-nn", "tcp or arp"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert process.stdout is not None
     captured: list[str] = []
@@ -62,9 +66,9 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 source = tcp.group("src")
                 kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
                 return DiscoveryEvidence(kind, "".join(captured))
-            arp = discover._ARP_REQUEST.search(line)
-            if arp is not None and arp.group("source_ip") != arp.group("target_ip"):
-                source = arp.group("source_ip")
+            arp = _ARP_TELL.search(line)
+            if arp is not None:
+                source = arp.group("source")
                 kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
                 return DiscoveryEvidence(kind, "".join(captured))
         detail = process.stderr.read().strip().splitlines()[-1] if process.stderr is not None else ""
