@@ -47,6 +47,38 @@ sudo python -m field.discover cleanup --state-dir /run/ocpp-discover
 
 For normal appliance use, the repository-root `discover.sh` wrapper provides the supported surface: running it directly starts discovery now, `--install` installs Debian dependencies and enables `ocpp-discover.service` at boot, `--uninstall` disables/removes the service and cleans discovery-owned state, and `--cleanup` removes only the current network adaptation. The base `install.sh` exposes the same optional feature as `--with-discover` and `--without-discover`; omitting either flag preserves the existing discovery state.
 
+## Production existing-endpoint handoff
+
+For chargers that already reach a host-owned plaintext OCPP endpoint, `field.handoff` supports a two-stage Path A handoff that learns the endpoint before the old listener is removed.
+
+First, while the old charger-facing listener is still available, capture and persist validated endpoint evidence:
+
+```sh
+sudo python -m field.handoff prepare \
+  --state-dir /path/to/handoff-run \
+  --interface eth0 \
+  --listen-port 9000 \
+  --seconds 30
+```
+
+A successful prepare writes immutable `handoff-endpoint.json`. It records the charger source, destination IP/port, WebSocket Host/path, capture interface, and target local CSMS listener. Prepare performs no service stop/start, address claim, nftables mutation, or Discover-state mutation, and it refuses to overwrite existing handoff evidence.
+
+After confirming the target CSMS listener is already available, execute the controlled cutover:
+
+```sh
+sudo python -m field.handoff cutover \
+  --data-dir /path/to/csms-data \
+  --state-dir /path/to/handoff-run \
+  --old-service OLD.service \
+  --timeout 30
+```
+
+The cutover runs a read-only rollover preflight, baselines the currently connected idle charger set plus connection and inbound-OCPP evidence, and repeats the active-charge check immediately before disruption. It then stops the old listener, materializes the narrow redirect from the previously validated receipt, and requires both a fresh `charger_connected` event and fresh inbound OCPP traffic before success.
+
+If anything fails after the old listener has stopped—including redirect application, charger reconnect, or fresh OCPP evidence—the handoff removes only the redirect owned by that attempt, restarts the old service, verifies it is active again, and preserves `handoff-endpoint.json` for diagnosis or a later retry. If rollback itself fails, the reported error includes both the original handoff failure and rollback failure.
+
+This handoff never overrides active charging and does not use ARP fallback or address claiming.
+
 ## Plaintext OCPP redirect helper
 
 Issue #53 uses a field-only helper for discovering and temporarily redirecting one observed plaintext OCPP WebSocket flow. It does not configure the host's gateway, DHCP, routing, NetworkManager, or persistent firewall state.
@@ -274,7 +306,7 @@ After successful configuration validation, enter the unattended soak with:
 python -m field.harness soak /path/to/run
 ```
 
-`soak` re-verifies that the configured candidate CSMS is active, the configured legacy service is inactive, the configured listener and control socket are available, and the charger is connected, has Heartbeat evidence, and has no active transaction. Only after those checks pass does the harness set phase `idle_soak` and arm the watchdog. The command itself does not start a watchdog supervisor; the separate `field.watchdog run` process must already be supervised or launched by the operator.
+`soak` re-verifies that the configured candidate CSMS is active, the configured legacy service is inactive, and the configured listener and control socket are available; requires the charger to be connected, have Heartbeat evidence, and have no active transaction. Only after those checks pass does the harness set phase `idle_soak` and arm the watchdog. The command itself does not start a watchdog supervisor; the separate `field.watchdog run` process must already be supervised or launched by the operator.
 
 The soak remains protected until either the watchdog rolls back or an operator deliberately hands control to the next field protocol. There is no time-based automatic expiry.
 
