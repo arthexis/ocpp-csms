@@ -249,3 +249,6 @@
 - name: Capture schema cutover action
   ansible.builtin.set_fact:
     ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
+
+- name: Perform controlled OCPP CSMS cutover
+  ansible.builtin.include_tasks: cutover.yml
