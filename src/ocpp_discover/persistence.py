@@ -61,12 +61,29 @@ def check_nftables_file(path: str | Path, *, nft: str = "nft") -> None:
         raise RuntimeError(f"invalid_nftables_configuration: {detail}")
 
 
+def check_nftables_text(content: str, *, nft: str = "nft") -> None:
+    """Validate a candidate Discover ruleset before replacing the installed fragment."""
+    import tempfile
+
+    descriptor, name = tempfile.mkstemp(prefix="ocpp-discover-", suffix=".nft")
+    path = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        check_nftables_file(path, nft=nft)
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def persist_ruleset(
     receipt: RedirectReceipt,
     *,
     ruleset_path: str | Path = DEFAULT_RULESET_PATH,
+    nft: str = "nft",
 ) -> Path:
-    """Persist only the exact narrow ruleset that has already passed handoff validation."""
+    """Validate and persist only the exact already-proven narrow redirect."""
     path = Path(ruleset_path)
     ruleset = render_persistent_ruleset(receipt)
     if path.exists():
@@ -75,6 +92,7 @@ def persist_ruleset(
             return path
         if existing != EMPTY_RULESET:
             raise RuntimeError("conflicting_persistent_nftables_adaptation")
+    check_nftables_text(ruleset, nft=nft)
     _atomic_write(path, ruleset, mode=0o600)
     return path
 
