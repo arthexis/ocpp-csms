@@ -18,9 +18,9 @@ from ocpp_csms.schema import DATABASE_FILENAME
 
 _HANDOFF_RECEIPT = "handoff-endpoint.json"
 _REDIRECT_RECEIPT = "redirect.json"
-_PERSISTENT_RECEIPT = "discovered.json"
-_PERSISTENT_KIND = "ocpp-discovered"
-_PERSISTENT_VERSION = 1
+_DISCOVERED_RECEIPT = "discovered.json"
+_DISCOVERED_KIND = "redirect"
+_DISCOVERED_VERSION = 1
 _DEFAULT_PERSISTENT_STATE_DIR = "/var/lib/ocpp-discover"
 _RECEIPT_KEYS = {"interface", "listen_port", "source_ip", "destination_ips", "requests", "captured_at", "destination_port"}
 _REQUEST_KEYS = {"destination_ip", "host", "path"}
@@ -34,8 +34,8 @@ def redirect_path(state_dir: str | Path) -> Path:
     return Path(state_dir).expanduser() / _REDIRECT_RECEIPT
 
 
-def persistent_receipt_path(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR) -> Path:
-    return Path(state_dir).expanduser() / _PERSISTENT_RECEIPT
+def discovered_path(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR) -> Path:
+    return Path(state_dir).expanduser() / _DISCOVERED_RECEIPT
 
 
 def _write_receipt(path: Path, receipt: RedirectReceipt) -> None:
@@ -59,32 +59,32 @@ def load_receipt(state_dir: str | Path) -> RedirectReceipt:
         raise RuntimeError("invalid_handoff_receipt") from None
 
 
-def _validate_persistent_path_a(receipt: RedirectReceipt) -> None:
+def validate_discovered_redirect(receipt: RedirectReceipt) -> None:
     validate_receipt(receipt)
     if len(receipt.destination_ips) != 1:
-        raise ValueError("path_a_requires_single_destination")
+        raise ValueError("discovered_redirect_requires_single_destination")
     if len(receipt.requests) != 1:
-        raise ValueError("path_a_requires_single_websocket_identity")
+        raise ValueError("discovered_redirect_requires_single_websocket_identity")
     request = receipt.requests[0]
     if request.destination_ip != receipt.destination_ips[0]:
-        raise ValueError("path_a_destination_evidence_mismatch")
+        raise ValueError("discovered_redirect_destination_evidence_mismatch")
     if not request.host.strip():
-        raise ValueError("path_a_missing_host_evidence")
+        raise ValueError("discovered_redirect_missing_host_evidence")
     if not request.path.startswith("/"):
-        raise ValueError("path_a_invalid_path_evidence")
+        raise ValueError("discovered_redirect_invalid_path_evidence")
     if receipt.destination_port == receipt.listen_port:
-        raise ValueError("path_a_redirect_not_required")
+        raise ValueError("discovered_redirect_not_required")
 
 
-def _persistent_payload(receipt: RedirectReceipt) -> dict[str, object]:
-    _validate_persistent_path_a(receipt)
-    return {"kind": _PERSISTENT_KIND, "version": _PERSISTENT_VERSION, "receipt": receipt.to_json()}
+def _discovered_payload(receipt: RedirectReceipt) -> dict[str, object]:
+    validate_discovered_redirect(receipt)
+    return {"kind": _DISCOVERED_KIND, "version": _DISCOVERED_VERSION, "receipt": receipt.to_json()}
 
 
-def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
+def _receipt_from_discovered_payload(payload: object) -> RedirectReceipt:
     if not isinstance(payload, dict) or set(payload) != {"kind", "version", "receipt"}:
         raise RuntimeError("invalid_discovered_receipt")
-    if payload["kind"] != _PERSISTENT_KIND or payload["version"] != _PERSISTENT_VERSION:
+    if payload["kind"] != _DISCOVERED_KIND or payload["version"] != _DISCOVERED_VERSION:
         raise RuntimeError("incompatible_discovered_receipt")
     receipt_payload = payload["receipt"]
     if not isinstance(receipt_payload, dict) or set(receipt_payload) != _RECEIPT_KEYS:
@@ -94,15 +94,15 @@ def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
         raise RuntimeError("invalid_discovered_receipt")
     try:
         receipt = receipt_from_json(receipt_payload)
-        _validate_persistent_path_a(receipt)
+        validate_discovered_redirect(receipt)
     except (TypeError, ValueError):
         raise RuntimeError("invalid_discovered_receipt") from None
     return receipt
 
 
-def persist_validated_path_a(state_dir: str | Path, receipt: RedirectReceipt) -> Path:
-    payload = _persistent_payload(receipt)
-    path = persistent_receipt_path(state_dir)
+def persist_discovered(state_dir: str | Path, receipt: RedirectReceipt) -> Path:
+    payload = _discovered_payload(receipt)
+    path = discovered_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         raise RuntimeError("discovered_receipt_exists")
@@ -126,15 +126,15 @@ def persist_validated_path_a(state_dir: str | Path, receipt: RedirectReceipt) ->
     return path
 
 
-def load_persistent_path_a(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR) -> RedirectReceipt:
-    path = persistent_receipt_path(state_dir)
+def load_discovered(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR) -> RedirectReceipt:
+    path = discovered_path(state_dir)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise RuntimeError("discovered_receipt_not_found") from None
     except json.JSONDecodeError:
         raise RuntimeError("invalid_discovered_receipt") from None
-    return _receipt_from_persistent_payload(payload)
+    return _receipt_from_discovered_payload(payload)
 
 
 def observe_existing_endpoint(*, state_dir: str | Path, interface: str, listen_port: int, seconds: float, capture_log: str | Path | None = None) -> RedirectReceipt:
@@ -244,27 +244,27 @@ def _rollback_cutover(state_dir: str | Path, old_service: str) -> None:
 def _promote_persistent_adaptation(persistent_state_dir: str | Path, receipt: RedirectReceipt) -> None:
     """Commit a proven live redirect as boot-persistent configuration plus ownership evidence."""
     ruleset_path = persistence.DEFAULT_RULESET_PATH
-    previous_ruleset = ruleset_path.read_bytes() if ruleset_path.exists() else None
+    previous_ruleset = ruleset_path.read_text(encoding="utf-8") if ruleset_path.exists() else None
     previous_mode = (ruleset_path.stat().st_mode & 0o777) if ruleset_path.exists() else 0o600
-    discovered_path = persistent_receipt_path(persistent_state_dir)
-    if discovered_path.exists():
+    state_path = discovered_path(persistent_state_dir)
+    if state_path.exists():
         raise RuntimeError("discovered_receipt_exists")
     try:
         persistence.persist_ruleset(receipt)
-        persist_validated_path_a(persistent_state_dir, receipt)
+        persist_discovered(persistent_state_dir, receipt)
     except Exception:
-        discovered_path.unlink(missing_ok=True)
+        state_path.unlink(missing_ok=True)
         if previous_ruleset is None:
             persistence.remove_ruleset()
         else:
-            persistence._atomic_write(ruleset_path, previous_ruleset.decode("utf-8"), mode=previous_mode)
+            persistence.replace_ruleset(previous_ruleset, ruleset_path=ruleset_path, mode=previous_mode)
         raise
 
 
 def cutover(*, data_dir: str | Path, state_dir: str | Path, old_service: str, persistent_state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR, timeout: float = 30.0, interval: float = 0.5) -> tuple[str, ...]:
     require_root()
     receipt = load_receipt(state_dir)
-    _validate_persistent_path_a(receipt)
+    validate_discovered_redirect(receipt)
     preflight = evaluate_preflight(data_dir, rollover=True)
     if not preflight.allowed:
         raise RuntimeError(preflight.reason or "handoff_preflight_blocked")
@@ -277,7 +277,7 @@ def cutover(*, data_dir: str | Path, state_dir: str | Path, old_service: str, pe
         raise RuntimeError("redirect_table_exists")
     if redirect_path(state_dir).exists():
         raise RuntimeError("redirect_receipt_exists")
-    if persistent_receipt_path(persistent_state_dir).exists():
+    if discovered_path(persistent_state_dir).exists():
         raise RuntimeError("discovered_receipt_exists")
 
     connection_baseline = connection_markers(data_dir, expected)
