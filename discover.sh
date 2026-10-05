@@ -10,7 +10,7 @@ GRACE_SECONDS=${OCPP_DISCOVER_GRACE_SECONDS:-10}
 ARP_SECONDS=${OCPP_DISCOVER_ARP_SECONDS:-15}
 TCP_SECONDS=${OCPP_DISCOVER_TCP_SECONDS:-15}
 EXISTING_ENDPOINT_ONLY=0
-PASSIVE_DIAGNOSTIC_ONLY=0
+DIAGNOSTIC_ONLY=0
 PASSIVE_CAPTURE_LOG=
 VENV="$PREFIX/venv"
 PYTHON="$VENV/bin/python"
@@ -32,7 +32,7 @@ Options:
   --arp-seconds N    ARP capture duration if fallback is enabled (default: 15).
   --tcp-seconds N    Passive TCP capture duration (default: 15; diagnostic max: 300).
   --existing-endpoint-only  Do not fall back to ARP or claim an address.
-  --passive-diagnostic-only  Observe an endpoint without mutating network state; bypasses the live-session grace check.
+  --diagnostic-only  Observe and report an existing endpoint without network mutation.
   --passive-capture-log PATH  Save the passive TCP transcript to a new local file.
   --install          Install dependencies and enable OCPP Discover at boot.
   --uninstall        Disable/remove OCPP Discover and clean discovery-owned state.
@@ -76,8 +76,8 @@ while [ "$#" -gt 0 ]; do
             EXISTING_ENDPOINT_ONLY=1
             shift
             ;;
-        --passive-diagnostic-only)
-            PASSIVE_DIAGNOSTIC_ONLY=1
+        --diagnostic-only)
+            DIAGNOSTIC_ONLY=1
             EXISTING_ENDPOINT_ONLY=1
             shift
             ;;
@@ -255,7 +255,7 @@ run_discovery() {
         if [ "$EXISTING_ENDPOINT_ONLY" -eq 1 ]; then
             set -- "$@" --existing-endpoint-only
         fi
-        if [ "$PASSIVE_DIAGNOSTIC_ONLY" -eq 1 ]; then
+        if [ "$DIAGNOSTIC_ONLY" -eq 1 ]; then
             set -- "$@" --passive-diagnostic-only
         fi
         if [ -n "$PASSIVE_CAPTURE_LOG" ]; then
