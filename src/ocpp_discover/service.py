@@ -15,79 +15,58 @@ _DEFAULT_WAIT_INTERVAL = 5.0
 _LOG = logging.getLogger("ocpp-discover")
 
 
-def _expected_chargers(receipt: object) -> tuple[str, ...]:
-    chargers = {
-        request.path.rstrip("/").rsplit("/", 1)[-1]
-        for request in receipt.requests
-        if request.path.rstrip("/").rsplit("/", 1)[-1]
-    }
-    if not chargers:
-        raise RuntimeError("discovered_receipt_missing_charger_identity")
-    return tuple(sorted(chargers))
-
-
-def _validate_observed_adaptation(
+def _validate(
     data_dir: str | Path,
-    expected: tuple[str, ...],
+    chargers: tuple[str, ...],
     *,
     timeout: float,
 ) -> tuple[str, ...]:
-    connection_baseline = connection_markers(data_dir, expected)
-    ocpp_baseline = handoff._ocpp_markers(data_dir, expected)
-    missing = wait_for_reconnect(data_dir, connection_baseline, timeout=timeout)
+    connections = connection_markers(data_dir, chargers)
+    ocpp = handoff._ocpp_markers(data_dir, chargers)
+    missing = wait_for_reconnect(data_dir, connections, timeout=timeout)
     if missing:
         return missing
-    return handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=timeout)
+    return handoff.wait_for_fresh_ocpp(data_dir, ocpp, timeout=timeout)
 
 
-def _diagnose_and_wait(
+def _wait_for_recovery(
     data_dir: str | Path,
     persistent_dir: str | Path,
     receipt: object,
-    expected: tuple[str, ...],
     *,
     interval: float,
-    validation_timeout: float,
+    timeout: float,
 ) -> dict[str, object]:
-    """Diagnose once, then passively wait for either a valid reconnect or positive contradiction."""
-    configured = diagnosis.inspect_configuration(receipt)
-    if not configured.configured_matches:
+    chargers = reconcile.charger_ids(receipt)
+    configured, live = diagnosis.inspect_configuration(receipt)
+    if not configured:
         _LOG.error("Discover persistent nftables fragment does not match discovered adaptation")
-    if not configured.live_table_present:
+    if not live:
         _LOG.error("Discover live nftables adaptation is absent")
 
     while True:
-        connection_baseline = connection_markers(data_dir, expected)
-        ocpp_baseline = handoff._ocpp_markers(data_dir, expected)
+        connections = connection_markers(data_dir, chargers)
+        ocpp = handoff._ocpp_markers(data_dir, chargers)
         candidate = diagnosis.observe_contradiction(receipt, seconds=interval)
 
-        missing = wait_for_reconnect(data_dir, connection_baseline, timeout=0)
-        if not missing:
-            missing_ocpp = handoff.wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=validation_timeout)
-            if not missing_ocpp:
-                return {"status": "persistent", "chargers": list(expected)}
-            _LOG.error(
-                "charger reconnected but fresh inbound OCPP was not observed; returning to passive wait"
-            )
+        if not wait_for_reconnect(data_dir, connections, timeout=0):
+            if not handoff.wait_for_fresh_ocpp(data_dir, ocpp, timeout=timeout):
+                return {"status": "persistent", "chargers": list(chargers)}
+            _LOG.error("charger reconnected without fresh inbound OCPP; returning to passive wait")
             continue
 
         if candidate is None:
             continue
 
-        _LOG.error(
-            "positive endpoint contradiction observed for expected charger; attempting safe reconciliation"
-        )
-        reconciled = reconcile.reconcile(
+        _LOG.error("positive endpoint contradiction observed; attempting safe reconciliation")
+        candidate = reconcile.reconcile(
             data_dir=data_dir,
             persistent_dir=persistent_dir,
             expected=receipt,
             candidate=candidate,
-            timeout=validation_timeout,
+            timeout=timeout,
         )
-        return {
-            "status": "reconciled",
-            "chargers": list(_expected_chargers(reconciled)),
-        }
+        return {"status": "reconciled", "chargers": list(reconcile.charger_ids(candidate))}
 
 
 def _observe_persistent(
@@ -99,22 +78,21 @@ def _observe_persistent(
     validation_timeout: float,
 ) -> dict[str, object]:
     receipt = handoff.load_discovered(persistent_dir)
-    expected = _expected_chargers(receipt)
-    missing = _validate_observed_adaptation(data_dir, expected, timeout=boot_timeout)
+    chargers = reconcile.charger_ids(receipt)
+    missing = _validate(data_dir, chargers, timeout=boot_timeout)
     if not missing:
-        return {"status": "persistent", "chargers": list(expected)}
+        return {"status": "persistent", "chargers": list(chargers)}
 
     _LOG.error(
         "expected charger(s) not observed during startup window: %s; persistent adaptation unchanged; entering passive offline wait",
         ", ".join(missing),
     )
-    return _diagnose_and_wait(
+    return _wait_for_recovery(
         data_dir,
         persistent_dir,
         receipt,
-        expected,
         interval=wait_interval,
-        validation_timeout=validation_timeout,
+        timeout=validation_timeout,
     )
 
 
@@ -132,9 +110,8 @@ def run_service(
     boot_timeout: float = _DEFAULT_BOOT_TIMEOUT,
     wait_interval: float = _DEFAULT_WAIT_INTERVAL,
 ):
-    """Observe known state; reconcile only positive contradictions; discover only when none exists."""
-    state_path = handoff.discovered_path(persistent_dir)
-    if state_path.exists():
+    """Observe known state; reconcile contradictions; discover only when state is absent."""
+    if handoff.discovered_path(persistent_dir).exists():
         return _observe_persistent(
             data_dir,
             persistent_dir,
