@@ -1,1 +1,11 @@
 ---
+- name: Reload systemd daemon
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart OCPP CSMS
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_csms_service_name }}"
+    state: restarted
