@@ -1,0 +1,35 @@
+---
+# Legacy install.sh exposes user-local aliases into a mutable venv. Once the
+# Ansible-managed release has been promoted and its canonical command verified,
+# those aliases must not shadow /usr/local/bin/ocpp-csms in interactive shells.
+- name: Inspect legacy user-local OCPP CSMS command aliases
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ ansible_env.HOME }}/.local/bin/ocpp-csms"
+    - "{{ ansible_env.HOME }}/.local/bin/csms"
+  register: ocpp_csms_legacy_aliases
+
+- name: Remove legacy user-local OCPP CSMS command aliases
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: absent
+  loop: "{{ ocpp_csms_legacy_aliases.results }}"
+  when:
+    - item.stat.islnk | default(false)
+    - item.stat.lnk_source is defined
+    - item.stat.lnk_source.startswith(ocpp_csms_prefix ~ '/venv/')
+
+# Mutable environments belong exclusively to install.sh. They are safe to
+# remove only after the Ansible service, release promotion, and stable command
+# verification have all completed successfully.
+- name: Remove legacy mutable OCPP CSMS runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ ocpp_csms_prefix }}/venv"
+    - "{{ ocpp_csms_prefix }}/venv.previous"
+    - "{{ ocpp_csms_prefix }}/venv.next"
+    - "{{ ocpp_csms_prefix }}/venv.failed"

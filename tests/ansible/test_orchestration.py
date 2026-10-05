@@ -169,6 +169,31 @@ def test_stable_command_assertion_uses_canonical_paths():
     assert "ocpp_csms_release_command_resolved.stdout" in assertion
 
 
+def test_legacy_cleanup_runs_only_after_verified_ansible_takeover():
+    main = read(TASKS / "main.yml")
+
+    assert_task_order(
+        main,
+        "Perform controlled OCPP CSMS handoff",
+        "Assert stable OCPP CSMS command target",
+        "Remove legacy install.sh artifacts after verified takeover",
+    )
+
+
+def test_legacy_cleanup_only_removes_known_shadowing_aliases_and_mutable_venvs():
+    cleanup = read(TASKS / "cleanup_legacy.yml")
+
+    assert "~/.profile" not in cleanup
+    assert "~/.bashrc" not in cleanup
+    assert "state: absent" in cleanup
+    assert "item.stat.islnk" in cleanup
+    assert "item.stat.lnk_source.startswith(ocpp_csms_prefix ~ '/venv/')" in cleanup
+    assert '"{{ ansible_env.HOME }}/.local/bin/ocpp-csms"' in cleanup
+    assert '"{{ ansible_env.HOME }}/.local/bin/csms"' in cleanup
+    for suffix in ("venv", "venv.previous", "venv.next", "venv.failed"):
+        assert f'"{{{{ ocpp_csms_prefix }}}}/{suffix}"' in cleanup
+
+
 def test_base_role_refuses_root_deployment_identity():
     validation = task_section(
         read(TASKS / "main.yml"), "Validate supported OCPP CSMS appliance host"
