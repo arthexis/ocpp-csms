@@ -115,6 +115,17 @@
         state: link
         force: true
 
+    # On first installation the candidate ExecStart path did not exist during
+    # staging. Validate it now that `current` resolves, before installing the unit.
+    - name: Verify candidate systemd unit on first install
+      ansible.builtin.command:
+        argv:
+          - systemd-analyze
+          - verify
+          - "{{ ocpp_csms_candidate_service_path }}"
+      changed_when: false
+      when: not (ocpp_csms_current_state.stat.islnk | default(false))
+
     - name: Install live OCPP CSMS systemd unit
       become: true
       ansible.builtin.copy:
@@ -134,6 +145,35 @@
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
           - init
+
+    - name: Inspect initialized OCPP CSMS database
+      ansible.builtin.stat:
+        path: "{{ ocpp_csms_database_path }}"
+      register: ocpp_csms_database_state
+
+    - name: Inspect initialized OCPP CSMS transaction archive
+      ansible.builtin.stat:
+        path: "{{ ocpp_csms_transactions_dir }}"
+      register: ocpp_csms_transactions_state
+
+    - name: Verify OCPP CSMS data directory is writable
+      ansible.builtin.command:
+        argv:
+          - test
+          - -w
+          - "{{ ocpp_csms_data_dir }}"
+      changed_when: false
+
+    - name: Assert initialized OCPP CSMS storage
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_database_state.stat.exists | default(false)
+          - ocpp_csms_database_state.stat.isreg | default(false)
+          - ocpp_csms_transactions_state.stat.exists | default(false)
+          - ocpp_csms_transactions_state.stat.isdir | default(false)
+        fail_msg: >-
+          OCPP CSMS init did not produce the expected SQLite database and
+          transaction archive directory.
 
     - name: Enable and start activated OCPP CSMS service
       become: true
