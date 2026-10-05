@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ocpp_discover import discover, handoff, restore
+from ocpp_discover import discover, handoff
 
 _DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
 _DEFAULT_RUNTIME_DIR = "/run/ocpp-discover"
@@ -22,15 +22,11 @@ def run_service(
     tcp_seconds: float = 15.0,
     connect_timeout: float = 30.0,
 ):
-    """Restore durable adaptation when present; otherwise run fresh discovery."""
+    """Leave a known persistent adaptation alone; discover only when none exists."""
     persistent_path = handoff.persistent_receipt_path(persistent_dir)
     if persistent_path.exists():
-        ruleset = restore.restore_path_a(
-            persistent_dir=persistent_dir,
-            runtime_dir=runtime_dir,
-            listen_port=listen_port,
-        )
-        return {"status": "restored", "ruleset": ruleset}
+        handoff.load_persistent_path_a(persistent_dir)
+        return {"status": "persistent"}
 
     result = discover.run_discovery(
         data_dir=data_dir,
@@ -48,7 +44,7 @@ def run_service(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m ocpp_discover service",
-        description="Restore validated OCPP network adaptation or discover one when none exists.",
+        description="Use a validated persistent OCPP adaptation or discover one when none exists.",
     )
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--runtime-dir", default=_DEFAULT_RUNTIME_DIR)
