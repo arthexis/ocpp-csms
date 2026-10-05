@@ -215,6 +215,22 @@
     dest: "{{ ocpp_csms_candidate_service_path }}"
     mode: "0644"
 
+# An existing appliance already has a valid `current` command path, so verify
+# the replacement unit before the final safety gate and before any downtime.
+- name: Inspect active OCPP CSMS runtime command
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_runtime_command }}"
+  register: ocpp_csms_runtime_command_state
+
+- name: Verify candidate systemd unit before handoff
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - verify
+      - "{{ ocpp_csms_candidate_service_path }}"
+  changed_when: false
+  when: ocpp_csms_runtime_command_state.stat.exists | default(false)
+
 # Charging state can change while the candidate environment is being built, so
 # repeat the Python-owned safety check immediately after staging is complete.
 - name: Run final install safety preflight
@@ -258,8 +274,8 @@
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
 
-# Keep the public appliance command independent of the deployment user's shell
-# configuration. The stable system link follows the current immutable release.
+# Expose only the canonical command name. The link follows `current`, so release
+# promotion does not require rewriting the public command path.
 - name: Install stable OCPP CSMS command
   become: true
   ansible.builtin.file:
@@ -267,3 +283,17 @@
     dest: "{{ ocpp_csms_command_path }}"
     state: link
     force: true
+
+- name: Inspect stable OCPP CSMS command
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_command_path }}"
+    follow: false
+  register: ocpp_csms_command_state
+
+- name: Assert stable OCPP CSMS command target
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_command_state.stat.islnk | default(false)
+      - ocpp_csms_command_state.stat.lnk_source == ocpp_csms_runtime_command
+    fail_msg: >-
+      Stable OCPP CSMS command does not point at the active current release.
