@@ -92,7 +92,8 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 continue
             kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
             return DiscoveryEvidence(kind, "".join(captured))
-        detail = process.stderr.read().strip().splitlines()[-1] if process.stderr is not None else ""
+        stderr = process.stderr.read().strip() if process.stderr is not None else ""
+        detail = stderr.splitlines()[-1] if stderr else ""
         raise RuntimeError(detail or "passive_observer_stopped")
     finally:
         if process.poll() is None:
