@@ -46,15 +46,18 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
     """Block until positive charger-side evidence appears, without mutating the host.
 
     The observer has no timer: an offline charger therefore causes no repeated
-    diagnosis. TCP can reveal an expected or replacement OCPP endpoint, while
-    ARP remains useful when a different/previously unknown charger is attached.
+    diagnosis. Only a new outbound TCP connection attempt (SYN without ACK) or
+    an ARP request wakes Discover. Established TCP traffic is ignored. The
+    bounded diagnostic pass after the wake decides whether the evidence is an
+    OCPP endpoint and whether any adaptation is warranted.
     """
     if not discover._INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
 
-    command = ["tcpdump", "-i", interface, "-l", "-nn", "tcp or arp"]
+    packet_filter = "arp or (tcp[tcpflags] & (tcp-syn|tcp-ack) == tcp-syn)"
+    command = ["tcpdump", "-i", interface, "-l", "-nn", packet_filter]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert process.stdout is not None
     captured: list[str] = []
