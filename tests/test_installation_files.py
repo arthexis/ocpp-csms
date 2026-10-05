@@ -103,17 +103,19 @@ def test_discover_help_exposes_runtime_and_install_surfaces():
     assert "--install" in help_output
     assert "--uninstall" in help_output
     assert "--cleanup" in help_output
+    assert "keep durable adaptation" in help_output
 
 
-def test_discover_service_is_root_boot_helper_that_retries_only_failures():
+def test_discover_service_uses_installed_package_and_owned_state():
     unit = read("systemd/ocpp-discover.service.in")
     assert "Description=OCPP Discover" in unit
     assert "After=network-online.target ocpp-csms.service" in unit
     assert "Type=oneshot" in unit
     assert "User=" not in unit
-    assert 'WorkingDirectory="@DISCOVER_ROOT@"' in unit
-    assert 'ExecStart="@PYTHON@" -m field.discover run' in unit
-    assert "--state-dir /run/ocpp-discover" in unit
+    assert "WorkingDirectory=" not in unit
+    assert 'ExecStart="@PYTHON@" -m ocpp_discover service' in unit
+    assert "--runtime-dir /run/ocpp-discover" in unit
+    assert "--persistent-dir /var/lib/ocpp-discover" in unit
     assert '--interface "@INTERFACE@"' in unit
     assert "--listen-port @PORT@" in unit
     assert "Restart=on-failure" in unit
@@ -121,7 +123,7 @@ def test_discover_service_is_root_boot_helper_that_retries_only_failures():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
+def test_discover_install_uses_installed_package_and_separates_cleanup_from_uninstall():
     script = read("discover.sh")
     assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
     assert "sudo apt-get install -y tcpdump nftables iproute2" in script
@@ -129,9 +131,12 @@ def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
     assert 'sudo systemctl enable "$SERVICE_NAME"' in script
     assert 'sudo systemctl start --no-block "$SERVICE_NAME"' in script
     assert 'sudo systemctl disable "$SERVICE_NAME"' in script
-    assert 'sudo "$PYTHON" -m field.discover cleanup' in script
-    assert 'set -- "$PYTHON" -m field.discover run' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle migrate' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover cleanup --state-dir /run/ocpp-discover' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle remove' in script
+    assert 'set -- "$PYTHON" -m ocpp_discover run' in script
     assert 'sudo "$@"' in script
-    assert 'cp "$ROOT/field/discover.py" "$DISCOVER_ROOT/field/discover.py"' in script
-    assert 'cp "$ROOT/field/redirect.py" "$DISCOVER_ROOT/field/redirect.py"' in script
+    assert 'cp "$ROOT/field/discover.py"' not in script
+    assert 'cp "$ROOT/field/redirect.py"' not in script
+    assert "DISCOVER_ROOT" not in script
     assert "ocpp-csms.service" not in script
