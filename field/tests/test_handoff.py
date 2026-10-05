@@ -44,12 +44,15 @@ def configure_cutover(
 ):
     seed_receipt(tmp_path)
     outcomes = iter(preflights or (allowed("CP1"), allowed("CP1")))
+    persistent_path = tmp_path / "persistent" / "path-a.json"
     monkeypatch.setattr(handoff, "require_root", lambda: None)
     monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(outcomes))
     monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: listener_available)
     monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
     monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": connection_marker})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda *args: {"CP1": ocpp_marker})
+    monkeypatch.setattr(handoff, "persistent_receipt_path", lambda state_dir=None: persistent_path)
+    monkeypatch.setattr(handoff, "persist_validated_path_a", lambda state_dir, observed: persistent_path)
     if calls is None:
         monkeypatch.setattr(handoff, "_stop_service", lambda service: None)
     else:
@@ -146,6 +149,69 @@ def test_load_receipt_rejects_invalid_evidence(tmp_path):
         handoff.load_receipt(tmp_path)
 
 
+def test_persistent_path_a_round_trip_is_versioned_and_private(tmp_path):
+    expected = receipt()
+
+    path = handoff.persist_validated_path_a(tmp_path, expected)
+
+    assert path == tmp_path / "path-a.json"
+    assert path.stat().st_mode & 0o777 == 0o600
+    payload = json.loads(path.read_text())
+    assert set(payload) == {"kind", "version", "receipt"}
+    assert payload["kind"] == "ocpp-path-a"
+    assert payload["version"] == 1
+    assert payload["receipt"]["interface"] == "eth0"
+    assert payload["receipt"]["source_ip"] == "192.168.129.182"
+    assert payload["receipt"]["destination_ips"] == ["10.42.0.1"]
+    assert payload["receipt"]["destination_port"] == 8888
+    assert payload["receipt"]["listen_port"] == 9000
+    assert payload["receipt"]["requests"] == [
+        {"destination_ip": "10.42.0.1", "host": "10.42.0.1:8888", "path": "/ocpp/CP1"}
+    ]
+    assert handoff.load_persistent_path_a(tmp_path) == expected
+
+
+def test_persistent_path_a_rejects_extra_fields(tmp_path):
+    handoff.persist_validated_path_a(tmp_path, receipt())
+    path = tmp_path / "path-a.json"
+    payload = json.loads(path.read_text())
+    payload["receipt"]["unexpected_authority"] = "0.0.0.0/0"
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(RuntimeError, match="invalid_persistent_path_a_receipt"):
+        handoff.load_persistent_path_a(tmp_path)
+
+
+def test_persistent_path_a_requires_one_exact_destination_and_identity(tmp_path):
+    ambiguous = RedirectReceipt(
+        interface="eth0",
+        listen_port=9000,
+        source_ip="192.168.129.182",
+        destination_ips=["10.42.0.1", "10.42.0.2"],
+        requests=[
+            WebSocketRequest("10.42.0.1", "10.42.0.1:8888", "/ocpp/CP1"),
+            WebSocketRequest("10.42.0.2", "10.42.0.2:8888", "/ocpp/CP1"),
+        ],
+        captured_at="discovered",
+        destination_port=8888,
+    )
+
+    with pytest.raises(ValueError, match="path_a_requires_single_destination"):
+        handoff.persist_validated_path_a(tmp_path, ambiguous)
+
+    assert not (tmp_path / "path-a.json").exists()
+
+
+def test_persistent_path_a_refuses_to_overwrite_owned_evidence(tmp_path):
+    path = handoff.persist_validated_path_a(tmp_path, receipt())
+    original = path.read_text()
+
+    with pytest.raises(RuntimeError, match="persistent_path_a_receipt_exists"):
+        handoff.persist_validated_path_a(tmp_path, receipt())
+
+    assert path.read_text() == original
+
+
 def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocpp(tmp_path, monkeypatch):
     calls = []
     configure_cutover(
@@ -160,7 +226,13 @@ def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocp
         assert json.loads((tmp_path / "redirect.json").read_text())["destination_port"] == 8888
         calls.append(("apply", str(state_dir)))
 
+    def persist(state_dir, observed):
+        assert observed == receipt()
+        calls.append(("persist", str(state_dir)))
+        return tmp_path / "persistent" / "path-a.json"
+
     monkeypatch.setattr(handoff.redirect_tools, "apply_redirect", apply)
+    monkeypatch.setattr(handoff, "persist_validated_path_a", persist)
     monkeypatch.setattr(
         handoff,
         "wait_for_reconnect",
@@ -172,10 +244,12 @@ def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocp
         lambda data_dir, markers, **kwargs: calls.append(("ocpp", markers.copy())) or (),
     )
 
+    persistent_dir = tmp_path / "persistent"
     result = handoff.cutover(
         data_dir="/data",
         state_dir=tmp_path,
         old_service="ocpp-csms.service",
+        persistent_state_dir=persistent_dir,
         timeout=15,
     )
 
@@ -185,9 +259,23 @@ def test_cutover_uses_prevalidated_receipt_and_requires_fresh_connection_and_ocp
         ("apply", str(tmp_path)),
         ("reconnect", {"CP1": 7}),
         ("ocpp", {"CP1": 11}),
+        ("persist", str(persistent_dir)),
     ]
     assert (tmp_path / "handoff-endpoint.json").exists()
     assert (tmp_path / "redirect.json").exists()
+
+
+def test_cutover_refuses_existing_durable_path_a_before_service_stop(tmp_path, monkeypatch):
+    configure_cutover(tmp_path, monkeypatch)
+    persistent = tmp_path / "persistent" / "path-a.json"
+    persistent.parent.mkdir()
+    persistent.write_text("existing\n")
+    monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
+
+    with pytest.raises(RuntimeError, match="persistent_path_a_receipt_exists"):
+        handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
+
+    assert not (tmp_path / "redirect.json").exists()
 
 
 def test_cutover_final_charging_gate_runs_before_service_stop(tmp_path, monkeypatch):
@@ -247,6 +335,11 @@ def test_cutover_rolls_back_redirect_and_old_service_on_reconnect_timeout(tmp_pa
     configure_cutover(tmp_path, monkeypatch, calls=calls)
     configure_successful_rollback(tmp_path, monkeypatch, calls)
     monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ("CP1",))
+    monkeypatch.setattr(
+        handoff,
+        "persist_validated_path_a",
+        lambda *args, **kwargs: pytest.fail("failed reconnect must not become durable"),
+    )
 
     with pytest.raises(RuntimeError, match="charger_reconnect_timeout"):
         handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
@@ -260,14 +353,38 @@ def test_cutover_rolls_back_redirect_and_old_service_on_reconnect_timeout(tmp_pa
     assert_preserved_handoff_only(tmp_path)
 
 
-def test_cutover_rolls_back_on_fresh_ocpp_timeout(tmp_path, monkeypatch):
+def test_cutover_rolls_back_on_fresh_ocpp_timeout_without_persisting(tmp_path, monkeypatch):
     calls = []
     configure_cutover(tmp_path, monkeypatch, calls=calls)
     configure_successful_rollback(tmp_path, monkeypatch, calls)
     monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ())
     monkeypatch.setattr(handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ("CP1",))
+    monkeypatch.setattr(
+        handoff,
+        "persist_validated_path_a",
+        lambda *args, **kwargs: pytest.fail("fresh OCPP timeout must not become durable"),
+    )
 
     with pytest.raises(RuntimeError, match="fresh_ocpp_timeout"):
+        handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
+
+    assert calls[-2:] == [("remove", str(tmp_path)), ("start", "old.service")]
+    assert_preserved_handoff_only(tmp_path)
+
+
+def test_cutover_rolls_back_if_durable_persistence_fails(tmp_path, monkeypatch):
+    calls = []
+    configure_cutover(tmp_path, monkeypatch, calls=calls)
+    configure_successful_rollback(tmp_path, monkeypatch, calls)
+    monkeypatch.setattr(handoff, "wait_for_reconnect", lambda *args, **kwargs: ())
+    monkeypatch.setattr(handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ())
+    monkeypatch.setattr(
+        handoff,
+        "persist_validated_path_a",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("durable_write_failed")),
+    )
+
+    with pytest.raises(OSError, match="durable_write_failed"):
         handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
 
     assert calls[-2:] == [("remove", str(tmp_path)), ("start", "old.service")]
