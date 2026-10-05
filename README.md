@@ -14,13 +14,7 @@ sh install.sh
 
 Do not run the installer itself with `sudo`. The installed `ocpp-csms.service` runs as the installing user, listens on `0.0.0.0:9000` by default, starts at boot, and restarts on failure.
 
-Before changing an existing appliance, the installer performs a read-only usage preflight. An active transaction always blocks installation. If the current CSMS has connected but idle chargers, installation also stops unless the operator explicitly authorizes an idle handoff with:
-
-```bash
-sh install.sh --rollover
-```
-
-`--rollover` never overrides active charging. It only authorizes replacement of an in-use but idle CSMS. The installer stages the replacement while the old CSMS stays live, repeats the active-charge check immediately before cutover, then requires fresh reconnect evidence from every charger that was connected at the final gate.
+Before changing an existing appliance, the installer performs a read-only safety preflight. Active charging always blocks installation. Connected but idle chargers are expected and are handed to the replacement service automatically: the installer stages the replacement while the old CSMS stays live, repeats the active-charge check immediately before cutover, then requires fresh reconnect evidence from every charger that was connected at the final gate.
 
 Normal upgrades use the same staged cutover machinery even when no charger is connected. Expensive work is done in `venv.next`; the previous environment is retained as `venv.previous` after promotion so startup failures can be recovered without rebuilding the old environment.
 
@@ -60,7 +54,7 @@ Install the appliance together with discovery:
 sh install.sh --with-discover
 ```
 
-If the current CSMS already has an idle connected charger, add `--rollover`; if any transaction is active, installation is refused even with `--rollover`.
+Idle connected chargers are handed off automatically. If any transaction is active, installation is refused.
 
 This keeps the normal CSMS unprivileged and installs a separate root `ocpp-discover.service`. At boot, Discover first gives the charger a short chance to connect normally. If no charger appears, it passively watches for validated plaintext WebSocket traffic to an IPv4 address already owned by the selected Ethernet interface. When that existing endpoint is visible, Discover applies only the narrow source/destination/port redirect needed to reach the local CSMS and does not claim another address. If no usable local endpoint is visible, it falls back to repeated unresolved-ARP discovery, temporarily claims only that exact IPv4 address as an additive `/32`, observes the charger's destination and port, installs the narrow redirect, and stops once the CSMS reports a real charger session.
 
@@ -347,7 +341,7 @@ CI exercises:
 - Debian 12 Bookworm / Python 3.11 / ARM64 as the primary appliance target;
 - Debian 13 / Python 3.13 / ARM64 as the compatibility target.
 
-Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Schema/rollover tests cover read-only preflight, active-charge refusal, explicit schema upgrades and backups, staged promotion, startup rollback boundaries, reconnect baselines, and fresh post-cutover connection evidence. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
+Tests favor behavior and state invariants over exact human-readable output. Installer tests exercise the public `--help` surfaces and verify privilege/delegation boundaries. Schema/handoff tests cover read-only preflight, active-charge refusal, explicit schema upgrades and backups, staged promotion, startup rollback boundaries, reconnect baselines, and fresh post-cutover connection evidence. Discovery tests cover the already-connected fast path, passive detection of a validated WebSocket endpoint already owned by the host, redirect-only success/rollback for that case, passive ARP fallback, additive address ownership, charger-specific WebSocket discovery after the claim, port-aware nftables redirects, and exact cleanup of only discovery-owned state.
 
 ## Source layout
 
@@ -360,7 +354,7 @@ src/ocpp_csms/
   session.py           # direct OCPP 1.6J handlers and outbound commands
   events.py            # SQLite event store and derived state
   schema.py            # SQLite schema identity, inspection, backup, and explicit upgrade
-  install_preflight.py # read-only install/rollover safety policy
+  install_preflight.py # read-only install/service-handoff safety policy
   install_cutover.py   # schema-aware staged cutover and reconnect helpers
   diagnostics.py       # direct event queries and formatting
   status.py            # status queries and formatting
@@ -379,7 +373,7 @@ systemd/
   ocpp-discover.service.in
 
 discover.sh            # run/install/uninstall optional OCPP Discover
-install.sh             # staged appliance installer and rollover entry point
+install.sh             # staged appliance installer and safe handoff entry point
 ```
 
 This README is the canonical project documentation. Important operator information belongs here; detailed field-harness procedures stay in `field/README.md` so the main path remains easy to scan.
