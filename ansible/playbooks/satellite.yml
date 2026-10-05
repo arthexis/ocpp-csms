@@ -1,1 +1,6 @@
 ---
+- name: Converge OCPP CSMS satellite
+  hosts: all
+  gather_facts: true
+  roles:
+    - role: ocpp_csms
