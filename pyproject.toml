@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ocpp-csms"
 version = "0.1.0"
-description = "A small Python OCPP CSMS"
+description = "A small Python OCPP CSMS with a companion network discovery service"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,6 +21,10 @@ dev = [
 
 [project.scripts]
 ocpp-csms = "ocpp_csms.app:main"
+ocpp-discover = "ocpp_discover.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocpp_csms", "src/ocpp_discover"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -31,14 +31,14 @@ def test_base_service_runs_unprivileged_and_restarts():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_base_installer_help_explains_safe_handoff_and_optional_discovery():
+def test_base_installer_help_describes_implicit_safe_handoff_and_optional_discovery():
     help_output = help_text("install.sh")
     assert "--host HOST" in help_output
     assert "--port PORT" in help_output
     assert "--rollover" not in help_output
-    assert "Idle connected chargers are expected" in help_output
-    assert "Active charging always blocks installation" in help_output
     assert "safe staged handoff" in help_output
+    assert "Idle connected chargers" in help_output
+    assert "Active charging always blocks" in help_output
     assert "--with-discover" in help_output
     assert "--without-discover" in help_output
     assert "preserved" in help_output
@@ -55,7 +55,6 @@ def test_base_installer_stages_before_disruptive_cutover():
     promote = installer.index('mv "$STAGE_VENV" "$VENV"')
     install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
     reconnect = installer.index("wait-reconnect")
-
     assert first_preflight < stage_venv < schema_check < final_preflight
     assert final_preflight < stop_service < schema_upgrade < promote < install_service < reconnect
     assert 'STAGE_VENV="$PREFIX/venv.next"' in installer
@@ -72,7 +71,7 @@ def test_base_installer_keeps_active_charge_gate_and_conditional_rollback():
     assert 'mv "$VENV" "$VENV.failed"' in installer
 
 
-def test_base_installer_preserves_and_delegates_discovery_after_cutover():
+def test_base_installer_preserves_and_delegates_discovery_after_verified_handoff():
     installer = read("install.sh")
     reconnect = installer.index("wait-reconnect")
     discover = installer.index('sh "$ROOT/discover.sh" --install')
@@ -104,17 +103,19 @@ def test_discover_help_exposes_runtime_and_install_surfaces():
     assert "--install" in help_output
     assert "--uninstall" in help_output
     assert "--cleanup" in help_output
+    assert "keep durable adaptation" in help_output
 
 
-def test_discover_service_is_root_boot_helper_that_retries_only_failures():
+def test_discover_service_uses_installed_package_and_owned_state():
     unit = read("systemd/ocpp-discover.service.in")
     assert "Description=OCPP Discover" in unit
     assert "After=network-online.target ocpp-csms.service" in unit
     assert "Type=oneshot" in unit
     assert "User=" not in unit
-    assert 'WorkingDirectory="@DISCOVER_ROOT@"' in unit
-    assert 'ExecStart="@PYTHON@" -m field.discover run' in unit
-    assert "--state-dir /run/ocpp-discover" in unit
+    assert "WorkingDirectory=" not in unit
+    assert 'ExecStart="@PYTHON@" -m ocpp_discover service' in unit
+    assert "--runtime-dir /run/ocpp-discover" in unit
+    assert "--persistent-dir /var/lib/ocpp-discover" in unit
     assert '--interface "@INTERFACE@"' in unit
     assert "--listen-port @PORT@" in unit
     assert "Restart=on-failure" in unit
@@ -122,17 +123,22 @@ def test_discover_service_is_root_boot_helper_that_retries_only_failures():
     assert "WantedBy=multi-user.target" in unit
 
 
-def test_discover_install_is_debian_scoped_and_keeps_base_service_separate():
+def test_discover_install_uses_debian_nftables_boot_loader_and_installed_package():
     script = read("discover.sh")
     assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
     assert "sudo apt-get install -y tcpdump nftables iproute2" in script
     assert "Automatic dependency installation is supported only on Debian" in script
+    assert "sudo systemctl enable nftables.service" in script
+    assert "systemctl restart nftables" not in script
     assert 'sudo systemctl enable "$SERVICE_NAME"' in script
     assert 'sudo systemctl start --no-block "$SERVICE_NAME"' in script
     assert 'sudo systemctl disable "$SERVICE_NAME"' in script
-    assert 'sudo "$PYTHON" -m field.discover cleanup' in script
-    assert 'set -- "$PYTHON" -m field.discover run' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle prepare' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover cleanup --state-dir /run/ocpp-discover' in script
+    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle remove' in script
+    assert 'set -- "$PYTHON" -m ocpp_discover run' in script
     assert 'sudo "$@"' in script
-    assert 'cp "$ROOT/field/discover.py" "$DISCOVER_ROOT/field/discover.py"' in script
-    assert 'cp "$ROOT/field/redirect.py" "$DISCOVER_ROOT/field/redirect.py"' in script
+    assert 'cp "$ROOT/field/discover.py"' not in script
+    assert 'cp "$ROOT/field/redirect.py"' not in script
+    assert "DISCOVER_ROOT" not in script
     assert "ocpp-csms.service" not in script

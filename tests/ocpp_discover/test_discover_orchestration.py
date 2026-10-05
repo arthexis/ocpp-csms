@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from field import discover
-from field.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_discover import discover
+from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_csms.events import EventStore
 from ocpp_csms.runtime import write_pid
 

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from field import discover
+from ocpp_discover import discover
 
 
 REQUEST = (
@@ -145,18 +145,10 @@ def test_host_addresses_reads_ipv4_across_all_interfaces(monkeypatch):
     class Result:
         returncode = 0
         stderr = ""
-        stdout = json.dumps(
-            [
-                {"ifname": "eth0", "addr_info": [{"family": "inet", "local": "192.168.129.10"}]},
-                {
-                    "ifname": "wlan0",
-                    "addr_info": [
-                        {"family": "inet", "local": "10.42.0.1"},
-                        {"family": "inet6", "local": "fe80::1"},
-                    ],
-                },
-            ]
-        )
+        stdout = json.dumps([
+            {"ifname": "eth0", "addr_info": [{"family": "inet", "local": "192.168.129.10"}]},
+            {"ifname": "wlan0", "addr_info": [{"family": "inet", "local": "10.42.0.1"}, {"family": "inet6", "local": "fe80::1"}]},
+        ])
 
     monkeypatch.setattr(discover, "_run_ip", lambda command: calls.append(command) or Result())
 

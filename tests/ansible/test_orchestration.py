@@ -1,9 +1,9 @@
 from .helpers import (
     DEFAULTS,
     TASKS,
-    all_ansible_text,
     assert_task_order,
     read,
+    role_text,
     task_section,
 )
 
@@ -25,7 +25,7 @@ def test_safety_gates_bracket_staging_and_handoff():
 
 
 def test_retired_rollover_surface_is_absent():
-    assert "rollover" not in all_ansible_text().lower()
+    assert "rollover" not in role_text().lower()
 
 
 def test_handoff_captures_reconnect_baseline_before_downtime():

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from field import redirect
+from ocpp_discover import redirect
 
 
 UPGRADE_ONE = """12:00:00.000001 IP 192.168.129.182.40200 > 203.0.113.10.80: Flags [P.], length 180
