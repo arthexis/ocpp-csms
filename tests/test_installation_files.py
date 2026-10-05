@@ -61,6 +61,21 @@ def test_base_installer_stages_before_disruptive_cutover():
     assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in installer
 
 
+def test_base_installer_verifies_staged_command_then_installs_promoted_command():
+    installer = read("install.sh")
+
+    candidate_render = installer.index('render_service "$STAGE_VENV/bin/ocpp-csms"')
+    verify = installer.index('systemd-analyze verify "$TMP_SERVICE"')
+    final_preflight = installer.index("# Second safety gate")
+    promote = installer.index('mv "$STAGE_VENV" "$VENV"')
+    live_render = installer.index('render_service "$VENV/bin/ocpp-csms"')
+    install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
+
+    assert candidate_render < verify < final_preflight < promote < live_render < install_service
+    assert 'render_service "$COMMAND"' not in installer
+    assert 's|@COMMAND@|$command_esc|g' in installer
+
+
 def test_base_installer_keeps_active_charge_gate_and_conditional_rollback():
     installer = read("install.sh")
     assert "run_preflight --json" in installer

@@ -95,6 +95,20 @@ ensure_user_bin_on_path() {
 
 escape_sed() { printf '%s' "$1" | sed 's/[\\&|]/\\&/g'; }
 
+render_service() {
+    service_command=$1
+    command_esc=$(escape_sed "$service_command")
+    sed \
+        -e "s|@USER@|$USER_ESC|g" \
+        -e "s|@GROUP@|$GROUP_ESC|g" \
+        -e "s|@HOME@|$HOME_ESC|g" \
+        -e "s|@COMMAND@|$command_esc|g" \
+        -e "s|@DATA_DIR@|$DATA_ESC|g" \
+        -e "s|@HOST@|$HOST_ESC|g" \
+        -e "s|@PORT@|$PORT|g" \
+        "$SERVICE_TEMPLATE" > "$TMP_SERVICE"
+}
+
 need python3
 # First safety gate: no appliance mutation has happened yet.
 run_preflight
@@ -124,18 +138,12 @@ SCHEMA_ACTION=$("$STAGE_VENV/bin/python" -m ocpp_csms.install_cutover schema-che
 USER_ESC=$(escape_sed "$INSTALL_USER")
 GROUP_ESC=$(escape_sed "$INSTALL_GROUP")
 HOME_ESC=$(escape_sed "$HOME")
-COMMAND_ESC=$(escape_sed "$COMMAND")
 DATA_ESC=$(escape_sed "$DATA_DIR")
 HOST_ESC=$(escape_sed "$HOST")
-sed \
-    -e "s|@USER@|$USER_ESC|g" \
-    -e "s|@GROUP@|$GROUP_ESC|g" \
-    -e "s|@HOME@|$HOME_ESC|g" \
-    -e "s|@COMMAND@|$COMMAND_ESC|g" \
-    -e "s|@DATA_DIR@|$DATA_ESC|g" \
-    -e "s|@HOST@|$HOST_ESC|g" \
-    -e "s|@PORT@|$PORT|g" \
-    "$SERVICE_TEMPLATE" > "$TMP_SERVICE"
+
+# Verify the candidate using the staged executable that already exists. The
+# public command link is intentionally created only after successful promotion.
+render_service "$STAGE_VENV/bin/ocpp-csms"
 if command -v systemd-analyze >/dev/null 2>&1; then systemd-analyze verify "$TMP_SERVICE" >/dev/null; fi
 
 # Second safety gate: a charge may have started while staging.
@@ -174,6 +182,10 @@ mkdir -p "$BIN_DIR" "$DATA_DIR"
 ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
 ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"
 ensure_user_bin_on_path
+
+# The live unit must point at the promoted environment, not the retired staging
+# path used for pre-cutover validation.
+render_service "$VENV/bin/ocpp-csms"
 
 rollback_startup() {
     printf 'Replacement CSMS failed during handoff.\n' >&2
