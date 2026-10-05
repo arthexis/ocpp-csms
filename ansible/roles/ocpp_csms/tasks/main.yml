@@ -41,3 +41,47 @@
     name: pip
     state: latest
     virtualenv: "{{ ocpp_csms_stage_venv }}"
+
+- name: Use current checkout as install source for local execution
+  ansible.builtin.set_fact:
+    ocpp_csms_install_source: "{{ ocpp_csms_controller_source_dir }}"
+  when: ansible_connection == 'local'
+
+- name: Create remote staged source directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_stage_source_dir }}"
+    state: directory
+    mode: "0755"
+  when: ansible_connection != 'local'
+
+- name: Copy remote package metadata
+  ansible.builtin.copy:
+    src: "{{ ocpp_csms_controller_source_dir }}/{{ item }}"
+    dest: "{{ ocpp_csms_stage_source_dir }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - pyproject.toml
+    - README.md
+  when: ansible_connection != 'local'
+
+- name: Copy remote Python package source
+  ansible.builtin.copy:
+    src: "{{ ocpp_csms_controller_source_dir }}/src/"
+    dest: "{{ ocpp_csms_stage_source_dir }}/src/"
+    mode: preserve
+  when: ansible_connection != 'local'
+
+- name: Use staged source as install source for remote execution
+  ansible.builtin.set_fact:
+    ocpp_csms_install_source: "{{ ocpp_csms_stage_source_dir }}"
+  when: ansible_connection != 'local'
+
+- name: Install OCPP CSMS into staged virtual environment
+  ansible.builtin.pip:
+    name: "{{ ocpp_csms_install_source }}"
+    virtualenv: "{{ ocpp_csms_stage_venv }}"
+
+- name: Verify staged OCPP CSMS command
+  ansible.builtin.command:
+    cmd: "{{ ocpp_csms_stage_venv }}/bin/ocpp-csms --help"
+  changed_when: false
