@@ -22,15 +22,7 @@ _PERSISTENT_RECEIPT = "discovered.json"
 _PERSISTENT_KIND = "ocpp-discovered"
 _PERSISTENT_VERSION = 1
 _DEFAULT_PERSISTENT_STATE_DIR = "/var/lib/ocpp-discover"
-_RECEIPT_KEYS = {
-    "interface",
-    "listen_port",
-    "source_ip",
-    "destination_ips",
-    "requests",
-    "captured_at",
-    "destination_port",
-}
+_RECEIPT_KEYS = {"interface", "listen_port", "source_ip", "destination_ips", "requests", "captured_at", "destination_port"}
 _REQUEST_KEYS = {"destination_ip", "host", "path"}
 
 
@@ -86,11 +78,7 @@ def _validate_persistent_path_a(receipt: RedirectReceipt) -> None:
 
 def _persistent_payload(receipt: RedirectReceipt) -> dict[str, object]:
     _validate_persistent_path_a(receipt)
-    return {
-        "kind": _PERSISTENT_KIND,
-        "version": _PERSISTENT_VERSION,
-        "receipt": receipt.to_json(),
-    }
+    return {"kind": _PERSISTENT_KIND, "version": _PERSISTENT_VERSION, "receipt": receipt.to_json()}
 
 
 def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
@@ -102,9 +90,7 @@ def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
     if not isinstance(receipt_payload, dict) or set(receipt_payload) != _RECEIPT_KEYS:
         raise RuntimeError("invalid_discovered_receipt")
     requests = receipt_payload.get("requests")
-    if not isinstance(requests, list) or any(
-        not isinstance(request, dict) or set(request) != _REQUEST_KEYS for request in requests
-    ):
+    if not isinstance(requests, list) or any(not isinstance(request, dict) or set(request) != _REQUEST_KEYS for request in requests):
         raise RuntimeError("invalid_discovered_receipt")
     try:
         receipt = receipt_from_json(receipt_payload)
@@ -115,16 +101,14 @@ def _receipt_from_persistent_payload(payload: object) -> RedirectReceipt:
 
 
 def persist_validated_path_a(state_dir: str | Path, receipt: RedirectReceipt) -> Path:
-    """Persist the evidence for an already-successful exact Path A adaptation."""
     payload = _persistent_payload(receipt)
     path = persistent_receipt_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         raise RuntimeError("discovered_receipt_exists")
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
-        descriptor = os.open(temporary, flags, 0o600)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         raise RuntimeError("discovered_receipt_temporary_exists") from None
     try:
@@ -153,25 +137,12 @@ def load_persistent_path_a(state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR
     return _receipt_from_persistent_payload(payload)
 
 
-def observe_existing_endpoint(
-    *,
-    state_dir: str | Path,
-    interface: str,
-    listen_port: int,
-    seconds: float,
-    capture_log: str | Path | None = None,
-) -> RedirectReceipt:
-    """Observe and persist a validated existing endpoint without network mutation."""
+def observe_existing_endpoint(*, state_dir: str | Path, interface: str, listen_port: int, seconds: float, capture_log: str | Path | None = None) -> RedirectReceipt:
     require_root()
     path = receipt_path(state_dir)
     if path.exists():
         raise RuntimeError("handoff_receipt_exists")
-    receipt = discover_existing_endpoint(
-        interface=interface,
-        listen_port=listen_port,
-        seconds=seconds,
-        capture_log=capture_log,
-    )
+    receipt = discover_existing_endpoint(interface=interface, listen_port=listen_port, seconds=seconds, capture_log=capture_log)
     if receipt is None:
         raise RuntimeError("no_existing_endpoint_websocket_upgrade")
     _write_receipt(path, receipt)
@@ -185,10 +156,7 @@ def _ocpp_markers(data_dir: str | Path, expected: tuple[str, ...]) -> dict[str, 
         return markers
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         for charger in expected:
-            row = connection.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM events WHERE charger_id = ? AND direction = 'in'",
-                (charger,),
-            ).fetchone()
+            row = connection.execute("SELECT COALESCE(MAX(id), 0) FROM events WHERE charger_id = ? AND direction = 'in'", (charger,)).fetchone()
             markers[charger] = int(row[0]) if row else 0
     return markers
 
@@ -200,22 +168,13 @@ def _fresh_ocpp(data_dir: Path, markers: dict[str, int]) -> set[str]:
     fresh: set[str] = set()
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         for charger, marker in markers.items():
-            row = connection.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM events WHERE charger_id = ? AND direction = 'in'",
-                (charger,),
-            ).fetchone()
+            row = connection.execute("SELECT COALESCE(MAX(id), 0) FROM events WHERE charger_id = ? AND direction = 'in'", (charger,)).fetchone()
             if row and int(row[0]) > marker:
                 fresh.add(charger)
     return fresh
 
 
-def wait_for_fresh_ocpp(
-    data_dir: str | Path,
-    markers: dict[str, int],
-    *,
-    timeout: float = 30.0,
-    interval: float = 0.5,
-) -> tuple[str, ...]:
+def wait_for_fresh_ocpp(data_dir: str | Path, markers: dict[str, int], *, timeout: float = 30.0, interval: float = 0.5) -> tuple[str, ...]:
     expected = set(markers)
     if not expected:
         return ()
@@ -246,8 +205,7 @@ def _start_service(service: str) -> None:
 
 
 def _service_active(service: str) -> bool:
-    result = subprocess.run(["systemctl", "is-active", "--quiet", service], check=False)
-    return result.returncode == 0
+    return subprocess.run(["systemctl", "is-active", "--quiet", service], check=False).returncode == 0
 
 
 def _prepare_redirect_receipt(state_dir: str | Path, receipt: RedirectReceipt) -> None:
@@ -273,43 +231,37 @@ def _rollback_cutover(state_dir: str | Path, old_service: str) -> None:
         errors.append(f"redirect rollback failed: {exc}")
     finally:
         path.unlink(missing_ok=True)
-
     try:
         _start_service(old_service)
         if not _service_active(old_service):
             errors.append("old_service_not_active_after_restart")
     except RuntimeError as exc:
         errors.append(f"old service restart failed: {exc}")
-
     if errors:
         raise RuntimeError("; ".join(errors))
 
 
 def _promote_persistent_adaptation(persistent_state_dir: str | Path, receipt: RedirectReceipt) -> None:
-    ruleset_existed = persistence.DEFAULT_RULESET_PATH.exists()
-    include_added = False
+    """Commit a proven live redirect as boot-persistent configuration plus ownership evidence."""
+    ruleset_path = persistence.DEFAULT_RULESET_PATH
+    previous_ruleset = ruleset_path.read_bytes() if ruleset_path.exists() else None
+    previous_mode = (ruleset_path.stat().st_mode & 0o777) if ruleset_path.exists() else 0o600
+    discovered_path = persistent_receipt_path(persistent_state_dir)
+    if discovered_path.exists():
+        raise RuntimeError("discovered_receipt_exists")
     try:
         persistence.persist_ruleset(receipt)
-        include_added = persistence.ensure_nftables_include()
         persist_validated_path_a(persistent_state_dir, receipt)
     except Exception:
-        if not ruleset_existed:
+        discovered_path.unlink(missing_ok=True)
+        if previous_ruleset is None:
             persistence.remove_ruleset()
-        if include_added:
-            persistence.remove_nftables_include()
+        else:
+            persistence._atomic_write(ruleset_path, previous_ruleset.decode("utf-8"), mode=previous_mode)
         raise
 
 
-def cutover(
-    *,
-    data_dir: str | Path,
-    state_dir: str | Path,
-    old_service: str,
-    persistent_state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR,
-    timeout: float = 30.0,
-    interval: float = 0.5,
-) -> tuple[str, ...]:
-    """Perform the controlled Path A handoff using prevalidated endpoint evidence."""
+def cutover(*, data_dir: str | Path, state_dir: str | Path, old_service: str, persistent_state_dir: str | Path = _DEFAULT_PERSISTENT_STATE_DIR, timeout: float = 30.0, interval: float = 0.5) -> tuple[str, ...]:
     require_root()
     receipt = load_receipt(state_dir)
     _validate_persistent_path_a(receipt)
@@ -330,7 +282,6 @@ def cutover(
 
     connection_baseline = connection_markers(data_dir, expected)
     ocpp_baseline = _ocpp_markers(data_dir, expected)
-
     final_preflight = evaluate_preflight(data_dir, rollover=True)
     if not final_preflight.allowed:
         raise RuntimeError(final_preflight.reason or "handoff_preflight_blocked")
@@ -341,25 +292,12 @@ def cutover(
     try:
         _prepare_redirect_receipt(state_dir, receipt)
         redirect_tools.apply_redirect(state_dir)
-
-        missing_connection = wait_for_reconnect(
-            data_dir,
-            connection_baseline,
-            timeout=timeout,
-            interval=interval,
-        )
+        missing_connection = wait_for_reconnect(data_dir, connection_baseline, timeout=timeout, interval=interval)
         if missing_connection:
             raise RuntimeError("charger_reconnect_timeout: " + ", ".join(missing_connection))
-
-        missing_ocpp = wait_for_fresh_ocpp(
-            data_dir,
-            ocpp_baseline,
-            timeout=timeout,
-            interval=interval,
-        )
+        missing_ocpp = wait_for_fresh_ocpp(data_dir, ocpp_baseline, timeout=timeout, interval=interval)
         if missing_ocpp:
             raise RuntimeError("fresh_ocpp_timeout: " + ", ".join(missing_ocpp))
-
         _promote_persistent_adaptation(persistent_state_dir, receipt)
         return expected
     except Exception as original:
@@ -371,15 +309,9 @@ def cutover(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m ocpp_discover.handoff",
-        description="Prepare and execute a validated staged OCPP handoff.",
-    )
+    parser = argparse.ArgumentParser(prog="python -m ocpp_discover.handoff", description="Prepare and execute a validated staged OCPP handoff.")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    prepare = subparsers.add_parser(
-        "prepare",
-        help="Observe the existing charger endpoint and persist immutable pre-cutover evidence.",
-    )
+    prepare = subparsers.add_parser("prepare", help="Observe the existing charger endpoint and persist immutable pre-cutover evidence.")
     prepare.add_argument("--state-dir", required=True)
     prepare.add_argument("--interface", default="eth0")
     prepare.add_argument("--listen-port", type=int, default=9000)
@@ -387,10 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--capture-log")
     show = subparsers.add_parser("show", help="Print the persisted pre-cutover endpoint evidence.")
     show.add_argument("--state-dir", required=True)
-    switch = subparsers.add_parser(
-        "cutover",
-        help="Stop the old listener, apply the prevalidated narrow redirect, and require fresh OCPP evidence.",
-    )
+    switch = subparsers.add_parser("cutover", help="Stop the old listener, apply the prevalidated narrow redirect, require fresh OCPP, then persist the proven adaptation.")
     switch.add_argument("--data-dir", required=True)
     switch.add_argument("--state-dir", required=True)
     switch.add_argument("--old-service", required=True)
@@ -403,25 +332,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "prepare":
-            receipt = observe_existing_endpoint(
-                state_dir=args.state_dir,
-                interface=args.interface,
-                listen_port=args.listen_port,
-                seconds=args.seconds,
-                capture_log=args.capture_log,
-            )
+            receipt = observe_existing_endpoint(state_dir=args.state_dir, interface=args.interface, listen_port=args.listen_port, seconds=args.seconds, capture_log=args.capture_log)
             print(json.dumps(receipt.to_json(), indent=2, sort_keys=True))
             return 0
         if args.command == "show":
             print(json.dumps(load_receipt(args.state_dir).to_json(), indent=2, sort_keys=True))
             return 0
-        chargers = cutover(
-            data_dir=args.data_dir,
-            state_dir=args.state_dir,
-            old_service=args.old_service,
-            persistent_state_dir=args.persistent_state_dir,
-            timeout=args.timeout,
-        )
+        chargers = cutover(data_dir=args.data_dir, state_dir=args.state_dir, old_service=args.old_service, persistent_state_dir=args.persistent_state_dir, timeout=args.timeout)
     except (RuntimeError, ValueError, OSError) as exc:
         print(str(exc))
         return 1
