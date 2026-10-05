@@ -23,9 +23,9 @@ def run_service(
     connect_timeout: float = 30.0,
 ):
     """Leave a known persistent adaptation alone; discover only when none exists."""
-    persistent_path = handoff.persistent_receipt_path(persistent_dir)
-    if persistent_path.exists():
-        handoff.load_persistent_path_a(persistent_dir)
+    state_path = handoff.discovered_path(persistent_dir)
+    if state_path.exists():
+        handoff.load_discovered(persistent_dir)
         return {"status": "persistent"}
 
     result = discover.run_discovery(
