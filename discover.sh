@@ -149,7 +149,10 @@ install_discovery() {
     need systemctl || { printf 'Missing required command: systemctl\n' >&2; exit 1; }
     install_dependencies
 
-    sudo "$PYTHON" -m ocpp_discover.lifecycle migrate
+    sudo "$PYTHON" -m ocpp_discover.lifecycle prepare
+    # Debian's nftables.service loads /etc/nftables.conf before networking.
+    # Enable it for future boots without restarting/flushing the current ruleset.
+    sudo systemctl enable nftables.service
 
     PYTHON_ESC=$(escape_sed "$PYTHON")
     DATA_ESC=$(escape_sed "$DATA_DIR")
