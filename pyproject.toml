@@ -21,6 +21,10 @@ dev = [
 
 [project.scripts]
 ocpp-csms = "ocpp_csms.app:main"
+ocpp-discover = "ocpp_discover.discover:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocpp_csms", "src/ocpp_discover"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
