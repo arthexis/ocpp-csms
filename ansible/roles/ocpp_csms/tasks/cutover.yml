@@ -286,10 +286,17 @@
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
     - name: Report handoff failure without automatic rollback
+      vars:
+        ocpp_csms_no_rollback_reason: >-
+          {{
+            'the database schema was upgraded'
+            if ocpp_csms_schema_action == 'upgrade'
+            else 'there is no previous managed release/service to restore'
+          }}
       ansible.builtin.fail:
         msg: >-
           OCPP CSMS handoff verification failed. Automatic rollback was not
-          attempted because {{ 'the database schema was upgraded' if ocpp_csms_schema_action == 'upgrade' else 'there is no previous managed release/service to restore' }}:
+          attempted because {{ ocpp_csms_no_rollback_reason }}:
           {{ ansible_failed_result.msg | default('verification failure') }}
       when: >-
         (ocpp_csms_schema_action == 'upgrade')
