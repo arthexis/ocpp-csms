@@ -105,7 +105,7 @@ def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only install safety preflight")
     parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument("-j", "--json", action="store_true")
     return parser
 
 
