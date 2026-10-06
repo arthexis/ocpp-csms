@@ -8,22 +8,14 @@ from ocpp_csms.diagnostics import format_events, transaction_events
 from ocpp_csms.transaction_cli import format_transaction, format_transactions
 from ocpp_csms.transaction_query import TransactionQuery
 
-
 TRANSACTION_COMMANDS = ("transactions", "transaction", "txns", "txn")
 _RELATIVE_TIME = re.compile(r"^(\d+(?:\.\d+)?)([SMHDW])$", re.IGNORECASE)
 _RELATIVE_SECONDS = {"S": 1, "M": 60, "H": 3600, "D": 86400, "W": 604800}
 
 
-def add_transaction_parser(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
-    """Register transaction inspection and its singular/plural aliases."""
+def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
     add = argparse.ArgumentParser.add_argument
-    transactions = subcommands.add_parser(
-        "transactions",
-        aliases=["transaction", "txns", "txn"],
-        help="Inspect archived transactions",
-    )
+    transactions = subcommands.add_parser("transactions", aliases=["transaction", "txns", "txn"], help="Inspect archived transactions")
     transactions.set_defaults(command="transactions")
     add(transactions, "transaction_id", nargs="?", type=int, help="Transaction ID for detailed inspection")
     selection = transactions.add_mutually_exclusive_group()
@@ -37,21 +29,20 @@ def add_transaction_parser(
     add(transactions, "--between", nargs=2, metavar=("START", "END"), help="Activity between two ISO-8601 or relative times")
     add(transactions, "--at", help="Activity on the UTC day containing this ISO-8601 or relative time")
     add(transactions, "--today", action="store_true", help="Activity during the current UTC day")
+    add(transactions, "-T", "--local-time", action="store_true", help="Use CSMS receive time for event display, filtering, and ordering")
     add(transactions, "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
     add(transactions, "--events", action="store_true", help="Show OCPP timeline for a transaction ID")
     return transactions
 
 
 def resolve_time(value: str, *, now: datetime | None = None) -> datetime:
-    """Resolve an ISO-8601 timestamp or a compact relative duration before now."""
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
     current = current.astimezone(timezone.utc)
     match = _RELATIVE_TIME.fullmatch(value.strip())
     if match:
-        amount = float(match.group(1))
-        return current - timedelta(seconds=amount * _RELATIVE_SECONDS[match.group(2).upper()])
+        return current - timedelta(seconds=float(match.group(1)) * _RELATIVE_SECONDS[match.group(2).upper()])
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -88,7 +79,6 @@ def _time_filters(args: argparse.Namespace, *, now: datetime | None = None) -> t
 
 
 def run_transactions(args: argparse.Namespace) -> str:
-    """Inspect transaction archives using the parsed transaction command arguments."""
     if args.transaction_id is not None and args.transaction_id < 0:
         raise ValueError("transaction ID must be zero or greater")
     if args.connector is not None and args.connector < 0:
@@ -106,26 +96,19 @@ def run_transactions(args: argparse.Namespace) -> str:
         view = query.get(args.transaction_id)
         if view is None:
             return f"Transaction {args.transaction_id} not found."
-        detail = format_transaction(view)
+        detail = format_transaction(view, local_time=args.local_time)
         if not args.events:
             return detail
-        timeline = format_events(
-            transaction_events(args.data_dir, args.transaction_id),
-            heading=f"Transaction {args.transaction_id} OCPP events",
-        )
+        timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events")
         return f"{detail}\n\n{timeline}"
 
     since, until = _time_filters(args)
-    filters = {
-        "charger": args.charger,
-        "connector": args.connector,
-        "id_tag": args.id_tag,
-        "since": since,
-        "until": until,
-    }
+    filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": since, "until": until, "local_time": args.local_time}
     if args.active:
-        return format_transactions(query.active(**filters))
-    if args.last:
+        views = query.active(**filters)
+    elif args.last:
         view = query.last(**filters)
-        return format_transactions([view] if view is not None else [])
-    return format_transactions(query.list(limit=args.limit, **filters))
+        views = [view] if view is not None else []
+    else:
+        views = query.list(limit=args.limit, **filters)
+    return format_transactions(views, local_time=args.local_time)
