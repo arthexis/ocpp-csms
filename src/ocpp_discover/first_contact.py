@@ -35,10 +35,14 @@ def _run_local_syn_discovery(*, initial_evidence: str, candidate: provisional.Lo
 
     provisional.apply(candidate)
     try:
+        # The SYN that justified the provisional rule was already rejected by the host.
+        # Keep capture open for one configured reconnect window plus the ordinary TCP
+        # observation window so the charger's next retry can expose its WebSocket identity.
+        proof_seconds = max(tcp_seconds, connect_timeout + tcp_seconds)
         receipt = core.discover_existing_endpoint(
             interface=candidate.interface,
             listen_port=candidate.listen_port,
-            seconds=max(tcp_seconds, connect_timeout),
+            seconds=proof_seconds,
         )
         if receipt is None:
             raise RuntimeError("provisional_redirect_unproven")
