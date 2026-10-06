@@ -17,8 +17,29 @@ def test_discover_uses_active_immutable_csms_runtime():
     template = read(DISCOVER_TEMPLATE)
 
     assert 'ocpp_discover_python: "{{ ocpp_discover_prefix }}/current/venv/bin/python"' in defaults
+    assert 'ocpp_discover_runtime_command: "{{ ocpp_discover_prefix }}/current/venv/bin/ocpp-discover"' in defaults
     assert "{{ ocpp_discover_python }}" in template
     assert "/venv/bin/python" not in template.replace("{{ ocpp_discover_python }}", "")
+
+
+def test_discover_exposes_stable_global_operator_command():
+    defaults = read(DISCOVER_DEFAULTS)
+    tasks = read(DISCOVER_TASKS)
+    assert "ocpp_discover_command_path: /usr/local/bin/ocpp-discover" in defaults
+    assert_task_order(
+        tasks,
+        "Verify active immutable OCPP Discover command exists",
+        "Require active immutable OCPP Discover command",
+        "Install stable OCPP Discover command",
+        "Resolve stable OCPP Discover command target",
+        "Resolve active OCPP Discover release command",
+        "Assert stable OCPP Discover command target",
+        "Install OCPP Discover runtime packages",
+    )
+    install = task_section(tasks, "Install stable OCPP Discover command")
+    assert 'src: "{{ ocpp_discover_runtime_command }}"' in install
+    assert 'dest: "{{ ocpp_discover_command_path }}"' in install
+    assert "state: link" in install
 
 
 def test_discover_is_resident_restartable_service():
@@ -38,6 +59,8 @@ def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
         "Require OCPP Discover charger-facing interface",
         "Verify active immutable CSMS Python runtime exists",
         "Require active immutable CSMS Python runtime",
+        "Verify active immutable OCPP Discover command exists",
+        "Require active immutable OCPP Discover command",
         "Inspect shared OCPP CSMS data directory",
         "Require shared OCPP CSMS data directory",
         "Install OCPP Discover runtime packages",
