@@ -134,6 +134,20 @@
     enabled: true
     daemon_reload: "{{ ocpp_discover_unit_install.changed }}"
 
+- name: Restart OCPP Discover when its effective unit changes
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_discover_service_name }}"
+    state: restarted
+  when: ocpp_discover_unit_install.changed
+
+- name: Ensure unchanged OCPP Discover service is running
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_discover_service_name }}"
+    state: started
+  when: not ocpp_discover_unit_install.changed
+
 - name: Confirm OCPP Discover service is enabled
   ansible.builtin.command:
     argv:
@@ -143,3 +157,13 @@
   register: ocpp_discover_enabled
   changed_when: false
   failed_when: ocpp_discover_enabled.stdout.strip() != 'enabled'
+
+- name: Confirm OCPP Discover service is active
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ ocpp_discover_service_name }}"
+  register: ocpp_discover_active
+  changed_when: false
+  failed_when: ocpp_discover_active.stdout.strip() != 'active'
