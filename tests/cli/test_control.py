@@ -1,19 +1,11 @@
 import pytest
 
-import ocpp_csms.cli.config as config_module
 import ocpp_csms.cli.control as control_module
-from ocpp_csms.cli import build_parser
-from ocpp_csms.cli.config import configuration_request, run_configuration
 from ocpp_csms.cli.control import control_request, run_control
 
 
-def parse(*args):
-    parser, _ = build_parser()
-    return parser.parse_args(list(args))
-
-
-def test_start_command_builds_control_request_with_or_without_charger():
-    assert control_request(parse("start", "--connector", "2", "--id-tag", "REMOTE")) == {
+def test_start_command_builds_control_request_with_or_without_charger(parse_cli):
+    assert control_request(parse_cli("start", "--connector", "2", "--id-tag", "REMOTE")) == {
         "command": "start",
         "id_tag": "REMOTE",
         "connector": 2,
@@ -25,12 +17,12 @@ def test_start_command_builds_control_request_with_or_without_charger():
         "id_tag": "REMOTE",
         "connector": 2,
     }
-    assert control_request(parse("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
-    assert control_request(parse("start", "--charger", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "--charger", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
 
 
-def test_stop_command_builds_control_request_with_or_without_charger():
-    assert control_request(parse("stop", "--transaction", "42")) == {
+def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
+    assert control_request(parse_cli("stop", "--transaction", "42")) == {
         "command": "stop",
         "transaction": 42,
     }
@@ -40,87 +32,49 @@ def test_stop_command_builds_control_request_with_or_without_charger():
         "charger": "charger-a",
         "transaction": 42,
     }
-    assert control_request(parse("stop", "charger-a", "--transaction", "42")) == expected
-    assert control_request(parse("stop", "--charger", "charger-a", "--txn", "42")) == expected
+    assert control_request(parse_cli("stop", "charger-a", "--transaction", "42")) == expected
+    assert control_request(parse_cli("stop", "--charger", "charger-a", "--txn", "42")) == expected
 
 
-def test_reboot_defaults_to_soft_and_supports_explicit_charger():
-    assert control_request(parse("reboot")) == {"command": "reboot", "type": "Soft"}
-    assert control_request(parse("reboot", "--hard")) == {"command": "reboot", "type": "Hard"}
-    assert control_request(parse("reboot", "--charger", "charger-a")) == {
+def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
+    assert control_request(parse_cli("reboot")) == {"command": "reboot", "type": "Soft"}
+    assert control_request(parse_cli("reboot", "--hard")) == {"command": "reboot", "type": "Hard"}
+    assert control_request(parse_cli("reboot", "--charger", "charger-a")) == {
         "command": "reboot",
         "charger": "charger-a",
         "type": "Soft",
     }
 
 
-def test_control_rejects_two_charger_selectors():
+def test_control_rejects_two_charger_selectors(parse_cli):
     with pytest.raises(ValueError):
-        control_request(parse("reboot", "charger-a", "--charger", "charger-b"))
+        control_request(parse_cli("reboot", "charger-a", "--charger", "charger-b"))
 
 
-@pytest.mark.parametrize(
-    ("argv", "expected_charger", "expected_keys", "expected_force"),
-    [
-        (("config",), None, None, False),
-        (("config", "HeartbeatInterval", "GetConfigurationMaxKeys"), None, ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
-        (("config", "-f"), None, None, True),
-        (("config", "--charger", "charger-a"), "charger-a", None, False),
-        (("config", "--charger", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"], False),
-        (("config", "HeartbeatInterval", "--force"), None, ["HeartbeatInterval"], True),
-    ],
-)
-def test_config_request_preserves_selector_keys_and_force(argv, expected_charger, expected_keys, expected_force):
-    request = configuration_request(parse(*argv))
-    assert request["command"] == "config"
-    assert request.get("charger") == expected_charger
-    assert request["force"] is expected_force
-    assert request.get("keys") == expected_keys
-
-
-def test_legacy_config_positional_charger_is_forwarded_for_daemon_compatibility():
-    request = configuration_request(parse("config", "charger-a", "HeartbeatInterval"))
-    assert "charger" not in request
-    assert request["keys"] == ["charger-a", "HeartbeatInterval"]
-
-
-def install_control_response(monkeypatch, response=None, exc=None, *, module=control_module):
+def install_control_response(monkeypatch, response=None, exc=None):
     async def fake_send(data_dir, request):
         assert data_dir
         if exc is not None:
             raise exc
         return response
 
-    monkeypatch.setattr(module, "send_control", fake_send)
+    monkeypatch.setattr(control_module, "send_control", fake_send)
 
 
 @pytest.mark.parametrize(("status", "expected_code"), [("Accepted", 0), ("Rejected", 1)])
-def test_command_status_controls_exit_code(monkeypatch, status, expected_code):
+def test_command_status_controls_exit_code(monkeypatch, parse_cli, status, expected_code):
     install_control_response(monkeypatch, {"ok": True, "response": {"status": status}})
-    assert run_control(parse("reboot")) == expected_code
+    assert run_control(parse_cli("reboot")) == expected_code
 
 
-def test_control_error_returns_one(monkeypatch):
+def test_control_error_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"error": "charger_required", "chargers": ["charger-a", "charger-b"]})
-    assert run_control(parse("reboot")) == 1
+    assert run_control(parse_cli("reboot")) == 1
 
 
-def test_missing_control_socket_returns_one(monkeypatch):
+def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
-    assert run_control(parse("reboot")) == 1
-
-
-@pytest.mark.parametrize(
-    ("response", "expected_code"),
-    [
-        ({"ok": True, "response": {"configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "300"}], "unknown_key": ["VendorThing"]}}, 0),
-        ({"error": "active_transaction", "charger": "charger-a", "transactions": [17]}, 1),
-        ({"ok": True, "response": {"configuration_key": "bad"}}, 1),
-    ],
-)
-def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
-    install_control_response(monkeypatch, response, module=config_module)
-    assert run_configuration(parse("config", "HeartbeatInterval")) == expected_code
+    assert run_control(parse_cli("reboot")) == 1
 
 
 @pytest.mark.parametrize(
@@ -132,6 +86,6 @@ def test_configuration_result_controls_exit_code(monkeypatch, response, expected
         ("stop", "--txn", "-1"),
     ],
 )
-def test_negative_selectors_are_rejected_before_socket_call(args):
+def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
     with pytest.raises(ValueError):
-        run_control(parse(*args))
+        run_control(parse_cli(*args))
