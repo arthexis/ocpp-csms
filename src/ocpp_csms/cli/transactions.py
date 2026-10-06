@@ -21,7 +21,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     selection = transactions.add_mutually_exclusive_group()
     selection.add_argument("--active", action="store_true", help="Show only active transactions")
     selection.add_argument("--last", action="store_true", help="Show the most recent non-active transaction")
-    add(transactions, "--charger", help="Filter by charge point ID")
+    add(transactions, "-c", "--charger", help="Filter by charge point ID")
     add(transactions, "--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
     add(transactions, "--id-tag", help="Filter by OCPP idTag")
     add(transactions, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 7D)")
@@ -30,7 +30,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     add(transactions, "--at", help="Activity on the UTC day containing this ISO-8601 or relative time")
     add(transactions, "--today", action="store_true", help="Activity during the current UTC day")
     add(transactions, "-T", "--local-time", action="store_true", help="Use CSMS receive time for event display, filtering, and ordering")
-    add(transactions, "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
+    add(transactions, "-n", "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
     add(transactions, "--events", action="store_true", help="Show OCPP timeline for a transaction ID")
     return transactions
 
