@@ -4,6 +4,7 @@ import argparse
 
 from ocpp_csms.cli.config import add_config_command
 from ocpp_csms.cli.control import add_control_commands
+from ocpp_csms.cli.profile import add_profile_command
 from ocpp_csms.cli.transactions import add_transaction_parser
 
 
@@ -14,4 +15,4 @@ def add_transaction_command(
     return add_transaction_parser(subcommands)
 
 
-__all__ = ["add_config_command", "add_control_commands", "add_transaction_command"]
+__all__ = ["add_config_command", "add_control_commands", "add_profile_command", "add_transaction_command"]
