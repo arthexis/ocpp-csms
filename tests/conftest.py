@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 import ocpp_csms.cli.profile as profile_cli
-from ocpp_csms.app import build_parser
+from ocpp_csms.cli import build_parser
 from ocpp_csms.schema import DATABASE_FILENAME
 
 
