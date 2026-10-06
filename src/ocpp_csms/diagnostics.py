@@ -23,6 +23,7 @@ def events_between(
     data_dir: str | Path,
     *,
     charger_id: str | None = None,
+    transaction_id: int | None = None,
     since: str | None = None,
     until: str | None = None,
     limit: int = 200,
@@ -42,20 +43,31 @@ def events_between(
         rows = connection.execute(
             """
             SELECT * FROM (
-                SELECT received_at AS occurred_at, charger_id, 'ocpp' AS kind,
+                SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
                        action, direction, transaction_id, id_tag, payload_json AS payload
                 FROM events
                 UNION ALL
-                SELECT occurred_at, charger_id, 'runtime', event, NULL, NULL, NULL, details_json
+                SELECT id, occurred_at, charger_id, 'runtime', event, NULL, NULL, NULL, details_json
                 FROM runtime_events
             )
             WHERE (? IS NULL OR charger_id = ?)
+              AND (? IS NULL OR transaction_id = ?)
               AND (? IS NULL OR occurred_at >= ?)
               AND (? IS NULL OR occurred_at <= ?)
-            ORDER BY occurred_at DESC
+            ORDER BY occurred_at DESC, id DESC
             LIMIT ?
             """,
-            (charger_id, charger_id, since, since, until, until, limit),
+            (
+                charger_id,
+                charger_id,
+                transaction_id,
+                transaction_id,
+                since,
+                since,
+                until,
+                until,
+                limit,
+            ),
         ).fetchall()
     finally:
         connection.close()
@@ -79,7 +91,7 @@ def transaction_events(
     try:
         return connection.execute(
             """
-            SELECT received_at AS occurred_at, charger_id, 'ocpp' AS kind,
+            SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
                    action, direction, transaction_id, id_tag, payload_json AS payload
             FROM events
             WHERE transaction_id = ?
