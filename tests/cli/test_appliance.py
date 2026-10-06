@@ -1,11 +1,12 @@
 from ocpp_csms.cli.appliance import run_appliance
+from ocpp_csms.schema import DATABASE_FILENAME
 
 
 def test_init_runs_through_cli_module(cli_parser, tmp_path):
     args = cli_parser.parse_args(["--data-dir", str(tmp_path), "init"])
 
     assert run_appliance(args) == 0
-    assert (tmp_path / "ocpp_csms.db").exists()
+    assert (tmp_path / DATABASE_FILENAME).exists()
     assert (tmp_path / "transactions").is_dir()
 
 
