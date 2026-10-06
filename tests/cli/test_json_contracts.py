@@ -113,4 +113,4 @@ def test_transaction_json_local_time_controls_filter_and_event_times(tmp_path, c
     [transaction] = payload["data"]["transactions"]
     assert transaction["started_at"] == "2026-10-06T12:00:00Z"
     assert transaction["stopped_at"] == "2026-10-06T12:10:00Z"
-    assert transaction["last_activity_at"] == "2026-10-06T12:10:00+00:00"
+    assert transaction["last_activity_at"] == "2026-10-06T12:10:00Z"
