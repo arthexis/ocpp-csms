@@ -13,7 +13,8 @@ class RuntimeEvents:
 
 
 class WebSocket:
-    def __init__(self):
+    def __init__(self, path="/charger-a"):
+        self.path = path
         self.subprotocol = OCPP_16_SUBPROTOCOL
         self.closed = asyncio.Event()
 
@@ -33,7 +34,7 @@ async def test_server_exposes_current_session_and_preserves_replacement(monkeypa
     first = WebSocket()
     second = WebSocket()
 
-    first_task = asyncio.create_task(server.accept(first, "/charger-a"))
+    first_task = asyncio.create_task(server.accept(first))
     await asyncio.sleep(0)
     first_session = server.session("charger-a")
 
@@ -41,7 +42,7 @@ async def test_server_exposes_current_session_and_preserves_replacement(monkeypa
     assert first_session.charge_point_id == "charger-a"
     assert server.session("missing") is None
 
-    second_task = asyncio.create_task(server.accept(second, "/charger-a"))
+    second_task = asyncio.create_task(server.accept(second))
     await asyncio.sleep(0)
     second_session = server.session("charger-a")
 

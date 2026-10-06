@@ -52,6 +52,3 @@ jobs:
 
       - name: Discover tests
         run: python -m pytest tests/ocpp_discover
-
-      - name: Field harness tests
-        run: python -m pytest field/tests

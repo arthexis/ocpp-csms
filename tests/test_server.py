@@ -16,7 +16,8 @@ class RuntimeEvents:
 
 
 class WebSocket:
-    def __init__(self, subprotocol=OCPP_16_SUBPROTOCOL):
+    def __init__(self, path="/", subprotocol=OCPP_16_SUBPROTOCOL):
+        self.path = path
         self.subprotocol = subprotocol
         self.closed = asyncio.Event()
 
@@ -53,14 +54,14 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     install_waiting_session(monkeypatch, started, sessions)
     events = RuntimeEvents()
     server = make_server(events)
-    first = WebSocket()
-    second = WebSocket()
+    first = WebSocket(path="/charger-a")
+    second = WebSocket(path="/charger-a")
 
-    first_task = asyncio.create_task(server.accept(first, "/charger-a"))
+    first_task = asyncio.create_task(server.accept(first))
     await asyncio.sleep(0)
     assert server.session("charger-a") is sessions[0]
 
-    second_task = asyncio.create_task(server.accept(second, "/charger-a"))
+    second_task = asyncio.create_task(server.accept(second))
     await asyncio.sleep(0)
 
     assert started == ["charger-a", "charger-a"]
@@ -98,9 +99,9 @@ async def test_connection_records_path_identity_and_subprotocol(monkeypatch, sub
     install_waiting_session(monkeypatch)
     events = RuntimeEvents()
     server = make_server(events)
-    websocket = WebSocket(subprotocol=subprotocol)
+    websocket = WebSocket(path="/ocpp/charger-a?source=test", subprotocol=subprotocol)
 
-    task = asyncio.create_task(server.accept(websocket, "/ocpp/charger-a?source=test"))
+    task = asyncio.create_task(server.accept(websocket))
     await asyncio.sleep(0)
 
     assert events.rows[0] == (
