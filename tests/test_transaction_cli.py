@@ -1,26 +1,12 @@
-import argparse
-
 import pytest
 
 from ocpp_csms.app import build_parser
-from ocpp_csms.transaction_command import add_transaction_parser, run_transactions
+from ocpp_csms.cli.transactions import run_transactions
 
 
 def parse(*argv: str):
     parser, _ = build_parser()
     return parser.parse_args(list(argv))
-
-
-def test_extracted_transaction_parser_preserves_command_shape():
-    parser = argparse.ArgumentParser()
-    subcommands = parser.add_subparsers(dest="command")
-    transaction_parser = add_transaction_parser(subcommands)
-
-    assert transaction_parser is not None
-    args = parser.parse_args(["txn", "--active", "--cp", "2"])
-    assert args.command == "transactions"
-    assert args.active is True
-    assert args.connector == 2
 
 
 def test_txn_alias_normalizes_to_transactions_command():
