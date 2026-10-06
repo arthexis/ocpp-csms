@@ -20,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-ocpp-csms = "ocpp_csms.app:main"
+ocpp-csms = "ocpp_csms.cli:main"
 ocpp-discover = "ocpp_discover.__main__:main"
 
 [tool.hatch.build.targets.wheel]
