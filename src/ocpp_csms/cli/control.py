@@ -17,18 +17,18 @@ def add_control_commands(
 
     start = subcommands.add_parser("start", help="Request remote transaction start")
     add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(start, "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(start, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
     add(start, "--connector", "--cp", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
     add(stop, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(stop, "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(stop, "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
+    add(stop, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(stop, "-t", "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
 
     reboot = subcommands.add_parser("reboot", help="Request charger reset")
     add(reboot, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(reboot, "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(reboot, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
     add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
     return {"start": start, "stop": stop, "reboot": reboot}
