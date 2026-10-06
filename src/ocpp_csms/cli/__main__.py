@@ -1,6 +1,6 @@
-"""Module entry point for the CLI package during migration."""
+"""Module entry point for ``python -m ocpp_csms.cli``."""
 
-from ocpp_csms.app import main
+from ocpp_csms.cli import main
 
 
 if __name__ == "__main__":
