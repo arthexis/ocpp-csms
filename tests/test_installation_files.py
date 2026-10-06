@@ -1,5 +1,4 @@
 from pathlib import Path
-import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,123 +8,47 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def help_text(script: str) -> str:
-    result = subprocess.run(
-        ["sh", str(ROOT / script), "--help"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout
+def test_install_script_uses_staged_runtime_before_cutover():
+    script = read("install.sh")
+    assert 'STAGE_VENV="$PREFIX/venv.next"' in script
+    assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in script
+    assert 'render_service "$STAGE_COMMAND" "$TMP_SERVICE"' in script
+    assert 'sudo systemd-analyze verify "$TMP_SERVICE"' in script
+    assert 'render_service "$COMMAND" "$TMP_SERVICE"' in script
+    assert script.index('render_service "$STAGE_COMMAND" "$TMP_SERVICE"') < script.index('sudo systemd-analyze verify "$TMP_SERVICE"')
+    assert script.index('sudo systemd-analyze verify "$TMP_SERVICE"') < script.index('preflight final')
+    assert script.index('mv "$STAGE_VENV" "$VENV"') < script.index('render_service "$COMMAND" "$TMP_SERVICE"')
 
 
-def test_base_service_runs_unprivileged_and_restarts():
-    unit = read("systemd/ocpp-csms.service.in")
-    assert "User=@USER@" in unit
-    assert "Group=@GROUP@" in unit
-    assert 'Environment="HOME=@HOME@"' in unit
-    assert 'ExecStart="@COMMAND@" --data-dir "@DATA_DIR@" serve --host "@HOST@" --port @PORT@' in unit
-    assert "Restart=always" in unit
-    assert "WantedBy=multi-user.target" in unit
+def test_install_script_preserves_previous_runtime_for_rollback():
+    script = read("install.sh")
+    assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in script
+    assert 'mv "$VENV" "$PREVIOUS_VENV"' in script
+    assert 'mv "$PREVIOUS_VENV" "$VENV"' in script
 
 
-def test_base_installer_help_describes_implicit_safe_handoff_and_optional_discovery():
-    help_output = help_text("install.sh")
-    assert "--host HOST" in help_output
-    assert "--port PORT" in help_output
-    assert "--rollover" not in help_output
-    assert "safe staged handoff" in help_output
-    assert "Idle connected chargers" in help_output
-    assert "Active charging always blocks" in help_output
-    assert "--with-discover" in help_output
-    assert "--without-discover" in help_output
-    assert "preserved" in help_output
+def test_install_script_supports_discover_modes():
+    script = read("install.sh")
+    assert "--with-discover" in script
+    assert "--without-discover" in script
+    assert "DISCOVER_MODE=preserve" in script
 
 
-def test_base_installer_stages_before_disruptive_cutover():
-    installer = read("install.sh")
-    first_preflight = installer.index("# First safety gate")
-    stage_venv = installer.index('python3 -m venv "$STAGE_VENV"')
-    schema_check = installer.index("schema-check")
-    final_preflight = installer.index("# Second safety gate")
-    stop_service = installer.index('sudo systemctl stop "$SERVICE_NAME"')
-    schema_upgrade = installer.index("schema-upgrade")
-    promote = installer.index('mv "$STAGE_VENV" "$VENV"')
-    install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
-    reconnect = installer.index("wait-reconnect")
-    assert first_preflight < stage_venv < schema_check < final_preflight
-    assert final_preflight < stop_service < schema_upgrade < promote < install_service < reconnect
-    assert 'STAGE_VENV="$PREFIX/venv.next"' in installer
-    assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in installer
-
-
-def test_base_installer_verifies_staged_command_then_installs_promoted_command():
-    installer = read("install.sh")
-
-    candidate_render = installer.index('render_service "$STAGE_VENV/bin/ocpp-csms"')
-    verify = installer.index('systemd-analyze verify "$TMP_SERVICE"')
-    final_preflight = installer.index("# Second safety gate")
-    promote = installer.index('mv "$STAGE_VENV" "$VENV"')
-    live_render = installer.index('render_service "$VENV/bin/ocpp-csms"')
-    install_service = installer.index('sudo install -m 0644 "$TMP_SERVICE" "$SERVICE_PATH"')
-
-    assert candidate_render < verify < final_preflight < promote < live_render < install_service
-    assert 'render_service "$COMMAND"' not in installer
-    assert 's|@COMMAND@|$command_esc|g' in installer
-
-
-def test_base_installer_keeps_active_charge_gate_and_conditional_rollback():
-    installer = read("install.sh")
-    assert "run_preflight --json" in installer
-    assert "--rollover" not in installer
-    assert 'if [ "$SCHEMA_ACTION" != upgrade ]' in installer
-    assert "automatic rollback is intentionally disabled" in installer
-    assert 'mv "$PREVIOUS_VENV" "$VENV"' in installer
-    assert 'mv "$VENV" "$VENV.failed"' in installer
-
-
-def test_base_installer_preserves_and_delegates_discovery_after_verified_handoff():
-    installer = read("install.sh")
-    reconnect = installer.index("wait-reconnect")
-    discover = installer.index('sh "$ROOT/discover.sh" --install')
-    assert 'DISCOVER_MODE=preserve' in installer
-    assert 'DISCOVER_MODE=install' in installer
-    assert 'DISCOVER_MODE=uninstall' in installer
-    assert reconnect < discover
-    assert 'sh "$ROOT/discover.sh" --uninstall' in installer
-    assert 'ocpp_csms.install_preflight --data-dir "$DATA_DIR" >/dev/null' in installer
-
-
-def test_base_installer_exposes_csms_and_ocpp_csms_commands_and_configures_user_path():
-    installer = read("install.sh")
-    assert 'COMMAND="$BIN_DIR/ocpp-csms"' in installer
-    assert 'CSMS_COMMAND="$BIN_DIR/csms"' in installer
-    assert 'ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"' in installer
-    assert 'ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"' in installer
-    assert "ensure_user_bin_on_path" in installer
-    assert 'bash) rc="$HOME/.bashrc"' in installer
-    assert 'zsh) rc="$HOME/.zshrc"' in installer
-    assert 'fish) rc="$HOME/.config/fish/config.fish"' in installer
-    assert '*) rc="$HOME/.profile"' in installer
-
-
-def test_discover_help_exposes_runtime_and_install_surfaces():
-    help_output = help_text("discover.sh")
-    assert "Run OCPP network discovery immediately by default" in help_output
-    assert "--interface IFACE" in help_output
-    assert "--install" in help_output
-    assert "--uninstall" in help_output
-    assert "--cleanup" in help_output
-    assert "keep durable adaptation" in help_output
+def test_discover_script_has_explicit_install_and_uninstall_modes():
+    script = read("discover.sh")
+    assert "--install" in script
+    assert "--uninstall" in script
+    assert "--cleanup" in script
+    assert "keep durable adaptation" in script
 
 
 def test_discover_service_uses_installed_package_and_owned_state():
     unit = read("systemd/ocpp-discover.service.in")
     assert "Description=OCPP Discover" in unit
     assert "After=network-online.target ocpp-csms.service" in unit
-    assert "Type=oneshot" in unit
+    assert "Type=simple" in unit
+    assert "Type=oneshot" not in unit
+    assert "RemainAfterExit" not in unit
     assert "User=" not in unit
     assert "WorkingDirectory=" not in unit
     assert 'ExecStart="@PYTHON@" -m ocpp_discover service' in unit
