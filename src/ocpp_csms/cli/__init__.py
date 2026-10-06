@@ -12,6 +12,7 @@ import sys
 
 from ocpp_csms import app
 from ocpp_csms.cli.config import add_config_download_arguments, is_config_download, run_config_download
+from ocpp_csms.cli.control import CONTROL_COMMANDS, control_request, run_control
 from ocpp_csms.cli.transactions import add_transaction_parser, run_transactions
 
 
@@ -25,6 +26,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 def main() -> int:
     parser, _ = build_parser()
     args = parser.parse_args(sys.argv[1:])
+    if args.command in CONTROL_COMMANDS:
+        try:
+            return run_control(args)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.command == "config" and is_config_download(args):
         return run_config_download(args)
     # Command families not yet migrated still use app.main(), which preserves
@@ -35,7 +41,9 @@ def main() -> int:
 __all__ = [
     "add_transaction_parser",
     "build_parser",
+    "control_request",
     "main",
     "run_config_download",
+    "run_control",
     "run_transactions",
 ]
