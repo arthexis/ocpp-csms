@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 import pytest
 
@@ -17,21 +18,24 @@ def test_cp_alias_matches_connector_filter(parse_cli):
     assert parse_cli("transactions", "--connector", "2").connector == 2
 
 
+def test_local_time_long_and_short_flags_match(parse_cli):
+    assert parse_cli("txn", "-T").local_time is True
+    assert parse_cli("transactions", "--local-time").local_time is True
+
+
 def test_active_and_last_are_mutually_exclusive(cli_parser):
     with pytest.raises(SystemExit):
         cli_parser.parse_args(["txn", "--active", "--last"])
 
 
 def test_events_requires_transaction_id(parse_cli, tmp_path):
-    args = parse_cli("--data-dir", str(tmp_path), "txn", "--events")
     with pytest.raises(ValueError):
-        run_transactions(args)
+        run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "--events"))
 
 
 def test_transaction_id_rejects_list_selectors(parse_cli, tmp_path):
-    args = parse_cli("--data-dir", str(tmp_path), "txn", "1", "--active")
     with pytest.raises(ValueError):
-        run_transactions(args)
+        run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "1", "--active"))
 
 
 def test_invalid_limit_and_connector_are_rejected(parse_cli, tmp_path):
@@ -41,10 +45,7 @@ def test_invalid_limit_and_connector_are_rejected(parse_cli, tmp_path):
         run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "--cp", "-1"))
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [("30S", 30), ("5m", 300), ("2H", 7200), ("7D", 604800), ("2w", 1209600)],
-)
+@pytest.mark.parametrize(("value", "expected"), [("30S", 30), ("5m", 300), ("2H", 7200), ("7D", 604800), ("2w", 1209600)])
 def test_relative_times_are_case_insensitive(value, expected):
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
     assert (now - resolve_time(value, now=now)).total_seconds() == expected
@@ -52,8 +53,7 @@ def test_relative_times_are_case_insensitive(value, expected):
 
 def test_between_accepts_relative_and_iso_bounds(parse_cli):
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
-    args = parse_cli("txn", "--between", "7D", "2026-10-06T11:00:00Z")
-    since, until = _time_filters(args, now=now)
+    since, until = _time_filters(parse_cli("txn", "--between", "7D", "2026-10-06T11:00:00Z"), now=now)
     assert since == datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
     assert until == datetime(2026, 10, 6, 11, 0, tzinfo=timezone.utc)
 
@@ -78,3 +78,22 @@ def test_date_shortcuts_reject_conflicts_and_reversed_bounds(parse_cli):
         _time_filters(parse_cli("txn", "--today", "--since", "7D"))
     with pytest.raises(ValueError):
         _time_filters(parse_cli("txn", "--between", "2026-10-06T12:00:00Z", "2026-10-05T12:00:00Z"))
+
+
+def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_path):
+    directory = tmp_path / "transactions" / "2026-10-06"
+    directory.mkdir(parents=True)
+    record = {
+        "transaction_id": 1, "origin": "local", "charge_point_id": "charger-a", "status": "stopped",
+        "created_at": "2026-10-06T12:00:00Z", "updated_at": "2026-10-06T12:10:00Z",
+        "start": {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"}, "start_received_at": "2026-10-06T12:00:00Z",
+        "meter_values": [], "meter_values_received_at": [],
+        "stop": {"transaction_id": 1, "timestamp": "2020-01-01T00:10:00Z"}, "stop_received_at": "2026-10-06T12:10:00Z",
+    }
+    (directory / "charger-a-1.json").write_text(json.dumps(record))
+
+    default_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn"))
+    local_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "-T", "--since", "2026-10-06T12:05:00Z"))
+    assert "EVENT TIME" in default_output
+    assert "2020-01-01T00:10:00Z" in default_output
+    assert "2026-10-06T12:10:00Z" in local_output
