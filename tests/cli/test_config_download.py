@@ -1,0 +1,94 @@
+import json
+
+import ocpp_csms.cli as cli
+import ocpp_csms.cli.config as config_cli
+
+
+def install_control_response(monkeypatch, response):
+    async def fake_send(data_dir, request):
+        assert data_dir
+        install_control_response.request = request
+        return response
+
+    monkeypatch.setattr(config_cli, "send_control", fake_send)
+
+
+def test_download_uses_full_guarded_configuration_query(monkeypatch, parse_cli):
+    install_control_response(
+        monkeypatch,
+        {
+            "ok": True,
+            "response": {
+                "configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "60"}],
+                "unknown_key": [],
+            },
+        },
+    )
+    monkeypatch.setattr(config_cli, "_connected_charger", lambda data_dir: "charger-a")
+
+    assert cli.run_config_download(parse_cli("config", "download")) == 0
+    assert install_control_response.request == {"command": "config", "force": False}
+
+
+def test_download_forwards_explicit_charger_and_force(monkeypatch, parse_cli):
+    install_control_response(monkeypatch, {"ok": True, "response": {"configuration_key": [], "unknown_key": []}})
+
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--force")) == 0
+    assert install_control_response.request == {"command": "config", "force": True, "charger": "charger-a"}
+
+
+def test_download_reports_active_transaction_guard(monkeypatch, parse_cli, capsys):
+    install_control_response(monkeypatch, {"error": "active_transaction", "charger": "charger-a", "transactions": [17]})
+
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a")) == 1
+    assert "active_transaction" in capsys.readouterr().out
+
+
+def test_download_writes_masked_json_snapshot(monkeypatch, parse_cli, tmp_path):
+    install_control_response(
+        monkeypatch,
+        {
+            "ok": True,
+            "response": {
+                "configuration_key": [{"key": "AuthorizationKey", "readonly": True, "value": "secret"}],
+                "unknown_key": [],
+            },
+        },
+    )
+    output = tmp_path / "configuration.json"
+
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--output", str(output))) == 0
+    snapshot = json.loads(output.read_text())
+    assert snapshot["charger"] == "charger-a"
+    assert snapshot["configuration"][0] == {"key": "AuthorizationKey", "readonly": True, "value": "[REDACTED]"}
+
+
+def test_download_show_sensitive_is_explicit(monkeypatch, parse_cli, tmp_path):
+    install_control_response(
+        monkeypatch,
+        {
+            "ok": True,
+            "response": {
+                "configuration_key": [{"key": "AuthorizationKey", "readonly": False, "value": "secret"}],
+                "unknown_key": [],
+            },
+        },
+    )
+    output = tmp_path / "configuration.json"
+
+    assert cli.run_config_download(
+        parse_cli("config", "download", "charger-a", "--show-sensitive", "--output", str(output))
+    ) == 0
+    assert json.loads(output.read_text())["configuration"][0]["value"] == "secret"
+
+
+def test_download_rejects_duplicate_charger_selectors(parse_cli):
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--charger", "charger-b")) == 2
+
+
+def test_download_is_recognized_by_unified_cli_parser(parse_cli):
+    args = parse_cli("config", "download", "charger-a", "--json")
+    assert args.command == "config"
+    assert config_cli.is_config_download(args)
+    assert args.items == ["download", "charger-a"]
+    assert args.json is True
