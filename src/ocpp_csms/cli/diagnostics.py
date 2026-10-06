@@ -41,32 +41,13 @@ def run_status(args: argparse.Namespace) -> int:
 
 
 def run_events(args: argparse.Namespace) -> int:
-    if args.limit < 1:
-        raise ValueError("--limit must be at least 1")
-    rows = events_between(
-        args.data_dir,
-        charger_id=args.charger,
-        since=args.since,
-        until=args.until,
-        limit=args.limit,
-    )
+    rows = events_between(args.data_dir, charger_id=args.charger, since=args.since, until=args.until, limit=args.limit)
     print(format_events(rows))
     return 0
 
 
 def run_explain(args: argparse.Namespace) -> int:
-    if args.minutes < 0:
-        raise ValueError("--minutes must be zero or greater")
-    print(
-        explain(
-            args.data_dir,
-            args.charger,
-            at=args.at,
-            since=args.since,
-            until=args.until,
-            minutes=args.minutes,
-        )
-    )
+    print(explain(args.data_dir, args.charger, at=args.at, since=args.since, until=args.until, minutes=args.minutes))
     return 0
 
 
