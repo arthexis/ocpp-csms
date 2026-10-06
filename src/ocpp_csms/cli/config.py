@@ -26,7 +26,7 @@ def add_config_command(
 def add_config_download_arguments(config: argparse.ArgumentParser) -> None:
     """Add options used by the ``config download`` command."""
     config.add_argument("--show-sensitive", action="store_true", help="Do not mask sensitive configuration values")
-    config.add_argument("--json", action="store_true", help="Print a downloaded snapshot as JSON")
+    config.add_argument("-j", "--json", action="store_true", help="Print a downloaded snapshot as JSON")
     config.add_argument("--output", help="Write a downloaded JSON snapshot to this file")
 
 
