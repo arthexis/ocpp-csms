@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from .helpers import ANSIBLE, PLAYBOOK, assert_task_order, read, task_section
 
 
@@ -23,18 +21,59 @@ def test_discover_uses_active_immutable_csms_runtime():
     assert "/venv/bin/python" not in template.replace("{{ ocpp_discover_python }}", "")
 
 
+def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
+    tasks = read(DISCOVER_TASKS)
+    assert_task_order(
+        tasks,
+        "Inspect OCPP Discover charger-facing interface",
+        "Require OCPP Discover charger-facing interface",
+        "Verify active immutable CSMS Python runtime exists",
+        "Require active immutable CSMS Python runtime",
+        "Inspect shared OCPP CSMS data directory",
+        "Require shared OCPP CSMS data directory",
+        "Install OCPP Discover runtime packages",
+    )
+
+    interface = task_section(tasks, "Inspect OCPP Discover charger-facing interface")
+    assert "/sys/class/net/{{ ocpp_discover_interface }}" in interface
+
+
 def test_discover_installs_static_host_integration_before_unit_enablement():
     tasks = read(DISCOVER_TASKS)
     assert_task_order(
         tasks,
         "Install OCPP Discover runtime packages",
+        "Ensure OCPP Discover persistent state directory exists",
         "Prepare OCPP Discover persistent integration",
+        "Validate OCPP Discover persistent integration result",
         "Enable nftables service for future boots",
         "Render candidate OCPP Discover systemd unit",
         "Verify candidate OCPP Discover systemd unit",
         "Install live OCPP Discover systemd unit",
         "Enable OCPP Discover at boot",
     )
+
+
+def test_discover_persistent_directory_is_static_root_owned_state():
+    section = task_section(
+        read(DISCOVER_TASKS), "Ensure OCPP Discover persistent state directory exists"
+    )
+    assert 'path: "{{ ocpp_discover_persistent_dir }}"' in section
+    assert "owner: root" in section
+    assert "group: root" in section
+    assert 'mode: "0755"' in section
+
+
+def test_discover_lifecycle_reports_real_ansible_change_state():
+    section = task_section(
+        read(DISCOVER_TASKS), "Prepare OCPP Discover persistent integration"
+    )
+    assert "--persistent-dir" in section
+    assert "--json" in section
+    assert "register: ocpp_discover_prepare" in section
+    assert "from_json" in section
+    assert ".changed | bool" in section
+    assert "changed_when: false" not in section
 
 
 def test_nftables_is_enabled_without_runtime_restart_or_flush():
