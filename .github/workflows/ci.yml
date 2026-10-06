@@ -30,14 +30,25 @@ jobs:
       - name: Install Ansible validation tools
         run: python -m pip install ansible-core ansible-lint
 
+      - name: Appliance script syntax
+        run: sh -n install.sh ansible-deploy.sh
+
+      - name: Installed command smoke
+        run: |
+          ocpp-csms --help >/dev/null
+          ocpp-discover --help >/dev/null
+
       - name: Ansible syntax check
         run: ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
 
       - name: Ansible lint
         run: ansible-lint --profile basic ansible/
 
+      - name: Ansible contract tests
+        run: python -m pytest tests/ansible
+
       - name: CSMS tests
-        run: python -m pytest tests --ignore=tests/ocpp_discover
+        run: python -m pytest tests --ignore=tests/ocpp_discover --ignore=tests/ansible
 
       - name: Discover tests
         run: python -m pytest tests/ocpp_discover
