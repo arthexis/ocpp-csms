@@ -96,8 +96,8 @@ def _archive_time(record: dict[str, Any]) -> datetime:
 
 
 def _received_activity_at(record: dict[str, Any]) -> datetime:
-    """Newest CSMS receive time, falling back for pre-receive-time archives."""
-    candidates: list[datetime] = []
+    """Newest CSMS receive evidence, including legacy archive timestamps."""
+    candidates: list[datetime] = [_archive_time(record)]
     for field in ("start_received_at", "stop_received_at"):
         parsed = _parse_time(record.get(field))
         if parsed is not None:
@@ -108,7 +108,7 @@ def _received_activity_at(record: dict[str, Any]) -> datetime:
             parsed = _parse_time(value)
             if parsed is not None:
                 candidates.append(parsed)
-    return max(candidates) if candidates else _archive_time(record)
+    return max(candidates)
 
 
 @dataclass(frozen=True)
