@@ -10,14 +10,14 @@ from ocpp_csms.cli.config import add_config_command, configuration_request, is_c
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
 from ocpp_csms.cli.profile import add_profile_command, run_profile
-from ocpp_csms.cli.transactions import add_transaction_parser, run_transactions
+from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions import default_data_dir
 
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     """Build the complete command-line parser from explicit command modules."""
     parser = argparse.ArgumentParser(prog="ocpp-csms", description="Small OCPP 1.6J CSMS appliance.")
-    parser.add_argument("--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s)")
+    parser.add_argument("--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s")
     subcommands = parser.add_subparsers(dest="command")
 
     commands: dict[str, argparse.ArgumentParser] = {}
@@ -27,8 +27,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["profile"] = add_profile_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
-    commands["transactions"] = transactions
-    commands["txn"] = transactions
+    for name in TRANSACTION_COMMANDS:
+        commands[name] = transactions
 
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
     topics = tuple(commands)
