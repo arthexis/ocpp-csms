@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 
 from ocpp_csms.control import send_control
+from ocpp_csms.output import emit_json
 from ocpp_csms.profile_templates import (
     build_profile,
     format_profile_template_help,
@@ -183,7 +183,7 @@ def run_profile(args: argparse.Namespace) -> int:
         if code or payload is None:
             return 1
         if args.json:
-            print(json.dumps(payload, sort_keys=True))
+            emit_json(payload)
         else:
             try:
                 print(_format_composite_schedule(payload))
