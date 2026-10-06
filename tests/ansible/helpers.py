@@ -27,8 +27,26 @@ def named_tasks(path: Path) -> list[dict]:
     return [task for task in tasks if isinstance(task, dict) and "name" in task]
 
 
+def all_named_tasks(path: Path) -> list[dict]:
+    found: list[dict] = []
+
+    def visit(tasks) -> None:
+        if not isinstance(tasks, list):
+            return
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if "name" in task:
+                found.append(task)
+            for section in ("block", "rescue", "always"):
+                visit(task.get(section))
+
+    visit(load_yaml(path))
+    return found
+
+
 def task_by_name(path: Path, name: str) -> dict:
-    matches = [task for task in named_tasks(path) if task.get("name") == name]
+    matches = [task for task in all_named_tasks(path) if task.get("name") == name]
     assert len(matches) == 1, f"expected one Ansible task named {name!r}, found {len(matches)}"
     return matches[0]
 
@@ -65,12 +83,3 @@ def task_section(text: str, name: str) -> str:
 def assert_task_order(text: str, *names: str) -> None:
     positions = [task_position(text, name) for name in names]
     assert positions == sorted(positions), f"unexpected task order: {names}"
-
-
-def role_text() -> str:
-    """Return only the implemented CSMS role, excluding future role scaffolds."""
-    return "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in ROLE.rglob("*")
-        if path.is_file()
-    )
