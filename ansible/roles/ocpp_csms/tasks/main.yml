@@ -131,8 +131,6 @@
     virtualenv: "{{ ocpp_csms_release_venv }}"
   when: not ocpp_csms_release_ready.stat.exists
 
-# With a local connection the controller and managed host are the same Pi, so
-# the checkout containing the playbook is already a valid target-side source.
 - name: Use current checkout as install source for local execution
   ansible.builtin.set_fact:
     ocpp_csms_install_source: "{{ ocpp_csms_controller_source_dir }}"
@@ -140,8 +138,6 @@
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) == 'local'
 
-# Remote execution cannot install from a controller-side path. Stage only the
-# inputs needed to build/install the Python package inside the immutable release.
 - name: Create remote release source directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_release_source_dir }}"
@@ -216,8 +212,6 @@
     dest: "{{ ocpp_csms_candidate_service_path }}"
     mode: "0644"
 
-# The candidate points directly at its immutable release, so systemd can verify
-# it before `current` is changed and before the final safety gate or downtime.
 - name: Verify candidate systemd unit before handoff
   ansible.builtin.command:
     argv:
@@ -226,8 +220,6 @@
       - "{{ ocpp_csms_candidate_service_path }}"
   changed_when: false
 
-# Charging state can change while the candidate environment is being built, so
-# repeat the Python-owned safety check immediately after staging is complete.
 - name: Run final install safety preflight
   ansible.builtin.command:
     argv:
@@ -243,6 +235,12 @@
 - name: Capture final preflight state
   ansible.builtin.set_fact:
     ocpp_csms_final_preflight_result: "{{ ocpp_csms_final_preflight.stdout | from_json }}"
+
+# Detect a legacy Arthexis owner only after the candidate and final safety gate
+# are ready. This inspection is read-only; legacy service downtime starts inside
+# the cutover transaction.
+- name: Inspect legacy Arthexis OCPP listener
+  ansible.builtin.include_tasks: legacy_arthexis.yml
 
 - name: Inspect database schema cutover action
   ansible.builtin.command:
@@ -269,8 +267,6 @@
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
 
-# Expose only the canonical command name. The link follows `current`, so release
-# promotion does not require rewriting the public command path.
 - name: Install stable OCPP CSMS command
   become: true
   ansible.builtin.file:

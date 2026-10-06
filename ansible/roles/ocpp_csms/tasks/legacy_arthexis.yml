@@ -1,0 +1,55 @@
+---
+# Legacy takeover is intentionally listener-driven. Arthexis may have other
+# services on the appliance; only an active configured legacy unit whose main
+# process owns the OCPP TCP port is eligible for takeover.
+- name: Inspect configured legacy Arthexis services
+  become: true
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - "{{ item }}"
+      - --property=ActiveState,MainPID
+      - --value
+  loop: "{{ ocpp_csms_legacy_arthexis_services }}"
+  register: ocpp_csms_legacy_service_states
+  changed_when: false
+  failed_when: false
+
+- name: Inspect process owning configured OCPP listener
+  become: true
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    ss -H -ltnp 'sport = :{{ ocpp_csms_port }}' 2>/dev/null |
+    sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1
+  args:
+    executable: /bin/bash
+  register: ocpp_csms_listener_pid
+  changed_when: false
+
+- name: Initialize legacy Arthexis takeover state
+  ansible.builtin.set_fact:
+    ocpp_csms_legacy_arthexis_service: ""
+
+- name: Match active legacy Arthexis service to OCPP listener
+  ansible.builtin.set_fact:
+    ocpp_csms_legacy_arthexis_service: "{{ item.item }}"
+  vars:
+    ocpp_csms_legacy_state_lines: "{{ item.stdout_lines | default([]) }}"
+  when:
+    - ocpp_csms_legacy_arthexis_service | length == 0
+    - item.rc | default(1) == 0
+    - ocpp_csms_legacy_state_lines | length >= 2
+    - ocpp_csms_legacy_state_lines[0] == 'active'
+    - ocpp_csms_listener_pid.stdout | length > 0
+    - ocpp_csms_legacy_state_lines[1] == ocpp_csms_listener_pid.stdout
+  loop: "{{ ocpp_csms_legacy_service_states.results }}"
+
+- name: Report legacy Arthexis takeover preflight
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'legacy Arthexis OCPP listener detected: ' ~ ocpp_csms_legacy_arthexis_service
+        if ocpp_csms_legacy_arthexis_service | length > 0
+        else 'no legacy Arthexis OCPP listener detected'
+      }}

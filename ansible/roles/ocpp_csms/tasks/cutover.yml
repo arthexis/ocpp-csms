@@ -1,6 +1,4 @@
 ---
-# Compare the desired release/unit to the live appliance before entering the
-# critical section. A converged rerun must not stop an otherwise healthy CSMS.
 - name: Inspect current release link
   ansible.builtin.stat:
     path: "{{ ocpp_csms_current_link }}"
@@ -24,15 +22,14 @@
   ansible.builtin.set_fact:
     ocpp_csms_activation_required: >-
       {{
-        (not (ocpp_csms_current_state.stat.islnk | default(false)))
+        (ocpp_csms_legacy_arthexis_service | length > 0)
+        or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
         or (not (ocpp_csms_live_service_state.stat.exists | default(false)))
         or ((ocpp_csms_live_service_state.stat.checksum | default('')) !=
             (ocpp_csms_candidate_service_state.stat.checksum | default('candidate-missing')))
       }}
 
-# Persist exactly what passed the final safety gate and preserve the existing
-# unit before downtime begins. These files are only handoff state, not policy.
 - name: Save final preflight payload for handoff
   ansible.builtin.copy:
     dest: "{{ ocpp_csms_final_preflight_path }}"
@@ -75,11 +72,14 @@
     - ocpp_csms_activation_required | bool
     - not (ocpp_csms_live_service_state.stat.exists | default(false))
 
-# Downtime-sensitive activation and verification are one transaction-like block.
-# `current` is deliberately not changed until the candidate has proven healthy.
+# Downtime starts here. A legacy Arthexis listener is stopped only after the
+# candidate, systemd unit, final safety gate and schema decision are ready.
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
+    - name: Stop legacy Arthexis listener at cutover
+      ansible.builtin.include_tasks: legacy_arthexis_stop.yml
+
     - name: Stop existing OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -130,10 +130,7 @@
 
     - name: Verify OCPP CSMS data directory is writable
       ansible.builtin.command:
-        argv:
-          - test
-          - -w
-          - "{{ ocpp_csms_data_dir }}"
+        argv: [test, -w, "{{ ocpp_csms_data_dir }}"]
       changed_when: false
 
     - name: Assert initialized OCPP CSMS storage
@@ -143,9 +140,7 @@
           - ocpp_csms_database_state.stat.isreg | default(false)
           - ocpp_csms_transactions_state.stat.exists | default(false)
           - ocpp_csms_transactions_state.stat.isdir | default(false)
-        fail_msg: >-
-          OCPP CSMS init did not produce the expected SQLite database and
-          transaction archive directory.
+        fail_msg: OCPP CSMS init did not produce expected storage.
 
     - name: Enable and start candidate OCPP CSMS service
       become: true
@@ -173,8 +168,6 @@
     - name: Verify previously connected chargers reconnect
       ansible.builtin.include_tasks: reconnect_with_discover.yml
 
-    # Only a fully verified candidate becomes the active release. Until here,
-    # `current` continues to name the last successfully active release.
     - name: Point previous at successfully active release
       ansible.builtin.file:
         src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
@@ -192,7 +185,23 @@
         state: link
         force: true
 
+    # A successful takeover must not allow the legacy listener to return on the
+    # next boot and race the new CSMS for the production port.
+    - name: Disable legacy Arthexis OCPP service after verified takeover
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_legacy_arthexis_service }}"
+        enabled: false
+      when: ocpp_csms_legacy_arthexis_service | length > 0
+
   rescue:
+    # Legacy takeover is independent of the new CSMS database. If it was the
+    # production owner before cutover, restore it first even when this was the
+    # first managed ocpp-csms release.
+    - name: Restore legacy Arthexis after failed takeover
+      ansible.builtin.include_tasks: legacy_arthexis_restore.yml
+      when: ocpp_csms_legacy_arthexis_service | length > 0
+
     - name: Stop failed replacement before rollback
       become: true
       ansible.builtin.systemd_service:
@@ -200,6 +209,7 @@
         state: stopped
       failed_when: false
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
 
@@ -212,6 +222,7 @@
         mode: "0644"
       notify: Reload systemd daemon
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
@@ -219,6 +230,7 @@
     - name: Apply rollback systemd daemon reload
       ansible.builtin.meta: flush_handlers
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
 
@@ -229,6 +241,7 @@
         enabled: true
         state: started
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
@@ -240,40 +253,41 @@
         timeout: "{{ ocpp_csms_listener_timeout }}"
         state: started
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
+    - name: Report failed legacy Arthexis takeover after restoration
+      ansible.builtin.fail:
+        msg: >-
+          OCPP CSMS takeover failed and legacy Arthexis was restored:
+          {{ ansible_failed_result.msg | default('verification failure') }}
+      when: ocpp_csms_legacy_arthexis_service | length > 0
+
     - name: Report handoff failure after safe rollback
       ansible.builtin.fail:
         msg: >-
-          OCPP CSMS handoff verification failed and the previous release was
-          restored: {{ ansible_failed_result.msg | default('verification failure') }}
+          OCPP CSMS handoff verification failed and the previous release was restored:
+          {{ ansible_failed_result.msg | default('verification failure') }}
       when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
     - name: Report handoff failure without automatic rollback
-      vars:
-        ocpp_csms_no_rollback_reason: >-
-          {{
-            'the database schema was upgraded'
-            if ocpp_csms_schema_action == 'upgrade'
-            else 'there is no previous managed release/service to restore'
-          }}
       ansible.builtin.fail:
         msg: >-
-          OCPP CSMS handoff verification failed. Automatic rollback was not
-          attempted because {{ ocpp_csms_no_rollback_reason }}:
+          OCPP CSMS handoff verification failed without a restorable previous managed release:
           {{ ansible_failed_result.msg | default('verification failure') }}
-      when: >-
-        (ocpp_csms_schema_action == 'upgrade')
-        or not (ocpp_csms_current_state.stat.islnk | default(false))
-        or not (ocpp_csms_live_service_state.stat.exists | default(false))
+      when:
+        - ocpp_csms_legacy_arthexis_service | length == 0
+        - >-
+          (ocpp_csms_schema_action == 'upgrade')
+          or not (ocpp_csms_current_state.stat.islnk | default(false))
+          or not (ocpp_csms_live_service_state.stat.exists | default(false))
 
-# Desired state also covers a converged rerun: do not interrupt it, but ensure
-# the service remains enabled/running and its local health checks still pass.
 - name: Ensure converged OCPP CSMS service is enabled and running
   become: true
   ansible.builtin.systemd_service:
