@@ -13,6 +13,7 @@ import sys
 from ocpp_csms import app
 from ocpp_csms.cli.config import configuration_request, is_config_download, run_config_download, run_configuration
 from ocpp_csms.cli.control import CONTROL_COMMANDS, control_request, run_control
+from ocpp_csms.cli.profile import run_profile
 from ocpp_csms.cli.transactions import add_transaction_parser, run_transactions
 
 
@@ -40,6 +41,11 @@ def main() -> int:
         if is_config_download(args):
             return run_config_download(args)
         return run_configuration(args)
+    if args.command == "profile":
+        try:
+            return run_profile(args)
+        except ValueError as exc:
+            parser.error(str(exc))
     # Command families not yet migrated still use app.main(), which preserves
     # their existing parsing and dispatch behavior during the staged move.
     return app.main()
@@ -54,5 +60,6 @@ __all__ = [
     "run_config_download",
     "run_configuration",
     "run_control",
+    "run_profile",
     "run_transactions",
 ]
