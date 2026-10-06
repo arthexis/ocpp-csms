@@ -4,6 +4,8 @@ ocpp_discover_port: 9000
 ocpp_discover_prefix: "{{ ansible_env.HOME }}/.local/share/ocpp-csms"
 ocpp_discover_data_dir: "{{ ansible_env.HOME }}/ocpp-csms-data"
 ocpp_discover_python: "{{ ocpp_discover_prefix }}/current/venv/bin/python"
+ocpp_discover_runtime_command: "{{ ocpp_discover_prefix }}/current/venv/bin/ocpp-discover"
+ocpp_discover_command_path: /usr/local/bin/ocpp-discover
 
 ocpp_discover_service_name: ocpp-discover.service
 ocpp_discover_service_path: "/etc/systemd/system/{{ ocpp_discover_service_name }}"
