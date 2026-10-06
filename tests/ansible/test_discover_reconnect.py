@@ -11,6 +11,9 @@ def test_reconnect_probe_precedes_candidate_discover_recovery():
         "Stop resident OCPP Discover before candidate recovery",
         "Start candidate OCPP Discover recovery unit",
         "Verify charger reconnect after candidate Discover recovery",
+        "Wait for candidate Discover ownership receipt",
+        "Validate candidate Discover persistent state",
+        "Require preserved candidate Discover persistent state",
     )
 
 
@@ -24,6 +27,18 @@ def test_candidate_discover_runs_from_immutable_candidate_release():
     assert "- service" in start
     assert "{{ ocpp_discover_interface | default('eth0') }}" in start
     assert "{{ ocpp_csms_port | string }}" in start
+
+
+def test_candidate_recovery_requires_durable_ownership_before_helper_stops():
+    reconnect = read(TASKS / "reconnect_with_discover.yml")
+    wait = task_section(reconnect, "Wait for candidate Discover ownership receipt")
+    validate = task_section(reconnect, "Validate candidate Discover persistent state")
+    require = task_section(reconnect, "Require preserved candidate Discover persistent state")
+
+    assert "discovered.json" in wait
+    assert "ocpp_discover.lifecycle" in validate
+    assert "- prepare" in validate
+    assert ".state == 'preserved'" in require
 
 
 def test_failed_candidate_discover_restores_previous_resident_service():
@@ -42,4 +57,4 @@ def test_successful_candidate_recovery_keeps_old_resident_out_of_success_path():
     restore = reconnect.index("Restore previous resident OCPP Discover after failed recovery")
     always = reconnect.index("\n  always:\n")
     assert rescue < restore < always
-    assert "ocpp-discover-handoff.service" in reconnect[always:]
+    assert "Stop candidate OCPP Discover recovery unit after verification" in reconnect[always:]
