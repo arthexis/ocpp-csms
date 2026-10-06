@@ -22,9 +22,18 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
     if not 1 <= listen_port <= 65535:
         raise ValueError("invalid_listen_port")
 
-    local_addresses = discover.host_addresses()
+    packets = list(discover._TCP_PACKET.finditer(text))
+    if not packets:
+        return None
+    try:
+        local_addresses = discover.host_addresses()
+    except RuntimeError as exc:
+        if str(exc) == "ip_not_found":
+            return None
+        raise
+
     candidates: set[tuple[str, str, int]] = set()
-    for packet in discover._TCP_PACKET.finditer(text):
+    for packet in packets:
         source = packet.group("src")
         destination = packet.group("dst")
         destination_port = int(packet.group("dst_port"))
@@ -40,8 +49,10 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
         raise ValueError("ambiguous_local_syn_candidates")
 
     source, destination, destination_port = next(iter(candidates))
-    ipaddress.ip_address(source)
-    ipaddress.ip_address(destination)
+    source_address = ipaddress.ip_address(source)
+    destination_address = ipaddress.ip_address(destination)
+    if source_address.version != 4 or destination_address.version != 4:
+        raise ValueError("local_syn_requires_ipv4")
     return LocalSynCandidate(interface, source, destination, destination_port, listen_port)
 
 
