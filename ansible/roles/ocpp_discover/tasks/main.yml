@@ -37,6 +37,20 @@
       OCPP Discover requires the active Ansible-managed CSMS release runtime at
       {{ ocpp_discover_python }}. Converge the ocpp_csms role first.
 
+- name: Verify active immutable OCPP Discover command exists
+  ansible.builtin.stat:
+    path: "{{ ocpp_discover_runtime_command }}"
+  register: ocpp_discover_runtime_command_state
+
+- name: Require active immutable OCPP Discover command
+  ansible.builtin.assert:
+    that:
+      - ocpp_discover_runtime_command_state.stat.exists
+      - ocpp_discover_runtime_command_state.stat.executable
+    fail_msg: >-
+      OCPP Discover command is missing from the active CSMS release at
+      {{ ocpp_discover_runtime_command }}.
+
 - name: Inspect shared OCPP CSMS data directory
   ansible.builtin.stat:
     path: "{{ ocpp_discover_data_dir }}"
@@ -50,6 +64,39 @@
     fail_msg: >-
       OCPP Discover requires the CSMS data directory at
       {{ ocpp_discover_data_dir }}. Converge the ocpp_csms role first.
+
+- name: Install stable OCPP Discover command
+  become: true
+  ansible.builtin.file:
+    src: "{{ ocpp_discover_runtime_command }}"
+    dest: "{{ ocpp_discover_command_path }}"
+    state: link
+    force: true
+
+- name: Resolve stable OCPP Discover command target
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ ocpp_discover_command_path }}"
+  register: ocpp_discover_command_resolved
+  changed_when: false
+
+- name: Resolve active OCPP Discover release command
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ ocpp_discover_runtime_command }}"
+  register: ocpp_discover_runtime_command_resolved
+  changed_when: false
+
+- name: Assert stable OCPP Discover command target
+  ansible.builtin.assert:
+    that:
+      - ocpp_discover_command_resolved.stdout == ocpp_discover_runtime_command_resolved.stdout
+    fail_msg: >-
+      Stable OCPP Discover command does not resolve to the active current release.
 
 - name: Install OCPP Discover runtime packages
   become: true
