@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ocpp_csms.config_report import configuration_snapshot, format_configuration_snapshot
 from ocpp_csms.control import send_control
+from ocpp_csms.output import emit_json
 from ocpp_csms.status import appliance_status
 
 
@@ -165,11 +166,11 @@ def run_config_download(args: argparse.Namespace) -> int:
         print(f"error: {exc}")
         return 1
 
-    serialized = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+    serialized = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
     if args.output:
         Path(args.output).expanduser().write_text(serialized, encoding="utf-8")
     if args.json:
-        print(serialized, end="")
+        emit_json(snapshot)
     else:
         print(format_configuration_snapshot(snapshot))
     return 0
