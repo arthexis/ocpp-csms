@@ -6,6 +6,14 @@ ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
 
+# Legacy Arthexis appliances have used more than one generated unit name. The
+# takeover only acts on a listed unit when systemd reports it active and its
+# process owns the configured OCPP listener. This avoids stopping unrelated
+# Arthexis web/worker/beat services.
+ocpp_csms_legacy_arthexis_services:
+  - arthexis-web.service
+  - arthexis-arthexis-arthexis.service
+
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.
 ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
