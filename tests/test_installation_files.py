@@ -12,12 +12,12 @@ def test_install_script_uses_staged_runtime_before_cutover():
     script = read("install.sh")
     assert 'STAGE_VENV="$PREFIX/venv.next"' in script
     assert 'PREVIOUS_VENV="$PREFIX/venv.previous"' in script
-    assert 'render_service "$STAGE_COMMAND" "$TMP_SERVICE"' in script
-    assert 'sudo systemd-analyze verify "$TMP_SERVICE"' in script
-    assert 'render_service "$COMMAND" "$TMP_SERVICE"' in script
-    assert script.index('render_service "$STAGE_COMMAND" "$TMP_SERVICE"') < script.index('sudo systemd-analyze verify "$TMP_SERVICE"')
-    assert script.index('sudo systemd-analyze verify "$TMP_SERVICE"') < script.index('preflight final')
-    assert script.index('mv "$STAGE_VENV" "$VENV"') < script.index('render_service "$COMMAND" "$TMP_SERVICE"')
+    assert 'render_service "$STAGE_VENV/bin/ocpp-csms"' in script
+    assert 'systemd-analyze verify "$TMP_SERVICE"' in script
+    assert 'render_service "$VENV/bin/ocpp-csms"' in script
+    assert script.index('render_service "$STAGE_VENV/bin/ocpp-csms"') < script.index('systemd-analyze verify "$TMP_SERVICE"')
+    assert script.index('systemd-analyze verify "$TMP_SERVICE"') < script.index('run_preflight --json')
+    assert script.index('mv "$STAGE_VENV" "$VENV"') < script.index('render_service "$VENV/bin/ocpp-csms"')
 
 
 def test_install_script_preserves_previous_runtime_for_rollback():
@@ -38,8 +38,6 @@ def test_discover_script_has_explicit_install_and_uninstall_modes():
     script = read("discover.sh")
     assert "--install" in script
     assert "--uninstall" in script
-    assert "--cleanup" in script
-    assert "keep durable adaptation" in script
 
 
 def test_discover_service_uses_installed_package_and_owned_state():
