@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
 from ocpp_csms.diagnostics import transaction_events
 from ocpp_csms.events import EventStore
-from ocpp_csms.transaction_cli import _duration, _energy_wh, _meter_summary
+from ocpp_csms.transaction_cli import _duration, _energy_wh, _meter_summary, format_transactions
+from ocpp_csms.transaction_query import TransactionView
 
 
 def test_duration_and_energy_are_derived_from_transaction_evidence():
@@ -15,6 +19,57 @@ def test_invalid_or_regressive_energy_is_not_derived():
     assert _energy_wh({}, {}) is None
     assert _energy_wh({"meter_start": 1000}, {"meter_stop": 900}) is None
     assert _duration("2026-10-03T10:10:00Z", "2026-10-03T10:00:00Z") is None
+
+
+def test_transaction_list_shows_derived_energy():
+    view = TransactionView(
+        record={
+            "transaction_id": 7,
+            "charge_point_id": "charger-a",
+            "status": "stopped",
+            "id_tag": "card-a",
+            "start": {
+                "connector_id": 1,
+                "meter_start": 1000,
+                "timestamp": "2026-10-03T10:00:00Z",
+            },
+            "stop": {
+                "meter_stop": 7420,
+                "timestamp": "2026-10-03T11:00:00Z",
+            },
+        },
+        path=Path("transactions/2026-10-03/charger-a-7.json"),
+    )
+
+    output = format_transactions([view])
+
+    assert "ENERGY" in output
+    assert "6.420 kWh" in output
+
+
+def test_transaction_list_shows_unknown_energy_when_evidence_is_incomplete():
+    view = TransactionView(
+        record={
+            "transaction_id": 8,
+            "charge_point_id": "charger-a",
+            "status": "open",
+            "id_tag": "card-b",
+            "start": {
+                "connector_id": 1,
+                "meter_start": 7420,
+                "timestamp": "2026-10-03T11:05:00Z",
+            },
+            "stop": None,
+        },
+        path=Path("transactions/2026-10-03/charger-a-8.json"),
+    )
+
+    output = format_transactions([view])
+    row = output.splitlines()[1].split()
+
+    assert "ENERGY" in output.splitlines()[0]
+    assert "kWh" not in output.splitlines()[1]
+    assert row[-2] == "-"
 
 
 def test_meter_summary_uses_only_explicit_measurand_and_unit_semantics():
