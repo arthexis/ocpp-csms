@@ -46,3 +46,7 @@ ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
 ocpp_csms_verify_host: "{{ '127.0.0.1' if ocpp_csms_host in ['0.0.0.0', '::'] else ocpp_csms_host }}"
 ocpp_csms_listener_timeout: 10
 ocpp_csms_reconnect_timeout: 30
+# Candidate Discover may still be finishing its bounded proof capture after the
+# CSMS has already observed the charger reconnect. Give durable ownership
+# promotion a separate window so the transient service is not killed mid-commit.
+ocpp_csms_discover_promotion_timeout: 60
