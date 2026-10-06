@@ -66,4 +66,4 @@ def test_successful_candidate_recovery_keeps_old_resident_out_of_success_path():
     restore = reconnect.index("Restore previous resident OCPP Discover after failed recovery")
     always = reconnect.index("\n  always:\n")
     assert rescue < restore < always
-    assert "Stop candidate OCPP Discover recovery unit after verification" in reconnect[always:]
+    assert "Stop candidate Discover recovery unit after verification" in reconnect[always:]
