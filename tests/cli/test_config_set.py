@@ -1,7 +1,8 @@
 import pytest
 
-import ocpp_csms.app as app_module
-from ocpp_csms.app import build_parser, configuration_request, run_configuration
+import ocpp_csms.cli.config as config_module
+from ocpp_csms.cli import build_parser
+from ocpp_csms.cli.config import configuration_request, run_configuration
 
 
 def parse(*args):
@@ -51,7 +52,7 @@ def test_config_set_prints_readback_and_accepts_reboot_required(monkeypatch, cap
             },
         }
 
-    monkeypatch.setattr(app_module, "send_control", fake_send)
+    monkeypatch.setattr(config_module, "send_control", fake_send)
     assert run_configuration(parse("config", "set", "HeartbeatInterval", "60")) == 0
     output = capsys.readouterr().out
     assert "RebootRequired" in output
