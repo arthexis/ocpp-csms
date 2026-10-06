@@ -27,7 +27,14 @@ def run_transactions_json(args: argparse.Namespace) -> int:
         views = [view] if view is not None else []
     else:
         since, until = _time_filters(args)
-        filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": since, "until": until}
+        filters = {
+            "charger": args.charger,
+            "connector": args.connector,
+            "id_tag": args.id_tag,
+            "since": since,
+            "until": until,
+            "local_time": args.local_time,
+        }
         if args.active:
             views = query.active(**filters)
         elif args.last:
@@ -35,5 +42,5 @@ def run_transactions_json(args: argparse.Namespace) -> int:
             views = [view] if view is not None else []
         else:
             views = query.list(limit=args.limit, **filters)
-    emit_json(transactions_contract(views))
+    emit_json(transactions_contract(views, local_time=args.local_time))
     return 0
