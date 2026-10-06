@@ -8,21 +8,56 @@ def receipt():
 
 def test_prepare_reports_absent_without_creating_state(tmp_path, monkeypatch):
     persistent = tmp_path / "persistent"
-    prepared = []
-    monkeypatch.setattr(lifecycle.persistence, "prepare_nftables_integration", lambda: prepared.append(True))
+    monkeypatch.setattr(
+        lifecycle.persistence,
+        "prepare_nftables_integration",
+        lambda: (False, False),
+    )
     assert lifecycle.prepare_persistent_state(persistent_dir=persistent) == "absent"
-    assert prepared == [True]
     assert not persistent.exists()
 
 
 def test_prepare_preserves_valid_discovered_receipt(tmp_path, monkeypatch):
     persistent = tmp_path / "persistent"
     handoff.persist_discovered(persistent, receipt())
-    prepared = []
-    monkeypatch.setattr(lifecycle.persistence, "prepare_nftables_integration", lambda: prepared.append(True))
+    monkeypatch.setattr(
+        lifecycle.persistence,
+        "prepare_nftables_integration",
+        lambda: (False, False),
+    )
     assert lifecycle.prepare_persistent_state(persistent_dir=persistent) == "preserved"
-    assert prepared == [True]
     assert handoff.load_discovered(persistent) == receipt()
+
+
+def test_prepare_report_exposes_static_integration_changes(tmp_path, monkeypatch):
+    persistent = tmp_path / "persistent"
+    monkeypatch.setattr(
+        lifecycle.persistence,
+        "prepare_nftables_integration",
+        lambda: (True, False),
+    )
+
+    assert lifecycle.prepare_persistent_state_report(persistent_dir=persistent) == {
+        "state": "absent",
+        "created_ruleset": True,
+        "changed_include": False,
+        "changed": True,
+    }
+
+
+def test_prepare_report_is_unchanged_when_static_integration_is_converged(
+    tmp_path, monkeypatch
+):
+    persistent = tmp_path / "persistent"
+    monkeypatch.setattr(
+        lifecycle.persistence,
+        "prepare_nftables_integration",
+        lambda: (False, False),
+    )
+
+    report = lifecycle.prepare_persistent_state_report(persistent_dir=persistent)
+    assert report["state"] == "absent"
+    assert report["changed"] is False
 
 
 def test_remove_deletes_only_discovered_receipt_from_state_dir(tmp_path, monkeypatch):
