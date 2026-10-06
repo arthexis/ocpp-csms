@@ -162,10 +162,3 @@
           - ocpp-discover-handoff.service
       changed_when: false
       failed_when: false
-
-# If the initial probe succeeded, it already proved the same reconnect baseline.
-- name: Record direct reconnect verification
-  ansible.builtin.debug:
-    msg: "Previously connected chargers reconnected without Discover recovery."
-  changed_when: false
-  when: ocpp_csms_reconnect_probe.rc == 0
