@@ -92,6 +92,38 @@
           - "{{ ocpp_csms_reconnect_timeout }}"
       changed_when: false
 
+    # Reconnect can become visible to the CSMS just before Discover finishes its
+    # synchronous durable promotion. Do not stop the transient candidate in that
+    # window: require the ownership receipt to exist and validate first.
+    - name: Wait for candidate Discover ownership receipt
+      become: true
+      ansible.builtin.wait_for:
+        path: "{{ ocpp_discover_persistent_dir | default('/var/lib/ocpp-discover') }}/discovered.json"
+        state: present
+        timeout: "{{ ocpp_csms_reconnect_timeout }}"
+
+    - name: Validate candidate Discover persistent state
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_discover.lifecycle
+          - prepare
+          - --persistent-dir
+          - "{{ ocpp_discover_persistent_dir | default('/var/lib/ocpp-discover') }}"
+          - --json
+      register: ocpp_csms_discover_persistent_validation
+      changed_when: false
+
+    - name: Require preserved candidate Discover persistent state
+      ansible.builtin.assert:
+        that:
+          - (ocpp_csms_discover_persistent_validation.stdout | from_json).state == 'preserved'
+        fail_msg: >-
+          Candidate OCPP Discover reconnected the charger but did not complete
+          durable ownership promotion before handoff verification ended.
+
   rescue:
     - name: Stop failed candidate Discover recovery unit
       become: true
@@ -121,7 +153,7 @@
           {{ ansible_failed_result.msg | default('reconnect verification failure') }}
 
   always:
-    - name: Stop candidate Discover recovery unit after verification
+    - name: Stop candidate OCPP Discover recovery unit after verification
       become: true
       ansible.builtin.command:
         argv:
