@@ -1,8 +1,9 @@
 import pytest
 
-import ocpp_csms.app as app_module
+import ocpp_csms.cli.config as config_module
 import ocpp_csms.cli.control as control_module
-from ocpp_csms.app import build_parser, configuration_request, run_configuration
+from ocpp_csms.cli import build_parser
+from ocpp_csms.cli.config import configuration_request, run_configuration
 from ocpp_csms.cli.control import control_request, run_control
 
 
@@ -118,7 +119,7 @@ def test_missing_control_socket_returns_one(monkeypatch):
     ],
 )
 def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
-    install_control_response(monkeypatch, response, module=app_module)
+    install_control_response(monkeypatch, response, module=config_module)
     assert run_configuration(parse("config", "HeartbeatInterval")) == expected_code
 
 
