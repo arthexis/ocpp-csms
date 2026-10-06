@@ -12,47 +12,52 @@ From a repository checkout:
 sh install.sh
 ```
 
-Do not run the installer itself with `sudo`. The installed `ocpp-csms.service` runs as the installing user, listens on `0.0.0.0:9000` by default, starts at boot, and restarts on failure.
+Do not run the installer itself with `sudo`. The appliance installs both `ocpp-csms.service` and the companion `ocpp-discover.service`. Both start at boot and restart on failure.
 
 Check the appliance with:
 
 ```bash
 ocpp-csms status
-sudo systemctl status ocpp-csms
-sudo journalctl -u ocpp-csms -f
+ocpp-discover status
+sudo ocpp-discover diagnostics
+sudo systemctl status ocpp-csms ocpp-discover
 ```
 
-If the charger is already configured for this CSMS, nothing else is required.
+Installation performs a read-only usage preflight before replacement. Active charging always blocks replacement. Idle connected chargers are handed to the replacement CSMS and must reconnect with fresh evidence before installation is considered successful.
 
-Before replacing an existing appliance, installation performs a read-only usage preflight. Active charging always blocks replacement. Connected but idle chargers require explicit handoff authorization:
+Use `--discover-interface` when the charger-facing interface is not `eth0`:
 
 ```bash
-sh install.sh --rollover
+sh install.sh --discover-interface eno1
 ```
-
-`--rollover` never overrides active charging. The installer stages the replacement, repeats the charging check immediately before cutover, and requires fresh reconnect evidence from chargers connected at the final gate.
 
 ## OCPP Discover
 
-Some chargers retain an old CSMS endpoint that cannot easily be reconfigured. OCPP Discover is the companion service for those installations.
+Some chargers retain an old CSMS endpoint that cannot easily be reconfigured. OCPP Discover is the resident companion service that observes charger-side network evidence, preserves a proven narrow adaptation, and reconciles only when positive contradictory evidence justifies it.
 
-Install it with the appliance:
+Discover is not an optional appliance component. `install.sh` and the Ansible satellite playbook install CSMS and Discover together.
 
-```bash
-sh install.sh --with-discover
+The permanent operator surface is the installed `ocpp-discover` command:
+
+```text
+ocpp-discover status [--json]
+ocpp-discover diagnostics [--json]
+ocpp-discover run ...
+ocpp-discover cleanup --state-dir /run/ocpp-discover
+ocpp-discover service ...
 ```
 
-or manage it directly:
+`status` is cheap and read-only. It reports service/enablement state and whether a persistent adaptation exists without requiring access to the protected adaptation contents.
+
+`diagnostics` performs deeper read-only inspection of the proven endpoint plus configured/live nftables state. Because durable Discover state is root-owned, detailed appliance diagnostics may require:
 
 ```bash
-./discover.sh                         # run discovery now
-./discover.sh --interface eno1       # select charger-facing interface
-./discover.sh --install              # install and enable at boot
-./discover.sh --cleanup              # remove transient Discover-owned state
-./discover.sh --uninstall            # remove Discover and its owned state
+sudo ocpp-discover diagnostics
 ```
 
-The installed Python command is also available as `ocpp-discover`. `ocpp-discover run ...` performs an explicit discovery attempt; `ocpp-discover service ...` is the boot observation and reconciliation path used by systemd.
+`run` is an explicit manual discovery operation and may mutate Discover-owned network state. Normal operation does not require manually running discovery because the resident service monitors continuously.
+
+`service` is the long-running systemd entry point and is not normally invoked by an operator.
 
 ### Discover operating model
 
@@ -74,7 +79,7 @@ A normal boot is deliberately optimistic:
 2. The CSMS starts normally.
 3. Discover reads and validates `discovered.json`.
 4. Fresh current-process connection evidence plus fresh inbound OCPP proves the adaptation for this boot.
-5. Discover exits successfully without rewriting networking or persistent state.
+5. Discover remains resident and returns to passive monitoring without rewriting networking or persistent state.
 
 If the expected charger is not observed during the startup window, Discover emits one clear error and enters passive waiting. **Charger absence is evidence to investigate, never permission to mutate networking.** It does not repeatedly rediscover, rewrite nftables, manipulate addresses, or restart services merely because the charger is offline.
 
@@ -87,29 +92,32 @@ Reconciliation is intentionally narrow:
 3. replace only Discover's owned live nftables table with the candidate;
 4. require fresh reconnect and fresh inbound OCPP;
 5. only after proof, replace the persistent fragment and `discovered.json`;
-6. if proof fails, restore the previously proven live and durable adaptation.
+6. if proof fails, restore the previously proven live and durable adaptation;
+7. return to passive monitoring.
 
 Configuration mismatch by itself does not authorize reconciliation. Discover waits for charger evidence rather than guessing.
 
 ### First discovery
 
-When no proven adaptation exists, Discover first looks for validated plaintext HTTP WebSocket Upgrade traffic. If the charger is already targeting an IPv4 address owned by the host, Discover can install only the narrow source/destination/port redirect and does not claim another address.
+When no proven adaptation exists, Discover waits for qualifying first-contact evidence and then performs bounded diagnosis.
 
-If no usable host-local endpoint is visible, the discovery path can fall back to unresolved-ARP evidence, temporarily claim only the exact required IPv4 address as an additive `/32`, observe the charger endpoint, and install the narrow redirect. Temporary state is rolled back on failure. Only a candidate proven by fresh CSMS connection and inbound OCPP is promoted to persistent adaptation.
+It first looks for validated plaintext HTTP WebSocket Upgrade traffic. If the charger is already targeting an IPv4 address owned by the host, Discover can install only the narrow source/destination/port redirect and does not claim another address.
+
+If no usable host-local endpoint is visible, the discovery path can fall back to repeated unresolved-ARP evidence, temporarily claim only the exact required IPv4 address as an additive `/32`, observe the charger endpoint, and install the narrow redirect. Temporary state is rolled back on failure.
+
+Only a candidate proven by fresh CSMS connection and fresh inbound OCPP is promoted into the persistent ruleset and `discovered.json`. The resident service then continues monitoring that proven adaptation.
 
 TLS/WSS traffic is opaque to this mechanism and is refused rather than guessed.
 
 ### Discover dependencies and ownership
 
-`discover.sh --install` installs missing Debian runtime dependencies when necessary:
+Appliance installation installs the Debian runtime dependencies required by Discover:
 
 ```text
 tcpdump
 nftables
 iproute2
 ```
-
-A plain discovery run never installs packages automatically.
 
 Discover owns only:
 
@@ -120,7 +128,7 @@ Discover owns only:
 /etc/systemd/system/ocpp-discover.service
 ```
 
-Install/upgrade is the normal place where the managed `/etc/nftables.conf` include is changed. Runtime discovery never edits that global file. Uninstall removes only Discover-owned integration and state and does not remove packages that may be used elsewhere.
+Install/upgrade is the normal place where the managed `/etc/nftables.conf` include is created. Runtime discovery never edits that global file and never restarts/flushed the global nftables ruleset.
 
 ## Operating model
 
@@ -141,11 +149,11 @@ The built-in listener is intended for a trusted charger LAN or equivalent privat
 
 **Do not expose the built-in listener directly to an untrusted network or the public Internet.** Use an appropriate private network, VPN, firewall, or TLS-terminating boundary when chargers must cross a broader network.
 
-OCPP Discover does not change this trust model. It is a local bootstrap mechanism for a charger-facing Ethernet network.
+OCPP Discover does not change this trust model. It is a local bootstrap and reconciliation mechanism for a charger-facing Ethernet network.
 
 Operator commands use `<data-dir>/control.sock`, a Unix-domain socket created mode `0660`; they do not expose a second TCP control service.
 
-## Commands
+## CSMS commands
 
 Run `ocpp-csms`, `ocpp-csms help`, or `ocpp-csms --help` for the current command surface.
 
@@ -170,7 +178,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ocpp-csms explain CHARGER --since TIME --until TIME
 ```
 
-All commands accept `--data-dir PATH` before the command name. `--cp` is the lowercase alias for `--connector`; `--txn` is the lowercase alias for `--transaction`. Diagnostic timestamps accept ISO-8601 and treat timestamps without an offset as UTC.
+All CSMS commands accept `--data-dir PATH` before the command name. `--cp` is the lowercase alias for `--connector`; `--txn` is the lowercase alias for `--transaction`. Diagnostic timestamps accept ISO-8601 and treat timestamps without an offset as UTC.
 
 `status` is read-only. `transactions` is the canonical transaction inspector and `txn` is its exact alias. `events` reads recorded evidence; `explain` presents evidence for one charger and incident window without inventing a root cause.
 
@@ -211,7 +219,9 @@ Schema versions are independent of application releases. New databases are creat
 
 ## Installed layout
 
-The normal appliance runs as the installing user. The base installer uses `sudo` only for system installation/management.
+The normal appliance services run under their intended service identities while installation uses privilege escalation only for host-level integration.
+
+Legacy `install.sh` uses a mutable deployment environment during the migration period:
 
 ```text
 ~/.local/share/ocpp-csms/venv/
@@ -219,16 +229,29 @@ The normal appliance runs as the installing user. The base installer uses `sudo`
 ~/.local/share/ocpp-csms/venv.next/
 ~/.local/bin/ocpp-csms
 ~/.local/bin/csms
+~/.local/bin/ocpp-discover
+```
+
+Ansible uses immutable releases with stable global commands:
+
+```text
+~/.local/share/ocpp-csms/releases/<revision>/
+~/.local/share/ocpp-csms/current
+~/.local/share/ocpp-csms/previous
+/usr/local/bin/ocpp-csms
+/usr/local/bin/ocpp-discover
+```
+
+Shared appliance state/integration:
+
+```text
 ~/ocpp-csms-data/
 /etc/systemd/system/ocpp-csms.service
-
+/etc/systemd/system/ocpp-discover.service
 /etc/ocpp-discover/nftables.conf
 /var/lib/ocpp-discover/discovered.json
 /run/ocpp-discover/
-/etc/systemd/system/ocpp-discover.service
 ```
-
-`venv.next` is staging. `venv.previous` is retained after promotion so startup failures can restore the previous binary environment when the database schema has not changed.
 
 ## Development and tests
 
@@ -248,7 +271,7 @@ python -m pytest field/tests
 
 CI runs all three boundaries on Debian 12 / Python 3.11 as the primary appliance target and Debian 13 / Python 3.13 as the compatibility target.
 
-Tests favor behavioral and state invariants over exact human-readable output. Discover tests cover ARP and TCP/WebSocket evidence, ownership, narrow redirects, persistence, boot observation, passive offline waiting, positive contradiction, active-charge refusal, proof-before-persist, and rollback.
+Tests favor behavioral and state invariants over exact human-readable output. Discover tests cover ARP and TCP/WebSocket evidence, ownership, narrow redirects, persistence, resident observation, passive offline waiting, positive contradiction, active-charge refusal, proof-before-persist, reconciliation, and rollback.
 
 ## Source layout
 
@@ -256,19 +279,22 @@ Tests favor behavioral and state invariants over exact human-readable output. Di
 src/
   ocpp_csms/          # OCPP server, evidence, status, diagnostics, transactions and control
   ocpp_discover/
-    discover.py       # network evidence and first discovery
+    __main__.py       # installed ocpp-discover command dispatcher
+    operator.py       # read-only operator status and diagnostics
+    discover.py       # network evidence and explicit/manual discovery
+    first_contact.py  # preserve wake evidence into bounded diagnosis
     redirect.py       # narrow nftables adaptation
     handoff.py        # proof and promotion of a discovered adaptation
     persistence.py    # owned persistent nftables integration
-    service.py        # boot observation and passive waiting
+    service.py        # resident observation and reconciliation loop
     diagnosis.py      # compare expected/configured/observed state
     reconcile.py      # prove and replace a contradicted adaptation
-    lifecycle.py      # install/uninstall owned persistent integration
+    lifecycle.py      # static host integration ownership
 
+ansible/              # canonical appliance convergence
 field/                # field harness and compatibility helpers
-systemd/              # appliance service templates
-discover.sh            # Discover run/install/cleanup/uninstall helper
-install.sh             # staged appliance installer
+systemd/              # legacy installer service templates
+install.sh             # transitional staged appliance installer
 ```
 
 This README is the canonical project documentation. Field-only procedures belong in `field/README.md`; production behavior belongs here.
