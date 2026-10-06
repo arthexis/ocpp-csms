@@ -1,1 +1,21 @@
 ---
+ocpp_discover_interface: eth0
+ocpp_discover_port: 9000
+ocpp_discover_prefix: "{{ ansible_env.HOME }}/.local/share/ocpp-csms"
+ocpp_discover_data_dir: "{{ ansible_env.HOME }}/ocpp-csms-data"
+ocpp_discover_python: "{{ ocpp_discover_prefix }}/current/venv/bin/python"
+ocpp_discover_runtime_command: "{{ ocpp_discover_prefix }}/current/venv/bin/ocpp-discover"
+ocpp_discover_command_path: /usr/local/bin/ocpp-discover
+
+ocpp_discover_service_name: ocpp-discover.service
+ocpp_discover_service_path: "/etc/systemd/system/{{ ocpp_discover_service_name }}"
+ocpp_discover_candidate_dir: "{{ ocpp_discover_prefix }}/candidate"
+ocpp_discover_candidate_service_path: "{{ ocpp_discover_candidate_dir }}/{{ ocpp_discover_service_name }}"
+
+ocpp_discover_runtime_dir: /run/ocpp-discover
+ocpp_discover_persistent_dir: /var/lib/ocpp-discover
+
+ocpp_discover_packages:
+  - tcpdump
+  - nftables
+  - iproute2

@@ -7,38 +7,38 @@ BIN_DIR=${OCPP_CSMS_BIN_DIR:-"$HOME/.local/bin"}
 DATA_DIR=${OCPP_CSMS_DATA_DIR:-"$HOME/ocpp-csms-data"}
 HOST=${OCPP_CSMS_HOST:-"0.0.0.0"}
 PORT=${OCPP_CSMS_PORT:-9000}
+DISCOVER_INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}
 VENV="$PREFIX/venv"
 STAGE_VENV="$PREFIX/venv.next"
 PREVIOUS_VENV="$PREFIX/venv.previous"
 COMMAND="$BIN_DIR/ocpp-csms"
 CSMS_COMMAND="$BIN_DIR/csms"
+DISCOVER_COMMAND="$BIN_DIR/ocpp-discover"
 DATABASE_NAME=ocpp-csms.sqlite3
 SERVICE_NAME=ocpp-csms.service
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 SERVICE_TEMPLATE="$ROOT/systemd/ocpp-csms.service.in"
+DISCOVER_SERVICE_NAME=ocpp-discover.service
+DISCOVER_SERVICE_PATH="/etc/systemd/system/$DISCOVER_SERVICE_NAME"
+DISCOVER_SERVICE_TEMPLATE="$ROOT/systemd/ocpp-discover.service.in"
 INSTALL_USER=$(id -un)
 INSTALL_GROUP=$(id -gn)
-DISCOVER_MODE=preserve
 PROMOTED=0
 
 usage() {
     cat <<'EOF'
-Usage: sh install.sh [--host HOST] [--port PORT] [--with-discover|--without-discover]
+Usage: sh install.sh [--host HOST] [--port PORT] [--discover-interface IFACE]
 
-Install or update the OCPP CSMS appliance service using a safe staged handoff.
+Install or update the complete OCPP appliance using a safe staged handoff.
+The appliance always includes both OCPP CSMS and OCPP Discover.
 Idle connected chargers are expected and are handed to the replacement service.
 Active charging always blocks installation.
 
 Options:
-  --host HOST          Listener address for the CSMS (default: 0.0.0.0).
-  --port PORT          Listener port for the CSMS (default: 9000).
-  --with-discover      Also install and enable OCPP Discover. Discover can learn the
-                       charger-facing Ethernet address/port at boot and adapt the
-                       local network so plaintext OCPP reaches this CSMS.
-  --without-discover   Disable/uninstall OCPP Discover and clean its owned network state.
-  -h, --help           Show this help.
-
-Without either discovery flag, the existing OCPP Discover enabled/disabled state is preserved.
+  --host HOST               Listener address for the CSMS (default: 0.0.0.0).
+  --port PORT               Listener port for the CSMS (default: 9000).
+  --discover-interface IFACE  Charger-facing interface for Discover (default: eth0).
+  -h, --help                Show this help.
 EOF
 }
 
@@ -48,12 +48,8 @@ while [ "$#" -gt 0 ]; do
         --host=*) HOST=${1#*=}; shift ;;
         --port) [ "$#" -ge 2 ] || { printf 'Missing value for --port\n' >&2; exit 2; }; PORT=$2; shift 2 ;;
         --port=*) PORT=${1#*=}; shift ;;
-        --with-discover)
-            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
-            DISCOVER_MODE=install; shift ;;
-        --without-discover)
-            [ "$DISCOVER_MODE" = preserve ] || { printf 'Choose only one discovery install option.\n' >&2; exit 2; }
-            DISCOVER_MODE=uninstall; shift ;;
+        --discover-interface) [ "$#" -ge 2 ] || { printf 'Missing value for --discover-interface\n' >&2; exit 2; }; DISCOVER_INTERFACE=$2; shift 2 ;;
+        --discover-interface=*) DISCOVER_INTERFACE=${1#*=}; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
@@ -64,6 +60,7 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 [ -n "$HOST" ] || { printf 'Listener host must not be empty.\n' >&2; exit 2; }
+[ -n "$DISCOVER_INTERFACE" ] || { printf 'Discover interface must not be empty.\n' >&2; exit 2; }
 case "$PORT" in ''|*[!0-9]*) printf 'Listener port must be an integer: %s\n' "$PORT" >&2; exit 2 ;; esac
 if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     printf 'Listener port must be between 1 and 65535: %s\n' "$PORT" >&2
@@ -109,30 +106,54 @@ render_service() {
         "$SERVICE_TEMPLATE" > "$TMP_SERVICE"
 }
 
-need python3
-# First safety gate: no appliance mutation has happened yet.
-run_preflight
+render_discover_service() {
+    python_esc=$(escape_sed "$1")
+    interface_esc=$(escape_sed "$DISCOVER_INTERFACE")
+    sed \
+        -e "s|@PYTHON@|$python_esc|g" \
+        -e "s|@DATA_DIR@|$DATA_ESC|g" \
+        -e "s|@INTERFACE@|$interface_esc|g" \
+        -e "s|@PORT@|$PORT|g" \
+        "$DISCOVER_SERVICE_TEMPLATE" > "$TMP_DISCOVER_SERVICE"
+}
 
+install_discover_dependencies() {
+    if [ ! -r /etc/os-release ]; then
+        printf 'OCPP Discover dependency installation requires Debian.\n' >&2
+        exit 1
+    fi
+    . /etc/os-release
+    if [ "${ID:-}" != debian ]; then
+        printf 'Automatic OCPP Discover dependency installation is supported only on Debian.\n' >&2
+        exit 1
+    fi
+    sudo apt-get update
+    sudo apt-get install -y tcpdump nftables iproute2
+}
+
+need python3
+run_preflight
 need systemctl
 need sudo
 
 TMP_FINAL=$(mktemp)
 TMP_BASELINE=$(mktemp)
 TMP_SERVICE=$(mktemp --suffix=.service)
+TMP_DISCOVER_SERVICE=$(mktemp --suffix=.service)
 TMP_OLD_SERVICE=$(mktemp)
 cleanup() {
-    rm -f "$TMP_FINAL" "$TMP_BASELINE" "$TMP_SERVICE" "$TMP_OLD_SERVICE"
+    rm -f "$TMP_FINAL" "$TMP_BASELINE" "$TMP_SERVICE" "$TMP_DISCOVER_SERVICE" "$TMP_OLD_SERVICE"
     if [ "$PROMOTED" -eq 0 ]; then rm -rf "$STAGE_VENV"; fi
 }
 trap cleanup EXIT HUP INT TERM
 
-# Expensive/fallible work is staged while the old CSMS remains untouched.
 mkdir -p "$PREFIX"
 rm -rf "$STAGE_VENV"
 python3 -m venv "$STAGE_VENV"
 "$STAGE_VENV/bin/python" -m pip install --upgrade pip
 "$STAGE_VENV/bin/python" -m pip install "$ROOT"
 "$STAGE_VENV/bin/ocpp-csms" --help >/dev/null
+"$STAGE_VENV/bin/ocpp-discover" --help >/dev/null
 SCHEMA_ACTION=$("$STAGE_VENV/bin/python" -m ocpp_csms.install_cutover schema-check --data-dir "$DATA_DIR")
 
 USER_ESC=$(escape_sed "$INSTALL_USER")
@@ -141,12 +162,22 @@ HOME_ESC=$(escape_sed "$HOME")
 DATA_ESC=$(escape_sed "$DATA_DIR")
 HOST_ESC=$(escape_sed "$HOST")
 
-# Verify the candidate using the staged executable that already exists. The
-# public command link is intentionally created only after successful promotion.
 render_service "$STAGE_VENV/bin/ocpp-csms"
-if command -v systemd-analyze >/dev/null 2>&1; then systemd-analyze verify "$TMP_SERVICE" >/dev/null; fi
+render_discover_service "$STAGE_VENV/bin/python"
+if command -v systemd-analyze >/dev/null 2>&1; then
+    systemd-analyze verify "$TMP_SERVICE" >/dev/null
+    systemd-analyze verify "$TMP_DISCOVER_SERVICE" >/dev/null
+fi
 
-# Second safety gate: a charge may have started while staging.
+# Discover package installation is fallible but does not alter live networking.
+# Do it before the final charge-state gate so service cutover is not followed by
+# an avoidable package-manager failure.
+install_discover_dependencies
+[ -d "/sys/class/net/$DISCOVER_INTERFACE" ] || {
+    printf 'Configured Discover interface does not exist: %s\n' "$DISCOVER_INTERFACE" >&2
+    exit 1
+}
+
 run_preflight --json > "$TMP_FINAL"
 "$STAGE_VENV/bin/python" -m ocpp_csms.install_cutover capture-baseline \
     --data-dir "$DATA_DIR" --preflight-json "$TMP_FINAL" --output "$TMP_BASELINE"
@@ -155,15 +186,11 @@ HAD_RUNNING_SERVICE=0
 HAD_SERVICE_FILE=0
 HAD_VENV=0
 if sudo systemctl is-active --quiet "$SERVICE_NAME"; then HAD_RUNNING_SERVICE=1; fi
-if sudo test -f "$SERVICE_PATH"; then
-    sudo cat "$SERVICE_PATH" > "$TMP_OLD_SERVICE"
-    HAD_SERVICE_FILE=1
-fi
+if sudo test -f "$SERVICE_PATH"; then sudo cat "$SERVICE_PATH" > "$TMP_OLD_SERVICE"; HAD_SERVICE_FILE=1; fi
 if [ -d "$VENV" ]; then HAD_VENV=1; fi
 
 if [ "$HAD_RUNNING_SERVICE" -eq 1 ]; then sudo systemctl stop "$SERVICE_NAME"; fi
 
-# The old process no longer owns the database. Only now may its schema change.
 if [ "$SCHEMA_ACTION" = upgrade ]; then
     "$STAGE_VENV/bin/python" -m ocpp_csms.install_cutover schema-upgrade --data-dir "$DATA_DIR" >/dev/null
 fi
@@ -173,19 +200,16 @@ if [ "$HAD_VENV" -eq 1 ]; then mv "$VENV" "$PREVIOUS_VENV"; fi
 mv "$STAGE_VENV" "$VENV"
 PROMOTED=1
 
-# Console scripts generated while the environment was named venv.next carry
-# that absolute interpreter path. Reinstall from the local checkout after the
-# promotion so the commands use the final venv path before systemd starts it.
 "$VENV/bin/python" -m pip install --no-deps --force-reinstall "$ROOT"
 
 mkdir -p "$BIN_DIR" "$DATA_DIR"
 ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
 ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"
+ln -sf "$VENV/bin/ocpp-discover" "$DISCOVER_COMMAND"
 ensure_user_bin_on_path
 
-# The live unit must point at the promoted environment, not the retired staging
-# path used for pre-cutover validation.
 render_service "$VENV/bin/ocpp-csms"
+render_discover_service "$VENV/bin/python"
 
 rollback_startup() {
     printf 'Replacement CSMS failed during handoff.\n' >&2
@@ -196,6 +220,7 @@ rollback_startup() {
         mv "$PREVIOUS_VENV" "$VENV"
         ln -sf "$VENV/bin/ocpp-csms" "$COMMAND"
         ln -sf "$VENV/bin/ocpp-csms" "$CSMS_COMMAND"
+        ln -sf "$VENV/bin/ocpp-discover" "$DISCOVER_COMMAND" 2>/dev/null || true
         if [ "$HAD_SERVICE_FILE" -eq 1 ]; then sudo install -m 0644 "$TMP_OLD_SERVICE" "$SERVICE_PATH"; fi
         sudo systemctl daemon-reload
         if [ "$HAD_RUNNING_SERVICE" -eq 1 ]; then sudo systemctl start "$SERVICE_NAME" || true; fi
@@ -206,7 +231,6 @@ rollback_startup() {
     exit 1
 }
 
-# init creates a brand-new current schema when needed and is a no-op for a current/upgraded DB.
 if ! "$COMMAND" --data-dir "$DATA_DIR" init; then rollback_startup; fi
 [ -f "$DATA_DIR/$DATABASE_NAME" ] || rollback_startup
 [ -d "$DATA_DIR/transactions" ] || rollback_startup
@@ -240,7 +264,6 @@ then
     rollback_startup
 fi
 
-# Every charger connected at the final gate must emit a fresh connection event.
 if ! "$VENV/bin/python" -m ocpp_csms.install_cutover wait-reconnect \
     --data-dir "$DATA_DIR" --baseline "$TMP_BASELINE" --timeout 30; then
     printf 'Service handoff incomplete: one or more previously connected chargers did not reconnect. The replacement CSMS remains running for diagnosis.\n' >&2
@@ -250,28 +273,45 @@ fi
 [ -w "$DATA_DIR" ] || { printf 'Data directory stopped being writable by %s: %s\n' "$INSTALL_USER" "$DATA_DIR" >&2; exit 1; }
 "$COMMAND" --data-dir "$DATA_DIR" status >/dev/null
 
-case "$DISCOVER_MODE" in
-    install|uninstall)
-        # Discover is a later network mutation: active charging still blocks it.
-        PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m ocpp_csms.install_preflight --data-dir "$DATA_DIR" >/dev/null
-        if [ "$DISCOVER_MODE" = install ]; then
-            OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" sh "$ROOT/discover.sh" --install
-        else
-            OCPP_CSMS_PREFIX="$PREFIX" OCPP_CSMS_DATA_DIR="$DATA_DIR" OCPP_CSMS_PORT="$PORT" sh "$ROOT/discover.sh" --uninstall
-        fi
-        ;;
-    preserve) ;;
-esac
+# Discover is part of the appliance. Its convergence happens only after CSMS is
+# healthy. A Discover failure reports an incomplete appliance but does not roll
+# back a proven healthy CSMS replacement.
+run_preflight >/dev/null
+if ! sudo "$VENV/bin/python" -m ocpp_discover.lifecycle prepare >/dev/null; then
+    printf 'CSMS installation succeeded, but OCPP Discover persistent integration failed.\n' >&2
+    exit 1
+fi
+sudo systemctl enable nftables.service >/dev/null
 
-printf 'Installed OCPP CSMS appliance for %s\n' "$INSTALL_USER"
-printf 'Command: %s\n' "$CSMS_COMMAND"
-printf 'Data:    %s\n' "$DATA_DIR"
-printf 'Service: %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
+DISCOVER_UNIT_CHANGED=0
+if ! sudo cmp -s "$TMP_DISCOVER_SERVICE" "$DISCOVER_SERVICE_PATH" 2>/dev/null; then DISCOVER_UNIT_CHANGED=1; fi
+sudo install -m 0644 "$TMP_DISCOVER_SERVICE" "$DISCOVER_SERVICE_PATH"
+sudo systemctl daemon-reload
+sudo systemctl enable "$DISCOVER_SERVICE_NAME" >/dev/null
+if [ "$DISCOVER_UNIT_CHANGED" -eq 1 ]; then
+    if ! sudo systemctl restart "$DISCOVER_SERVICE_NAME"; then
+        printf 'CSMS installation succeeded, but OCPP Discover failed to restart.\n' >&2
+        sudo journalctl -u "$DISCOVER_SERVICE_NAME" -n 20 --no-pager >&2 || true
+        exit 1
+    fi
+else
+    if ! sudo systemctl start "$DISCOVER_SERVICE_NAME"; then
+        printf 'CSMS installation succeeded, but OCPP Discover failed to start.\n' >&2
+        sudo journalctl -u "$DISCOVER_SERVICE_NAME" -n 20 --no-pager >&2 || true
+        exit 1
+    fi
+fi
+if ! sudo systemctl is-active --quiet "$DISCOVER_SERVICE_NAME"; then
+    printf 'CSMS installation succeeded, but OCPP Discover is not active.\n' >&2
+    exit 1
+fi
+
+printf 'Installed OCPP appliance for %s\n' "$INSTALL_USER"
+printf 'CSMS command:     %s\n' "$CSMS_COMMAND"
+printf 'Discover command: %s\n' "$DISCOVER_COMMAND"
+printf 'Data:             %s\n' "$DATA_DIR"
+printf 'CSMS:             %s (active, enabled, listening on %s:%s)\n' "$SERVICE_NAME" "$HOST" "$PORT"
+printf 'Discover:         %s (active, enabled, interface %s)\n' "$DISCOVER_SERVICE_NAME" "$DISCOVER_INTERFACE"
 case "$SCHEMA_ACTION" in upgrade) printf 'Schema: upgraded with backup preserved\n' ;; *) printf 'Schema: current\n' ;; esac
-case "$DISCOVER_MODE" in
-    install) printf 'Discover: ocpp-discover.service enabled\n' ;;
-    uninstall) printf 'Discover: disabled/uninstalled\n' ;;
-    preserve) printf 'Discover: existing state preserved\n' ;;
-esac
-printf '\nUseful commands:\n  csms status\n  sudo systemctl status %s\n  sudo journalctl -u %s -f\n' "$SERVICE_NAME" "$SERVICE_NAME"
-case ":$PATH:" in *":$BIN_DIR:"*) ;; *) printf 'Open a new shell, or source your shell configuration, before running csms directly.\n' ;; esac
+printf '\nUseful commands:\n  csms status\n  ocpp-discover status\n  sudo ocpp-discover diagnostics\n  sudo systemctl status %s %s\n' "$SERVICE_NAME" "$DISCOVER_SERVICE_NAME"
+case ":$PATH:" in *":$BIN_DIR:"*) ;; *) printf 'Open a new shell, or source your shell configuration, before running appliance commands directly.\n' ;; esac

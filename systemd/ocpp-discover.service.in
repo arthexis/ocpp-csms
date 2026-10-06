@@ -4,9 +4,8 @@ Wants=network-online.target ocpp-csms.service
 After=network-online.target ocpp-csms.service
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart="@PYTHON@" -m ocpp_discover service --data-dir "@DATA_DIR@" --runtime-dir /run/ocpp-discover --persistent-dir /var/lib/ocpp-discover --interface "@INTERFACE@" --listen-port @PORT@
-RemainAfterExit=no
 Restart=on-failure
 RestartSec=5
 

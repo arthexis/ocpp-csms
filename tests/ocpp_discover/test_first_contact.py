@@ -1,9 +1,18 @@
 from types import SimpleNamespace
 
 from ocpp_discover import diagnosis, first_contact, service
+from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 
 
 SYN = "12:00:00.000000 IP 192.168.50.20.50000 > 192.168.50.1.8888: Flags [S], seq 1\n"
+
+
+def adaptation():
+    return RedirectReceipt(interface="enp7s0", listen_port=9100, source_ip="192.168.50.20", destination_ips=["192.168.50.1"], requests=[WebSocketRequest("192.168.50.1", "192.168.50.1:8888", "/ocpp/CP7")], captured_at="discovered", destination_port=8888)
+
+
+def result():
+    return SimpleNamespace(charger_id="CP7", receipt=adaptation(), to_json=lambda: {"status": "connected"})
 
 
 def test_first_discovery_passes_initial_syn_into_discovery(tmp_path, monkeypatch):
@@ -11,8 +20,9 @@ def test_first_discovery_passes_initial_syn_into_discovery(tmp_path, monkeypatch
     evidence = diagnosis.DiscoveryEvidence("candidate", SYN)
     monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface: evidence)
     calls = []
-    monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or SimpleNamespace(to_json=lambda: {"status": "connected"}))
-    outcome = service.run_service(data_dir=tmp_path / "data", runtime_dir=tmp_path / "runtime", persistent_dir=tmp_path / "persistent", interface="enp7s0", listen_port=9100)
+    monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or result())
+    monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args, **kwargs: None)
+    outcome = service.run_service(data_dir=tmp_path / "data", runtime_dir=tmp_path / "runtime", persistent_dir=tmp_path / "persistent", interface="enp7s0", listen_port=9100, max_cycles=1)
     assert outcome["status"] == "discovered"
     assert len(calls) == 1
     assert calls[0]["initial_evidence"] == SYN
@@ -24,8 +34,9 @@ def test_first_discovery_preserves_qualified_arp_capture(tmp_path, monkeypatch):
     evidence = diagnosis.DiscoveryEvidence("candidate", first + second)
     monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface: evidence)
     calls = []
-    monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or SimpleNamespace(to_json=lambda: {"status": "connected"}))
-    service.run_service(data_dir=tmp_path / "data", runtime_dir=tmp_path / "runtime", persistent_dir=tmp_path / "persistent", interface="enp7s0", listen_port=9100)
+    monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or result())
+    monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args, **kwargs: None)
+    service.run_service(data_dir=tmp_path / "data", runtime_dir=tmp_path / "runtime", persistent_dir=tmp_path / "persistent", interface="enp7s0", listen_port=9100, max_cycles=1)
     assert calls[0]["initial_evidence"] == first + second
 
 

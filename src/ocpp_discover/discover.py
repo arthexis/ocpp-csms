@@ -12,8 +12,8 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from field import redirect as redirect_tools
-from field.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_discover import redirect as redirect_tools
+from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"

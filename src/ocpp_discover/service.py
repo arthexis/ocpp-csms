@@ -56,8 +56,8 @@ def _observe_persistent(data_dir: str | Path, persistent_dir: str | Path, *, boo
     return _wait_for_recovery(data_dir, persistent_dir, receipt, diagnosis_seconds=diagnosis_seconds, timeout=validation_timeout)
 
 
-def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float) -> dict[str, object]:
-    """Wait silently for first charger evidence and carry it into discovery."""
+def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persistent_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float) -> dict[str, object]:
+    """Wait silently for first charger evidence, prove it, and promote it to durable state."""
     evidence = diagnosis.wait_for_discovery_evidence(interface)
     result = discover.run_discovery(
         data_dir=data_dir,
@@ -70,18 +70,41 @@ def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, interf
         connect_timeout=connect_timeout,
         initial_evidence=evidence.capture,
     )
-    return {"status": "discovered", "result": result.to_json()}
+    receipt = getattr(result, "receipt", None)
+    charger_id = getattr(result, "charger_id", None)
+    if receipt is None or charger_id is None:
+        raise RuntimeError("discovery_did_not_produce_proven_adaptation")
+    handoff._promote_persistent_adaptation(persistent_dir, receipt)
+    return {"status": "discovered", "chargers": [charger_id], "result": result.to_json()}
 
 
-def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR, persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR, interface: str = "eth0", listen_port: int = 9000, grace_seconds: float = 10.0, arp_seconds: float = 15.0, tcp_seconds: float = 15.0, connect_timeout: float = 30.0, boot_timeout: float = _DEFAULT_BOOT_TIMEOUT, wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS):
-    """Observe known state; reconcile contradictions; discover only after positive evidence."""
+def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR, persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR, interface: str = "eth0", listen_port: int = 9000, grace_seconds: float = 10.0, arp_seconds: float = 15.0, tcp_seconds: float = 15.0, connect_timeout: float = 30.0, boot_timeout: float = _DEFAULT_BOOT_TIMEOUT, wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS, max_cycles: int | None = None):
+    """Continuously observe, diagnose, and reconcile the proven charger adaptation.
+
+    ``max_cycles`` exists only to make bounded unit tests possible. Production callers
+    leave it unset, so successful discovery/validation never terminates the service.
+    """
+    cycles = 0
+
     if handoff.discovered_path(persistent_dir).exists():
-        return _observe_persistent(data_dir, persistent_dir, boot_timeout=boot_timeout, diagnosis_seconds=wait_interval, validation_timeout=connect_timeout)
-    return _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
+        outcome = _observe_persistent(data_dir, persistent_dir, boot_timeout=boot_timeout, diagnosis_seconds=wait_interval, validation_timeout=connect_timeout)
+    else:
+        outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
+
+    cycles += 1
+    if max_cycles is not None and cycles >= max_cycles:
+        return outcome
+
+    while True:
+        receipt = handoff.load_discovered(persistent_dir)
+        outcome = _wait_for_recovery(data_dir, persistent_dir, receipt, diagnosis_seconds=wait_interval, timeout=connect_timeout)
+        cycles += 1
+        if max_cycles is not None and cycles >= max_cycles:
+            return outcome
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ocpp_discover service", description="Observe, diagnose, and safely reconcile a persistent OCPP adaptation.")
+    parser = argparse.ArgumentParser(prog="python -m ocpp_discover service", description="Continuously observe, diagnose, and safely reconcile a persistent OCPP adaptation.")
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--runtime-dir", default=_DEFAULT_RUNTIME_DIR)
     parser.add_argument("--persistent-dir", default=_DEFAULT_PERSISTENT_DIR)
