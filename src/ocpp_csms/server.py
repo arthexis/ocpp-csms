@@ -101,7 +101,8 @@ class CSMSServer:
             self._record_runtime("server_stopped")
             remove_pid(self.events.data_dir)
 
-    async def accept(self, websocket: WebSocketServerProtocol, path: str) -> None:
+    async def accept(self, websocket: WebSocketServerProtocol) -> None:
+        path = websocket.path
         charge_point_id = charge_point_id_from_path(path)
         if not charge_point_id:
             await websocket.close(code=1008, reason="Missing charge point id")
