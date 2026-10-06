@@ -33,7 +33,7 @@ def add_profile_command(
     add(profile_composite, "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_composite, "--connector", "--cp", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
     add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
-    add(profile_composite, "--json", action="store_true", help="Print the OCPP response as JSON")
+    add(profile_composite, "-j", "--json", action="store_true", help="Print the OCPP response as JSON")
     profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
     add(profile_clear, "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
