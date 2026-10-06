@@ -16,7 +16,7 @@ def add_config_command(
 ) -> argparse.ArgumentParser:
     """Register the configuration command while preserving its existing syntax."""
     config = subcommands.add_parser("config", help="Read or change charger configuration")
-    config.add_argument("--charger", help="Explicit charge point ID when more than one charger is connected")
+    config.add_argument("-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     config.add_argument("items", nargs="*", metavar="KEY", help="Keys to read, or: set KEY VALUE")
     config.add_argument("-f", "--force", action="store_true", help="Operate even with an active transaction")
     add_config_download_arguments(config)
@@ -26,7 +26,7 @@ def add_config_command(
 def add_config_download_arguments(config: argparse.ArgumentParser) -> None:
     """Add options used by the ``config download`` command."""
     config.add_argument("--show-sensitive", action="store_true", help="Do not mask sensitive configuration values")
-    config.add_argument("--json", action="store_true", help="Print a downloaded snapshot as JSON")
+    config.add_argument("-j", "--json", action="store_true", help="Print a downloaded snapshot as JSON")
     config.add_argument("--output", help="Write a downloaded JSON snapshot to this file")
 
 

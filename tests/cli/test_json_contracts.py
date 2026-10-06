@@ -6,6 +6,7 @@ import ocpp_csms.cli.config as config_cli
 import ocpp_csms.cli.profile as profile_cli
 from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.config import run_config_download
+from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.profile import run_profile
 from ocpp_csms.output import emit_json, json_command_result
 
@@ -82,3 +83,34 @@ def test_profile_composite_json_uses_deterministic_emitter(monkeypatch, tmp_path
     assert output.endswith("\n")
     assert json.loads(output)["status"] == "Accepted"
     assert "\n  " not in output
+
+
+def test_transaction_json_local_time_controls_filter_and_event_times(tmp_path, capsys):
+    directory = tmp_path / "transactions" / "2026-10-06"
+    directory.mkdir(parents=True)
+    record = {
+        "transaction_id": 1,
+        "origin": "local",
+        "charge_point_id": "charger-a",
+        "status": "stopped",
+        "created_at": "2026-10-06T12:00:00Z",
+        "updated_at": "2026-10-06T12:10:00Z",
+        "start": {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"},
+        "start_received_at": "2026-10-06T12:00:00Z",
+        "meter_values": [],
+        "meter_values_received_at": [],
+        "stop": {"transaction_id": 1, "timestamp": "2020-01-01T00:10:00Z"},
+        "stop_received_at": "2026-10-06T12:10:00Z",
+    }
+    (directory / "charger-a-1.json").write_text(json.dumps(record))
+
+    parser, _ = build_parser()
+    args = parser.parse_args([
+        "--data-dir", str(tmp_path), "txn", "-jT", "--since", "2026-10-06T12:05:00Z",
+    ])
+    assert run_transactions_json(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    [transaction] = payload["data"]["transactions"]
+    assert transaction["started_at"] == "2026-10-06T12:00:00Z"
+    assert transaction["stopped_at"] == "2026-10-06T12:10:00Z"
+    assert transaction["last_activity_at"] == "2026-10-06T12:10:00Z"

@@ -22,7 +22,7 @@ def _payload(record: dict[str, Any], name: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def transaction_item(view: TransactionView) -> dict[str, Any]:
+def transaction_item(view: TransactionView, *, local_time: bool = False) -> dict[str, Any]:
     """Serialize one transaction into the stable machine-readable contract."""
     record = view.record
     start = _payload(record, "start")
@@ -34,8 +34,11 @@ def transaction_item(view: TransactionView) -> dict[str, Any]:
     if meter_start is not None and meter_stop is not None:
         energy_wh = meter_stop - meter_start
 
-    started_at = start.get("timestamp") if start else None
-    stopped_at = stop.get("timestamp") if stop else None
+    started_at = record.get("start_received_at") if local_time else (start.get("timestamp") if start else None)
+    stopped_at = record.get("stop_received_at") if local_time else (stop.get("timestamp") if stop else None)
+    if local_time:
+        started_at = started_at or record.get("created_at")
+        stopped_at = stopped_at or (record.get("updated_at") if stop else None)
 
     return {
         "id": view.transaction_id,
@@ -49,12 +52,12 @@ def transaction_item(view: TransactionView) -> dict[str, Any]:
         "meter_start_wh": meter_start,
         "meter_stop_wh": meter_stop,
         "energy_wh": energy_wh,
-        "last_activity_at": view.activity_at,
+        "last_activity_at": view.event_time(local_time=local_time),
     }
 
 
-def transactions_contract(views: Iterable[TransactionView]) -> dict[str, Any]:
+def transactions_contract(views: Iterable[TransactionView], *, local_time: bool = False) -> dict[str, Any]:
     return json_command_result(
-        {"transactions": [transaction_item(view) for view in views]},
+        {"transactions": [transaction_item(view, local_time=local_time) for view in views]},
         schema=TRANSACTIONS_SCHEMA,
     )

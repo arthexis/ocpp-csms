@@ -122,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("--persistent-dir", default=str(DEFAULT_PERSISTENT_DIR))
         command.add_argument("--service", default=DEFAULT_SERVICE)
-        command.add_argument("--json", action="store_true")
+        command.add_argument("-j", "--json", action="store_true")
     return parser
 
 

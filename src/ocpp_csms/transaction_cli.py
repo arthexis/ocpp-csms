@@ -12,9 +12,7 @@ def _text(value: object | None, default: str = "-") -> str:
 
 
 def _timestamp(value: object | None) -> str:
-    if not isinstance(value, str):
-        return "-"
-    return value
+    return value if isinstance(value, str) else "-"
 
 
 def _age_key(value: datetime) -> str:
@@ -68,9 +66,7 @@ def _energy_wh(start: dict[str, Any], stop: dict[str, Any]) -> int | None:
 
 
 def _format_energy(energy_wh: int) -> str:
-    if energy_wh >= 1000:
-        return f"{energy_wh / 1000:.3f} kWh"
-    return f"{energy_wh} Wh"
+    return f"{energy_wh / 1000:.3f} kWh" if energy_wh >= 1000 else f"{energy_wh} Wh"
 
 
 def _transaction_energy(view: TransactionView) -> str:
@@ -81,28 +77,30 @@ def _transaction_energy(view: TransactionView) -> str:
     return _format_energy(energy_wh) if energy_wh is not None else "-"
 
 
-def _meter_summary(record: dict[str, Any]) -> dict[str, object]:
+def _meter_summary(record: dict[str, Any], *, local_time: bool = False) -> dict[str, object]:
     payloads = record.get("meter_values")
     if not isinstance(payloads, list):
         payloads = []
-
+    received = record.get("meter_values_received_at")
+    if not isinstance(received, list):
+        received = []
     sample_count = 0
     timestamps: list[str] = []
     latest_energy: tuple[str, str] | None = None
     latest_power: tuple[str, str] | None = None
-
-    for payload in payloads:
+    for index, payload in enumerate(payloads):
         if not isinstance(payload, dict):
             continue
+        if local_time and index < len(received) and isinstance(received[index], str):
+            timestamps.append(received[index])
         meter_values = payload.get("meter_value")
         if not isinstance(meter_values, list):
             continue
         for entry in meter_values:
             if not isinstance(entry, dict):
                 continue
-            timestamp = entry.get("timestamp")
-            if isinstance(timestamp, str):
-                timestamps.append(timestamp)
+            if not local_time and isinstance(entry.get("timestamp"), str):
+                timestamps.append(entry["timestamp"])
             samples = entry.get("sampled_value")
             if not isinstance(samples, list):
                 continue
@@ -110,121 +108,67 @@ def _meter_summary(record: dict[str, Any]) -> dict[str, object]:
                 if not isinstance(sample, dict):
                     continue
                 sample_count += 1
-                value = sample.get("value")
-                measurand = sample.get("measurand")
-                unit = sample.get("unit")
-                if not isinstance(value, str) or not isinstance(measurand, str) or not isinstance(unit, str):
+                value, measurand, unit = sample.get("value"), sample.get("measurand"), sample.get("unit")
+                if not all(isinstance(item, str) for item in (value, measurand, unit)):
                     continue
                 if measurand == "Energy.Active.Import.Register":
                     latest_energy = (value, unit)
                 elif measurand == "Power.Active.Import":
                     latest_power = (value, unit)
-
-    return {
-        "messages": len(payloads),
-        "samples": sample_count,
-        "first": min(timestamps) if timestamps else None,
-        "last": max(timestamps) if timestamps else None,
-        "latest_energy": latest_energy,
-        "latest_power": latest_power,
-    }
+    return {"messages": len(payloads), "samples": sample_count, "first": min(timestamps) if timestamps else None, "last": max(timestamps) if timestamps else None, "latest_energy": latest_energy, "latest_power": latest_power}
 
 
-def format_transactions(views: Iterable[TransactionView]) -> str:
+def format_transactions(views: Iterable[TransactionView], *, local_time: bool = False) -> str:
     rows = list(views)
     if not rows:
         return "No transactions."
-
-    headers = ("TXN", "STATUS", "CHARGER", "CP", "RFID", "ENERGY", "UPDATED")
+    headers = ("TXN", "STATUS", "CHARGER", "CP", "RFID", "ENERGY", "EVENT TIME")
     body = [
-        (
-            str(view.transaction_id),
-            view.status or "unknown",
-            view.charge_point_id or "-",
-            _text(view.connector_id, "?"),
-            _text(view.id_tag),
-            _transaction_energy(view),
-            _age_key(view.activity_at),
-        )
+        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_energy(view), _age_key(view.event_time(local_time=local_time)))
         for view in rows
     ]
-    widths = [
-        max(len(headers[index]), *(len(row[index]) for row in body))
-        for index in range(len(headers))
-    ]
-
+    widths = [max(len(headers[index]), *(len(row[index]) for row in body)) for index in range(len(headers))]
     def line(values: tuple[str, ...]) -> str:
         return "  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip()
-
     return "\n".join([line(headers), *(line(row) for row in body)])
 
 
-def format_transaction(view: TransactionView) -> str:
+def format_transaction(view: TransactionView, *, local_time: bool = False) -> str:
     record = view.record
     start = record.get("start") if isinstance(record.get("start"), dict) else {}
     stop = record.get("stop") if isinstance(record.get("stop"), dict) else {}
     origin = record.get("origin") or ("local" if start else "recovered")
-    duration = _duration(start.get("timestamp"), stop.get("timestamp"))
+    if local_time:
+        started = record.get("start_received_at") or (record.get("created_at") if start else None)
+        stopped = record.get("stop_received_at") or (record.get("updated_at") if stop else None)
+    else:
+        started, stopped = start.get("timestamp"), stop.get("timestamp")
+    duration = _duration(started, stopped)
     energy_wh = _energy_wh(start, stop)
-    meter = _meter_summary(record)
-
+    meter = _meter_summary(record, local_time=local_time)
     lines = [
-        f"Transaction {view.transaction_id}",
-        f"Status:       {view.status or 'unknown'}",
-        f"Origin:       {origin}",
-        f"Charger:      {view.charge_point_id or '-'}",
-        f"Connector:    {_text(view.connector_id, '?')}",
-        f"RFID:         {_text(view.id_tag)}",
-        "",
-        f"Started:      {_timestamp(start.get('timestamp'))}",
-        f"Stopped:      {_timestamp(stop.get('timestamp'))}",
+        f"Transaction {view.transaction_id}", f"Status:       {view.status or 'unknown'}", f"Origin:       {origin}",
+        f"Charger:      {view.charge_point_id or '-'}", f"Connector:    {_text(view.connector_id, '?')}", f"RFID:         {_text(view.id_tag)}", "",
+        f"Started:      {_timestamp(started)}", f"Stopped:      {_timestamp(stopped)}",
     ]
     if duration is not None:
         lines.append(f"Duration:     {duration}")
-    lines.extend(
-        (
-            f"Last update:  {_age_key(view.activity_at)}",
-            f"Meter start:  {_text(start.get('meter_start'))}",
-            f"Meter stop:   {_text(stop.get('meter_stop'))}",
-        )
-    )
+    lines.extend((f"Event time:   {_age_key(view.event_time(local_time=local_time))}", f"Meter start:  {_text(start.get('meter_start'))}", f"Meter stop:   {_text(stop.get('meter_stop'))}"))
     if energy_wh is not None:
         lines.append(f"Energy:       {_format_energy(energy_wh)}")
-
-    lines.extend(
-        (
-            "",
-            "MeterValues:",
-            f"  messages:   {meter['messages']}",
-            f"  samples:    {meter['samples']}",
-            f"  first:      {_text(meter['first'])}",
-            f"  last:       {_text(meter['last'])}",
-        )
-    )
+    lines.extend(("", "MeterValues:", f"  messages:   {meter['messages']}", f"  samples:    {meter['samples']}", f"  first:      {_text(meter['first'])}", f"  last:       {_text(meter['last'])}"))
     if meter["latest_energy"] is not None:
         value, unit = meter["latest_energy"]
         lines.append(f"  latest energy: {value} {unit}")
     if meter["latest_power"] is not None:
         value, unit = meter["latest_power"]
         lines.append(f"  latest power: {value} {unit}")
-
     if origin == "recovered" and not start:
         recovered_by = "StopTransaction" if stop else "MeterValues" if record.get("meter_values") else "historical traffic"
-        lines.extend(
-            (
-                "",
-                "Recovery:",
-                "  start:      unknown",
-                f"  recovered:  {recovered_by}",
-            )
-        )
-
+        lines.extend(("", "Recovery:", "  start:      unknown", f"  recovered:  {recovered_by}"))
     if view.unresolved:
         lines.extend(("", "Warnings:"))
         for unresolved in view.unresolved:
-            reason = unresolved.get("reason") or "unknown"
-            message_type = unresolved.get("message_type") or "OCPP"
-            lines.append(f"  unresolved {message_type}: {reason}")
-
+            lines.append(f"  unresolved {unresolved.get('message_type') or 'OCPP'}: {unresolved.get('reason') or 'unknown'}")
     lines.extend(("", f"Archive:      {_archive_path(view)}"))
     return "\n".join(lines)

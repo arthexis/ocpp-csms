@@ -58,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--persistent-dir", default=str(DEFAULT_PERSISTENT_DIR))
-    prepare.add_argument("--json", action="store_true")
+    prepare.add_argument("-j", "--json", action="store_true")
     remove = subparsers.add_parser("remove")
     remove.add_argument("--persistent-dir", default=str(DEFAULT_PERSISTENT_DIR))
     return parser
