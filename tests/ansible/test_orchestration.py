@@ -23,13 +23,60 @@ def test_safety_gates_bracket_staging_and_handoff():
         )
 
 
+def test_legacy_inspection_occurs_after_candidate_validation_before_handoff():
+    main = read(TASKS / "main.yml")
+    assert_task_order(
+        main,
+        "Verify candidate systemd unit before handoff",
+        "Run final install safety preflight",
+        "Inspect legacy Arthexis OCPP listener",
+        "Perform controlled OCPP CSMS handoff",
+    )
+
+
+def test_legacy_detection_is_listener_owned_not_install_presence():
+    legacy = read(TASKS / "legacy_arthexis.yml")
+    assert "ActiveState,MainPID" in legacy
+    assert "ss -H -ltnp" in legacy
+    assert "ocpp_csms_listener_pid.stdout" in legacy
+    defaults = load_yaml(DEFAULTS)
+    assert "arthexis-web.service" in defaults["ocpp_csms_legacy_arthexis_services"]
+    assert "arthexis-arthexis-arthexis.service" in defaults["ocpp_csms_legacy_arthexis_services"]
+
+
 def test_handoff_captures_reconnect_baseline_before_downtime():
     cutover = read(TASKS / "cutover.yml")
     assert_task_order(
         cutover,
         "Capture charger reconnect baseline",
+        "Stop legacy Arthexis listener at cutover",
         "Stop existing OCPP CSMS service",
     )
+
+
+def test_legacy_service_is_disabled_only_after_verified_promotion():
+    cutover = read(TASKS / "cutover.yml")
+    assert_task_order(
+        cutover,
+        "Wait for OCPP CSMS listener",
+        "Verify candidate OCPP CSMS application status",
+        "Promote verified release to current",
+        "Disable legacy Arthexis OCPP service after verified takeover",
+    )
+
+
+def test_failed_legacy_takeover_restores_old_listener():
+    restore = read(TASKS / "legacy_arthexis_restore.yml")
+    assert_task_order(
+        restore,
+        "Stop failed replacement before legacy Arthexis rollback",
+        "Restore legacy Arthexis OCPP listener",
+        "Verify restored legacy Arthexis listener",
+    )
+    failure = task_by_name(
+        TASKS / "cutover.yml", "Report failed legacy Arthexis takeover after restoration"
+    )
+    assert failure["when"] == "ocpp_csms_legacy_arthexis_service | length > 0"
 
 
 def test_schema_upgrade_happens_only_after_old_service_stops():
@@ -54,7 +101,7 @@ def test_replacement_health_is_proven_before_current_is_promoted():
     )
 
 
-def test_schema_upgrade_disables_automatic_runtime_rollback():
+def test_schema_upgrade_disables_managed_release_runtime_rollback():
     cutover = TASKS / "cutover.yml"
     for name in (
         "Stop failed replacement before rollback",
