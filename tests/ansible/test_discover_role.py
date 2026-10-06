@@ -1,4 +1,12 @@
-from .helpers import ANSIBLE, PLAYBOOK, assert_task_order, read, task_section
+from .helpers import (
+    ANSIBLE,
+    PLAYBOOK,
+    assert_named_task_order,
+    load_yaml,
+    read,
+    task_by_name,
+    task_names,
+)
 
 
 DISCOVER_ROLE = ANSIBLE / "roles" / "ocpp_discover"
@@ -8,26 +16,27 @@ DISCOVER_TEMPLATE = DISCOVER_ROLE / "templates" / "ocpp-discover.service.j2"
 
 
 def test_satellite_converges_csms_before_discover():
-    playbook = read(PLAYBOOK)
-    assert playbook.index("- role: ocpp_csms") < playbook.index("- role: ocpp_discover")
+    plays = load_yaml(PLAYBOOK)
+    roles = plays[0]["roles"]
+    names = [role["role"] if isinstance(role, dict) else role for role in roles]
+    assert names.index("ocpp_csms") < names.index("ocpp_discover")
 
 
 def test_discover_uses_active_immutable_csms_runtime():
-    defaults = read(DISCOVER_DEFAULTS)
+    defaults = load_yaml(DISCOVER_DEFAULTS)
     template = read(DISCOVER_TEMPLATE)
 
-    assert 'ocpp_discover_python: "{{ ocpp_discover_prefix }}/current/venv/bin/python"' in defaults
-    assert 'ocpp_discover_runtime_command: "{{ ocpp_discover_prefix }}/current/venv/bin/ocpp-discover"' in defaults
+    assert defaults["ocpp_discover_python"] == "{{ ocpp_discover_prefix }}/current/venv/bin/python"
+    assert defaults["ocpp_discover_runtime_command"] == "{{ ocpp_discover_prefix }}/current/venv/bin/ocpp-discover"
     assert "{{ ocpp_discover_python }}" in template
     assert "/venv/bin/python" not in template.replace("{{ ocpp_discover_python }}", "")
 
 
 def test_discover_exposes_stable_global_operator_command():
-    defaults = read(DISCOVER_DEFAULTS)
-    tasks = read(DISCOVER_TASKS)
-    assert "ocpp_discover_command_path: /usr/local/bin/ocpp-discover" in defaults
-    assert_task_order(
-        tasks,
+    defaults = load_yaml(DISCOVER_DEFAULTS)
+    assert defaults["ocpp_discover_command_path"] == "/usr/local/bin/ocpp-discover"
+    assert_named_task_order(
+        DISCOVER_TASKS,
         "Verify active immutable OCPP Discover command exists",
         "Require active immutable OCPP Discover command",
         "Install stable OCPP Discover command",
@@ -36,10 +45,10 @@ def test_discover_exposes_stable_global_operator_command():
         "Assert stable OCPP Discover command target",
         "Install OCPP Discover runtime packages",
     )
-    install = task_section(tasks, "Install stable OCPP Discover command")
-    assert 'src: "{{ ocpp_discover_runtime_command }}"' in install
-    assert 'dest: "{{ ocpp_discover_command_path }}"' in install
-    assert "state: link" in install
+    install = task_by_name(DISCOVER_TASKS, "Install stable OCPP Discover command")["ansible.builtin.file"]
+    assert install["src"] == "{{ ocpp_discover_runtime_command }}"
+    assert install["dest"] == "{{ ocpp_discover_command_path }}"
+    assert install["state"] == "link"
 
 
 def test_discover_is_resident_restartable_service():
@@ -52,9 +61,8 @@ def test_discover_is_resident_restartable_service():
 
 
 def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
-    tasks = read(DISCOVER_TASKS)
-    assert_task_order(
-        tasks,
+    assert_named_task_order(
+        DISCOVER_TASKS,
         "Inspect OCPP Discover charger-facing interface",
         "Require OCPP Discover charger-facing interface",
         "Verify active immutable CSMS Python runtime exists",
@@ -65,15 +73,13 @@ def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
         "Require shared OCPP CSMS data directory",
         "Install OCPP Discover runtime packages",
     )
-
-    interface = task_section(tasks, "Inspect OCPP Discover charger-facing interface")
-    assert "/sys/class/net/{{ ocpp_discover_interface }}" in interface
+    interface = task_by_name(DISCOVER_TASKS, "Inspect OCPP Discover charger-facing interface")
+    assert interface["ansible.builtin.stat"]["path"] == "/sys/class/net/{{ ocpp_discover_interface }}"
 
 
 def test_discover_installs_static_host_integration_before_service_activation():
-    tasks = read(DISCOVER_TASKS)
-    assert_task_order(
-        tasks,
+    assert_named_task_order(
+        DISCOVER_TASKS,
         "Install OCPP Discover runtime packages",
         "Ensure OCPP Discover persistent state directory exists",
         "Prepare OCPP Discover persistent integration",
@@ -91,71 +97,74 @@ def test_discover_installs_static_host_integration_before_service_activation():
 
 
 def test_discover_persistent_directory_is_static_root_owned_state():
-    section = task_section(
-        read(DISCOVER_TASKS), "Ensure OCPP Discover persistent state directory exists"
-    )
-    assert 'path: "{{ ocpp_discover_persistent_dir }}"' in section
-    assert "owner: root" in section
-    assert "group: root" in section
-    assert 'mode: "0755"' in section
+    task = task_by_name(DISCOVER_TASKS, "Ensure OCPP Discover persistent state directory exists")
+    spec = task["ansible.builtin.file"]
+    assert spec["path"] == "{{ ocpp_discover_persistent_dir }}"
+    assert spec["owner"] == "root"
+    assert spec["group"] == "root"
+    assert spec["mode"] == "0755"
 
 
 def test_discover_lifecycle_reports_real_ansible_change_state():
-    section = task_section(
-        read(DISCOVER_TASKS), "Prepare OCPP Discover persistent integration"
-    )
-    assert "--persistent-dir" in section
-    assert "--json" in section
-    assert "register: ocpp_discover_prepare" in section
-    assert "from_json" in section
-    assert ".changed | bool" in section
-    assert "changed_when: false" not in section
+    task = task_by_name(DISCOVER_TASKS, "Prepare OCPP Discover persistent integration")
+    argv = task["ansible.builtin.command"]["argv"]
+    assert "ocpp_discover.lifecycle" in argv
+    assert "prepare" in argv
+    assert "--persistent-dir" in argv
+    assert "--json" in argv
+    assert task["register"] == "ocpp_discover_prepare"
+    assert "from_json" in task["changed_when"]
+    assert ".changed" in task["changed_when"]
 
 
 def test_nftables_is_enabled_without_runtime_restart_or_flush():
-    tasks = read(DISCOVER_TASKS)
-    section = task_section(tasks, "Enable nftables service for future boots")
-
-    assert "enabled: true" in section
-    assert "state:" not in section
-    assert "restart" not in section.lower()
-    assert "flush" not in section.lower()
+    task = task_by_name(DISCOVER_TASKS, "Enable nftables service for future boots")
+    spec = task["ansible.builtin.systemd_service"]
+    assert spec["enabled"] is True
+    assert "state" not in spec
+    assert "restart" not in str(spec).lower()
+    assert "flush" not in str(spec).lower()
 
 
 def test_discover_role_delegates_network_reasoning_to_python():
-    tasks = read(DISCOVER_TASKS)
+    tasks = read(DISCOVER_TASKS).lower()
+    prepare = task_by_name(DISCOVER_TASKS, "Prepare OCPP Discover persistent integration")
+    argv = prepare["ansible.builtin.command"]["argv"]
+    assert "ocpp_discover.lifecycle" in argv
+    assert "prepare" in argv
 
-    prepare = task_section(tasks, "Prepare OCPP Discover persistent integration")
-    assert "ocpp_discover.lifecycle" in prepare
-    assert "prepare" in prepare
-
-    forbidden = ("nft add", "nft delete", "ip addr add", "tcpdump")
-    for command in forbidden:
-        assert command not in tasks.lower()
+    for command in ("nft add", "nft delete", "ip addr add", "tcpdump"):
+        assert command not in tasks
 
 
 def test_discover_unit_change_is_the_only_explicit_restart_trigger():
-    tasks = read(DISCOVER_TASKS)
-    restart = task_section(tasks, "Restart OCPP Discover when its effective unit changes")
-    assert "state: restarted" in restart
-    assert "when: ocpp_discover_unit_install.changed" in restart
+    restart = task_by_name(DISCOVER_TASKS, "Restart OCPP Discover when its effective unit changes")
+    assert restart["ansible.builtin.systemd_service"]["state"] == "restarted"
+    assert restart["when"] == "ocpp_discover_unit_install.changed"
 
-    assert tasks.count("state: restarted") == 1
+    restart_tasks = []
+    for name in task_names(DISCOVER_TASKS):
+        task = task_by_name(DISCOVER_TASKS, name)
+        spec = task.get("ansible.builtin.systemd_service", {})
+        if spec.get("state") == "restarted":
+            restart_tasks.append(name)
+    assert restart_tasks == ["Restart OCPP Discover when its effective unit changes"]
 
 
 def test_unchanged_discover_convergence_does_not_restart_service():
-    tasks = read(DISCOVER_TASKS)
-    started = task_section(tasks, "Ensure unchanged OCPP Discover service is running")
-    assert "state: started" in started
-    assert "when: not ocpp_discover_unit_install.changed" in started
-    assert "restarted" not in started
+    started = task_by_name(DISCOVER_TASKS, "Ensure unchanged OCPP Discover service is running")
+    assert started["ansible.builtin.systemd_service"]["state"] == "started"
+    assert started["when"] == "not ocpp_discover_unit_install.changed"
 
 
 def test_discover_service_is_enabled_and_required_active():
-    tasks = read(DISCOVER_TASKS)
-    enabled = task_section(tasks, "Enable OCPP Discover at boot")
-    active = task_section(tasks, "Confirm OCPP Discover service is active")
+    enabled = task_by_name(DISCOVER_TASKS, "Enable OCPP Discover at boot")
+    assert enabled["ansible.builtin.systemd_service"]["enabled"] is True
 
-    assert "enabled: true" in enabled
-    assert "is-active" in active
-    assert "failed_when: ocpp_discover_active.stdout.strip() != 'active'" in active
+    active = task_by_name(DISCOVER_TASKS, "Confirm OCPP Discover service is active")
+    assert active["ansible.builtin.command"]["argv"] == [
+        "systemctl",
+        "is-active",
+        "{{ ocpp_discover_service_name }}",
+    ]
+    assert active["failed_when"] == "ocpp_discover_active.stdout.strip() != 'active'"
