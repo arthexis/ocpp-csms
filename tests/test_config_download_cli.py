@@ -3,10 +3,11 @@ import json
 import pytest
 
 import ocpp_csms.cli as cli
+import ocpp_csms.cli.config as config_cli
 
 
 def parse_download(*args):
-    parser = cli._build_download_parser()
+    parser, _ = cli.build_parser()
     return parser.parse_args(["config", "download", *args])
 
 
@@ -16,7 +17,7 @@ def install_control_response(monkeypatch, response):
         install_control_response.request = request
         return response
 
-    monkeypatch.setattr(cli, "send_control", fake_send)
+    monkeypatch.setattr(config_cli, "send_control", fake_send)
 
 
 def test_download_uses_full_guarded_configuration_query(monkeypatch):
@@ -32,7 +33,7 @@ def test_download_uses_full_guarded_configuration_query(monkeypatch):
             },
         },
     )
-    monkeypatch.setattr(cli, "_connected_charger", lambda data_dir: "charger-a")
+    monkeypatch.setattr(config_cli, "_connected_charger", lambda data_dir: "charger-a")
 
     assert cli.run_config_download(parse_download()) == 0
     assert install_control_response.request == {"command": "config", "force": False}
@@ -110,3 +111,12 @@ def test_download_show_sensitive_is_explicit(monkeypatch, tmp_path):
 
 def test_download_rejects_duplicate_charger_selectors():
     assert cli.run_config_download(parse_download("charger-a", "--charger", "charger-b")) == 2
+
+
+def test_download_is_recognized_by_unified_cli_parser():
+    args = parse_download("charger-a", "--json")
+
+    assert args.command == "config"
+    assert config_cli.is_config_download(args)
+    assert args.items == ["download", "charger-a"]
+    assert args.json is True
