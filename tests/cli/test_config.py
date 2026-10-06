@@ -1,13 +1,7 @@
 import pytest
 
 import ocpp_csms.cli.config as config_module
-from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.config import configuration_request, run_configuration
-
-
-def parse(*args):
-    parser, _ = build_parser()
-    return parser.parse_args(list(args))
 
 
 @pytest.mark.parametrize(
@@ -21,16 +15,22 @@ def parse(*args):
         (("config", "HeartbeatInterval", "--force"), None, ["HeartbeatInterval"], True),
     ],
 )
-def test_config_request_preserves_selector_keys_and_force(argv, expected_charger, expected_keys, expected_force):
-    request = configuration_request(parse(*argv))
+def test_config_request_preserves_selector_keys_and_force(parse_cli, argv, expected_charger, expected_keys, expected_force):
+    request = configuration_request(parse_cli(*argv))
     assert request["command"] == "config"
     assert request.get("charger") == expected_charger
     assert request["force"] is expected_force
     assert request.get("keys") == expected_keys
 
 
-def test_config_set_builds_change_request():
-    assert configuration_request(parse("config", "set", "HeartbeatInterval", "60")) == {
+def test_legacy_config_positional_charger_remains_a_key(parse_cli):
+    request = configuration_request(parse_cli("config", "charger-a", "HeartbeatInterval"))
+    assert "charger" not in request
+    assert request["keys"] == ["charger-a", "HeartbeatInterval"]
+
+
+def test_config_set_builds_change_request(parse_cli):
+    assert configuration_request(parse_cli("config", "set", "HeartbeatInterval", "60")) == {
         "command": "config_set",
         "key": "HeartbeatInterval",
         "value": "60",
@@ -38,10 +38,22 @@ def test_config_set_builds_change_request():
     }
 
 
-def test_legacy_config_positional_charger_remains_a_key():
-    request = configuration_request(parse("config", "charger-a", "HeartbeatInterval"))
-    assert "charger" not in request
-    assert request["keys"] == ["charger-a", "HeartbeatInterval"]
+def test_config_set_supports_explicit_charger_and_force(parse_cli):
+    assert configuration_request(
+        parse_cli("config", "--charger", "charger-a", "set", "HeartbeatInterval", "60", "--force")
+    ) == {
+        "command": "config_set",
+        "key": "HeartbeatInterval",
+        "value": "60",
+        "force": True,
+        "charger": "charger-a",
+    }
+
+
+@pytest.mark.parametrize("argv", [("config", "set"), ("config", "set", "HeartbeatInterval")])
+def test_config_set_requires_key_and_value(parse_cli, argv):
+    with pytest.raises(ValueError):
+        configuration_request(parse_cli(*argv))
 
 
 def install_response(monkeypatch, response):
@@ -60,6 +72,27 @@ def install_response(monkeypatch, response):
         ({"ok": True, "response": {"configuration_key": "bad"}}, 1),
     ],
 )
-def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
+def test_configuration_result_controls_exit_code(monkeypatch, parse_cli, response, expected_code):
     install_response(monkeypatch, response)
-    assert run_configuration(parse("config", "HeartbeatInterval")) == expected_code
+    assert run_configuration(parse_cli("config", "HeartbeatInterval")) == expected_code
+
+
+def test_config_set_prints_readback_and_accepts_reboot_required(monkeypatch, parse_cli, capsys):
+    install_response(
+        monkeypatch,
+        {
+            "ok": True,
+            "response": {
+                "change": {"status": "RebootRequired"},
+                "readback": {
+                    "configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "60"}],
+                    "unknown_key": [],
+                },
+            },
+        },
+    )
+    assert run_configuration(parse_cli("config", "set", "HeartbeatInterval", "60")) == 0
+    output = capsys.readouterr().out
+    assert "RebootRequired" in output
+    assert "HeartbeatInterval" in output
+    assert "60" in output
