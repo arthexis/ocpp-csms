@@ -21,6 +21,15 @@ def test_discover_uses_active_immutable_csms_runtime():
     assert "/venv/bin/python" not in template.replace("{{ ocpp_discover_python }}", "")
 
 
+def test_discover_is_resident_restartable_service():
+    template = read(DISCOVER_TEMPLATE)
+    assert "Type=simple" in template
+    assert "Type=oneshot" not in template
+    assert "RemainAfterExit" not in template
+    assert "Restart=on-failure" in template
+    assert "RestartSec=5" in template
+
+
 def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
     tasks = read(DISCOVER_TASKS)
     assert_task_order(
@@ -38,7 +47,7 @@ def test_discover_validates_interface_runtime_and_shared_data_before_mutation():
     assert "/sys/class/net/{{ ocpp_discover_interface }}" in interface
 
 
-def test_discover_installs_static_host_integration_before_unit_enablement():
+def test_discover_installs_static_host_integration_before_service_activation():
     tasks = read(DISCOVER_TASKS)
     assert_task_order(
         tasks,
@@ -51,6 +60,10 @@ def test_discover_installs_static_host_integration_before_unit_enablement():
         "Verify candidate OCPP Discover systemd unit",
         "Install live OCPP Discover systemd unit",
         "Enable OCPP Discover at boot",
+        "Restart OCPP Discover when its effective unit changes",
+        "Ensure unchanged OCPP Discover service is running",
+        "Confirm OCPP Discover service is enabled",
+        "Confirm OCPP Discover service is active",
     )
 
 
@@ -98,9 +111,28 @@ def test_discover_role_delegates_network_reasoning_to_python():
         assert command not in tasks.lower()
 
 
-def test_discover_service_is_enabled_but_not_forced_to_run_during_convergence():
+def test_discover_unit_change_is_the_only_explicit_restart_trigger():
     tasks = read(DISCOVER_TASKS)
-    section = task_section(tasks, "Enable OCPP Discover at boot")
+    restart = task_section(tasks, "Restart OCPP Discover when its effective unit changes")
+    assert "state: restarted" in restart
+    assert "when: ocpp_discover_unit_install.changed" in restart
 
-    assert "enabled: true" in section
-    assert "state:" not in section
+    assert tasks.count("state: restarted") == 1
+
+
+def test_unchanged_discover_convergence_does_not_restart_service():
+    tasks = read(DISCOVER_TASKS)
+    started = task_section(tasks, "Ensure unchanged OCPP Discover service is running")
+    assert "state: started" in started
+    assert "when: not ocpp_discover_unit_install.changed" in started
+    assert "restarted" not in started
+
+
+def test_discover_service_is_enabled_and_required_active():
+    tasks = read(DISCOVER_TASKS)
+    enabled = task_section(tasks, "Enable OCPP Discover at boot")
+    active = task_section(tasks, "Confirm OCPP Discover service is active")
+
+    assert "enabled: true" in enabled
+    assert "is-active" in active
+    assert "failed_when: ocpp_discover_active.stdout.strip() != 'active'" in active
