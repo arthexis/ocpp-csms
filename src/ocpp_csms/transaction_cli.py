@@ -73,6 +73,14 @@ def _format_energy(energy_wh: int) -> str:
     return f"{energy_wh} Wh"
 
 
+def _transaction_energy(view: TransactionView) -> str:
+    record = view.record
+    start = record.get("start") if isinstance(record.get("start"), dict) else {}
+    stop = record.get("stop") if isinstance(record.get("stop"), dict) else {}
+    energy_wh = _energy_wh(start, stop)
+    return _format_energy(energy_wh) if energy_wh is not None else "-"
+
+
 def _meter_summary(record: dict[str, Any]) -> dict[str, object]:
     payloads = record.get("meter_values")
     if not isinstance(payloads, list):
@@ -127,7 +135,7 @@ def format_transactions(views: Iterable[TransactionView]) -> str:
     if not rows:
         return "No transactions."
 
-    headers = ("TXN", "STATUS", "CHARGER", "CP", "RFID", "UPDATED")
+    headers = ("TXN", "STATUS", "CHARGER", "CP", "RFID", "ENERGY", "UPDATED")
     body = [
         (
             str(view.transaction_id),
@@ -135,6 +143,7 @@ def format_transactions(views: Iterable[TransactionView]) -> str:
             view.charge_point_id or "-",
             _text(view.connector_id, "?"),
             _text(view.id_tag),
+            _transaction_energy(view),
             _age_key(view.activity_at),
         )
         for view in rows
