@@ -92,15 +92,15 @@
           - "{{ ocpp_csms_reconnect_timeout }}"
       changed_when: false
 
-    # Reconnect can become visible to the CSMS just before Discover finishes its
-    # synchronous durable promotion. Do not stop the transient candidate in that
-    # window: require the ownership receipt to exist and validate first.
+    # Reconnect can become visible to the CSMS while Discover is still inside its
+    # bounded proof capture. Durable promotion has its own timeout so Ansible does
+    # not terminate the transient candidate just as it begins committing state.
     - name: Wait for candidate Discover ownership receipt
       become: true
       ansible.builtin.wait_for:
         path: "{{ ocpp_discover_persistent_dir | default('/var/lib/ocpp-discover') }}/discovered.json"
         state: present
-        timeout: "{{ ocpp_csms_reconnect_timeout }}"
+        timeout: "{{ ocpp_csms_discover_promotion_timeout }}"
 
     - name: Validate candidate Discover persistent state
       become: true
@@ -153,7 +153,7 @@
           {{ ansible_failed_result.msg | default('reconnect verification failure') }}
 
   always:
-    - name: Stop candidate OCPP Discover recovery unit after verification
+    - name: Stop candidate Discover recovery unit after verification
       become: true
       ansible.builtin.command:
         argv:
