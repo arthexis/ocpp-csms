@@ -35,12 +35,11 @@ def test_failed_candidate_discover_restores_previous_resident_service():
     assert "ocpp_csms_discover_was_active.rc | default(1) == 0" in restore
 
 
-def test_successful_candidate_recovery_does_not_restart_old_resident_before_promotion():
+def test_successful_candidate_recovery_keeps_old_resident_out_of_success_path():
     reconnect = read(TASKS / "reconnect_with_discover.yml")
 
-    # The old resident is restarted only in the rescue path. On success it stays
-    # stopped until `current` is promoted and the ocpp_discover role converges it.
-    assert reconnect.index("rescue:") < reconnect.index(
-        "Restore previous resident OCPP Discover after failed recovery"
-    )
-    assert "Stop candidate OCPP Discover recovery unit after verification" in reconnect
+    rescue = reconnect.index("\n  rescue:\n")
+    restore = reconnect.index("Restore previous resident OCPP Discover after failed recovery")
+    always = reconnect.index("\n  always:\n")
+    assert rescue < restore < always
+    assert "ocpp-discover-handoff.service" in reconnect[always:]
