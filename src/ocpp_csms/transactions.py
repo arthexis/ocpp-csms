@@ -172,8 +172,12 @@ class TransactionArchive:
                 return loaded[2]
             path, record, decision = loaded
             received_at = utc_now_iso()
-            record.setdefault("meter_values", []).append(payload)
-            record.setdefault("meter_values_received_at", []).append(received_at)
+            meter_values = record.setdefault("meter_values", [])
+            received_times = record.setdefault("meter_values_received_at", [])
+            while len(received_times) < len(meter_values):
+                received_times.append(None)
+            meter_values.append(payload)
+            received_times.append(received_at)
             record["updated_at"] = received_at
             self._write(path, record)
             return decision
