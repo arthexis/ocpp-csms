@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-import ocpp_csms.app as app
+import ocpp_csms.cli.profile as profile_cli
 from ocpp_csms.app import build_parser
 from ocpp_csms.schema import DATABASE_FILENAME
 
@@ -28,7 +28,7 @@ def cli_parser():
 @pytest.fixture
 def profile_control(monkeypatch):
     stub = ProfileControlStub()
-    monkeypatch.setattr(app, "send_control", stub)
+    monkeypatch.setattr(profile_cli, "send_control", stub)
     return stub
 
 
