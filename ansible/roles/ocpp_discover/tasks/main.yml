@@ -10,6 +10,19 @@
       OCPP Discover requires a Debian-family appliance with a valid charger-facing
       interface and listener port.
 
+- name: Inspect OCPP Discover charger-facing interface
+  ansible.builtin.stat:
+    path: "/sys/class/net/{{ ocpp_discover_interface }}"
+  register: ocpp_discover_interface_state
+
+- name: Require OCPP Discover charger-facing interface
+  ansible.builtin.assert:
+    that:
+      - ocpp_discover_interface_state.stat.exists
+    fail_msg: >-
+      Configured OCPP Discover interface {{ ocpp_discover_interface }} does not
+      exist on this appliance.
+
 - name: Verify active immutable CSMS Python runtime exists
   ansible.builtin.stat:
     path: "{{ ocpp_discover_python }}"
@@ -24,12 +37,35 @@
       OCPP Discover requires the active Ansible-managed CSMS release runtime at
       {{ ocpp_discover_python }}. Converge the ocpp_csms role first.
 
+- name: Inspect shared OCPP CSMS data directory
+  ansible.builtin.stat:
+    path: "{{ ocpp_discover_data_dir }}"
+  register: ocpp_discover_data_dir_state
+
+- name: Require shared OCPP CSMS data directory
+  ansible.builtin.assert:
+    that:
+      - ocpp_discover_data_dir_state.stat.exists
+      - ocpp_discover_data_dir_state.stat.isdir
+    fail_msg: >-
+      OCPP Discover requires the CSMS data directory at
+      {{ ocpp_discover_data_dir }}. Converge the ocpp_csms role first.
+
 - name: Install OCPP Discover runtime packages
   become: true
   ansible.builtin.apt:
     name: "{{ ocpp_discover_packages }}"
     state: present
     update_cache: true
+
+- name: Ensure OCPP Discover persistent state directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ ocpp_discover_persistent_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Prepare OCPP Discover persistent integration
   become: true
@@ -39,7 +75,19 @@
       - -m
       - ocpp_discover.lifecycle
       - prepare
-  changed_when: false
+      - --persistent-dir
+      - "{{ ocpp_discover_persistent_dir }}"
+      - --json
+  register: ocpp_discover_prepare
+  changed_when: (ocpp_discover_prepare.stdout | from_json).changed | bool
+
+- name: Validate OCPP Discover persistent integration result
+  ansible.builtin.assert:
+    that:
+      - (ocpp_discover_prepare.stdout | from_json).state in ['absent', 'preserved']
+      - (ocpp_discover_prepare.stdout | from_json).changed is boolean
+    fail_msg: >-
+      OCPP Discover lifecycle preparation returned an invalid convergence report.
 
 # Discover owns only its included nftables fragment. Debian should load that
 # fragment on future boots, but convergence must not flush or restart the live
