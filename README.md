@@ -152,7 +152,8 @@ ocpp-csms status [CHARGER]
 ocpp-csms status --charging
 ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
 ocpp-csms txn ...
-ocpp-csms config CHARGER [KEY ...] [-f|--force]
+ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
+ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile list
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile set max-power --watts WATTS [--charger CHARGER]
@@ -166,6 +167,29 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
 `--cp` aliases `--connector`; `--txn` aliases `--transaction`.
+
+### Configuration snapshots
+
+`config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
+
+When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
+
+Full configuration queries are blocked while the selected charger has an active transaction because field testing has shown that some chargers become unstable under extra OCPP traffic while charging. `-f` / `--force` deliberately bypasses that guard.
+
+Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
+
+Examples:
+
+```bash
+ocpp-csms config download
+ocpp-csms config download CHARGER
+ocpp-csms config download CHARGER --json
+ocpp-csms config download CHARGER --output charger-config.json
+ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
+ocpp-csms config download CHARGER --force
+```
+
+`--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
 
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
 
@@ -227,7 +251,6 @@ The main test boundaries are:
 python -m pytest tests/ansible
 python -m pytest tests --ignore=tests/ocpp_discover --ignore=tests/ansible
 python -m pytest tests/ocpp_discover
-python -m pytest field/tests
 ```
 
 CI runs those suites on:
@@ -239,8 +262,6 @@ Debian 13 / Python 3.13 / ARM64   compatibility target
 
 Tests favor behavioral/state invariants over human-readable strings, historical tombstones, and deprecated compatibility surfaces.
 
-The `field/` package is only for real-hardware harness behavior such as takeover, reboot/configuration validation, soak, watchdog, and rollback. Production discovery/adaptation lives exclusively in `src/ocpp_discover/`; Smart Charging diagnostics use the normal `ocpp-csms profile ...` surface.
-
 ## Source layout
 
 ```text
@@ -249,10 +270,9 @@ src/
   ocpp_discover/      resident discovery, adaptation and reconciliation
 
 ansible/              canonical appliance convergence
-field/                real-hardware validation harness
 systemd/              legacy installer service templates
 install.sh             transitional installer
 ansible-deploy.sh      canonical deployment wrapper
 ```
 
-This README is the canonical production documentation. Real-hardware harness procedures live in `field/README.md`.
+This README is the canonical project documentation.
