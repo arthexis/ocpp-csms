@@ -59,10 +59,37 @@ def test_install_script_does_not_rollback_healthy_csms_for_discover_failure():
     assert "CSMS installation succeeded, but OCPP Discover" in tail
 
 
-def test_discover_script_has_explicit_install_and_uninstall_modes_until_compatibility_cleanup():
+def test_discover_script_is_compatibility_only_not_an_installer():
     script = read("discover.sh")
-    assert "--install" in script
-    assert "--uninstall" in script
+    assert "Installation and service ownership belong to `install.sh` or Ansible." in script
+    assert "install_discovery()" not in script
+    assert "uninstall_discovery()" not in script
+    assert "apt-get install" not in script
+    assert "systemctl enable" not in script
+    assert "ocpp_discover.lifecycle prepare" not in script
+    assert "ocpp_discover.lifecycle remove" not in script
+    assert "--install` and `--uninstall` are no longer supported" in script
+
+
+def test_discover_script_delegates_operator_commands_to_installed_cli():
+    script = read("discover.sh")
+    assert "command -v ocpp-discover" in script
+    assert 'exec "$DISCOVER" status' in script
+    assert 'exec "$DISCOVER" diagnostics' in script
+    assert 'exec sudo "$DISCOVER" cleanup --state-dir /run/ocpp-discover' in script
+    assert 'set -- "$DISCOVER" run' in script
+    assert 'exec sudo "$@"' in script
+
+
+def test_discover_script_preserves_explicit_manual_discovery_options():
+    script = read("discover.sh")
+    assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
+    assert "--existing-endpoint-only" in script
+    assert "--diagnostic-only" in script
+    assert "--passive-capture-log" in script
+    assert "--grace-seconds" in script
+    assert "--arp-seconds" in script
+    assert "--tcp-seconds" in script
 
 
 def test_discover_service_uses_installed_package_and_owned_state():
@@ -82,21 +109,3 @@ def test_discover_service_uses_installed_package_and_owned_state():
     assert "Restart=on-failure" in unit
     assert "RestartSec=5" in unit
     assert "WantedBy=multi-user.target" in unit
-
-
-def test_discover_compatibility_installer_still_uses_owned_state_until_chunk_3c():
-    script = read("discover.sh")
-    assert 'INTERFACE=${OCPP_DISCOVER_INTERFACE:-eth0}' in script
-    assert "sudo apt-get install -y tcpdump nftables iproute2" in script
-    assert "Automatic dependency installation is supported only on Debian" in script
-    assert "sudo systemctl enable nftables.service" in script
-    assert "systemctl restart nftables" not in script
-    assert 'sudo systemctl enable "$SERVICE_NAME"' in script
-    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle prepare' in script
-    assert 'sudo "$PYTHON" -m ocpp_discover cleanup --state-dir /run/ocpp-discover' in script
-    assert 'sudo "$PYTHON" -m ocpp_discover.lifecycle remove' in script
-    assert 'set -- "$PYTHON" -m ocpp_discover run' in script
-    assert 'sudo "$@"' in script
-    assert 'cp "$ROOT/field/discover.py"' not in script
-    assert 'cp "$ROOT/field/redirect.py"' not in script
-    assert "DISCOVER_ROOT" not in script
