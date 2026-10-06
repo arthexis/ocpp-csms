@@ -1,7 +1,9 @@
 import pytest
 
 import ocpp_csms.app as app_module
-from ocpp_csms.app import build_parser, configuration_request, control_request, run_configuration, run_control
+import ocpp_csms.cli.control as control_module
+from ocpp_csms.app import build_parser, configuration_request, run_configuration
+from ocpp_csms.cli.control import control_request, run_control
 
 
 def parse(*args):
@@ -42,14 +44,8 @@ def test_stop_command_builds_control_request_with_or_without_charger():
 
 
 def test_reboot_defaults_to_soft_and_supports_explicit_charger():
-    assert control_request(parse("reboot")) == {
-        "command": "reboot",
-        "type": "Soft",
-    }
-    assert control_request(parse("reboot", "--hard")) == {
-        "command": "reboot",
-        "type": "Hard",
-    }
+    assert control_request(parse("reboot")) == {"command": "reboot", "type": "Soft"}
+    assert control_request(parse("reboot", "--hard")) == {"command": "reboot", "type": "Hard"}
     assert control_request(parse("reboot", "--charger", "charger-a")) == {
         "command": "reboot",
         "charger": "charger-a",
@@ -75,7 +71,6 @@ def test_control_rejects_two_charger_selectors():
 )
 def test_config_request_preserves_selector_keys_and_force(argv, expected_charger, expected_keys, expected_force):
     request = configuration_request(parse(*argv))
-
     assert request["command"] == "config"
     assert request.get("charger") == expected_charger
     assert request["force"] is expected_force
@@ -84,71 +79,46 @@ def test_config_request_preserves_selector_keys_and_force(argv, expected_charger
 
 def test_legacy_config_positional_charger_is_forwarded_for_daemon_compatibility():
     request = configuration_request(parse("config", "charger-a", "HeartbeatInterval"))
-
     assert "charger" not in request
     assert request["keys"] == ["charger-a", "HeartbeatInterval"]
 
 
-def install_control_response(monkeypatch, response=None, exc=None):
+def install_control_response(monkeypatch, response=None, exc=None, *, module=control_module):
     async def fake_send(data_dir, request):
         assert data_dir
         if exc is not None:
             raise exc
         return response
 
-    monkeypatch.setattr(app_module, "send_control", fake_send)
+    monkeypatch.setattr(module, "send_control", fake_send)
 
 
-@pytest.mark.parametrize(
-    ("status", "expected_code"),
-    [("Accepted", 0), ("Rejected", 1)],
-)
+@pytest.mark.parametrize(("status", "expected_code"), [("Accepted", 0), ("Rejected", 1)])
 def test_command_status_controls_exit_code(monkeypatch, status, expected_code):
-    install_control_response(
-        monkeypatch,
-        {"ok": True, "response": {"status": status}},
-    )
-
+    install_control_response(monkeypatch, {"ok": True, "response": {"status": status}})
     assert run_control(parse("reboot")) == expected_code
 
 
 def test_control_error_returns_one(monkeypatch):
-    install_control_response(
-        monkeypatch,
-        {"error": "charger_required", "chargers": ["charger-a", "charger-b"]},
-    )
-
+    install_control_response(monkeypatch, {"error": "charger_required", "chargers": ["charger-a", "charger-b"]})
     assert run_control(parse("reboot")) == 1
 
 
 def test_missing_control_socket_returns_one(monkeypatch):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
-
     assert run_control(parse("reboot")) == 1
 
 
 @pytest.mark.parametrize(
     ("response", "expected_code"),
     [
-        (
-            {
-                "ok": True,
-                "response": {
-                    "configuration_key": [
-                        {"key": "HeartbeatInterval", "readonly": False, "value": "300"}
-                    ],
-                    "unknown_key": ["VendorThing"],
-                },
-            },
-            0,
-        ),
+        ({"ok": True, "response": {"configuration_key": [{"key": "HeartbeatInterval", "readonly": False, "value": "300"}], "unknown_key": ["VendorThing"]}}, 0),
         ({"error": "active_transaction", "charger": "charger-a", "transactions": [17]}, 1),
         ({"ok": True, "response": {"configuration_key": "bad"}}, 1),
     ],
 )
 def test_configuration_result_controls_exit_code(monkeypatch, response, expected_code):
-    install_control_response(monkeypatch, response)
-
+    install_control_response(monkeypatch, response, module=app_module)
     assert run_configuration(parse("config", "HeartbeatInterval")) == expected_code
 
 
