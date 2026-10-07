@@ -266,6 +266,21 @@
   ansible.builtin.set_fact:
     ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
 
+- name: Report staged OCPP CSMS handoff plan
+  ansible.builtin.debug:
+    msg:
+      release: "{{ ocpp_csms_release_id }}"
+      incumbent_service: "{{ ocpp_csms_incumbent_service | default('') }}"
+      incumbent_port: "{{ ocpp_csms_incumbent_port | default(0) }}"
+      schema_action: "{{ ocpp_csms_schema_action }}"
+      preflight: "{{ ocpp_csms_final_preflight_result }}"
+      handoff: skipped
+  when: ocpp_csms_stage_only | bool
+
+- name: End host after safe staging
+  ansible.builtin.meta: end_host
+  when: ocpp_csms_stage_only | bool
+
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
 

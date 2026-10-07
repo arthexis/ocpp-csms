@@ -11,6 +11,7 @@ ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
 # observation window bounded so ordinary converged deploys remain predictable.
 ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
 ocpp_csms_incumbent_observe_seconds: 15
+ocpp_csms_stage_only: false
 
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.

@@ -14,6 +14,31 @@ The canonical appliance deployment is Ansible:
 
 Do not run the wrapper itself with `sudo`; the playbook uses privilege escalation only for host-level integration.
 
+The deployment wrapper exposes a small field-oriented surface before any raw
+Ansible arguments:
+
+```bash
+./ansible-deploy.sh --observe 180
+./ansible-deploy.sh --interface eno1
+./ansible-deploy.sh --reconnect 60
+./ansible-deploy.sh --stage-only
+./ansible-deploy.sh --diagnose
+```
+
+`--observe SECONDS` changes the bounded incumbent-traffic observation window
+(default 15 seconds). `--interface NAME` selects the charger-facing interface
+for both Discover and incumbent observation. `--reconnect SECONDS` changes the
+post-cutover charger reconnect timeout. `--stage-only` installs and validates
+the candidate, runs safety and incumbent inspection, reports the planned handoff,
+then exits before stopping any service. `--diagnose` runs a separate read-only
+playbook that reports safety preflight, observed incumbent ownership, current
+managed release/service state, and Discover diagnostics without staging or
+handoff.
+
+Wrapper options must appear before raw Ansible arguments. `--diagnose` may be
+combined with `--observe` and `--interface`, but not with `--stage-only` or
+`--reconnect`.
+
 The satellite playbook installs and manages both:
 
 ```text
@@ -30,11 +55,9 @@ sudo ocpp-discover diagnostics
 sudo systemctl status ocpp-csms ocpp-discover
 ```
 
-If the charger-facing interface is not `eth0`:
-
-```bash
-./ansible-deploy.sh -e ocpp_discover_interface=eno1
-```
+If the charger-facing interface is not `eth0`, prefer the wrapper form
+`./ansible-deploy.sh --interface eno1`. Raw Ansible `-e` arguments remain
+available for advanced overrides.
 
 `install.sh` remains only as a transitional legacy installer. New appliance deployment and validation should use Ansible.
 
