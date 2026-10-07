@@ -11,6 +11,7 @@ from ocpp_csms.schema import (
     inspect_schema,
     require_supported_schema,
     schema_backup_path,
+    source_id,
     upgrade_schema,
 )
 
@@ -235,3 +236,22 @@ def test_schema_two_upgrades_to_four_with_rfid_history_and_metadata(tmp_path):
     assert "rfid_lists" in tables
     assert "rfid_list_entries" in tables
     assert "appliance_metadata" in tables
+
+
+def test_source_identity_is_stable_for_existing_database(tmp_path):
+    create_current_schema(tmp_path)
+
+    first = source_id(tmp_path)
+    second = source_id(tmp_path)
+
+    assert first
+    assert second == first
+
+
+def test_new_database_gets_new_source_identity(tmp_path):
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    create_current_schema(first_dir)
+    create_current_schema(second_dir)
+
+    assert source_id(first_dir) != source_id(second_dir)
