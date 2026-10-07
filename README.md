@@ -204,9 +204,25 @@ Machine-readable status uses `null` when no RFID authorization file is
 configured and a structured object when one is present.
 
 `ocpp-csms rfid report` summarizes every RFID observed in transaction history,
-including transaction count and total energy. If `rfid.csv` exists, the summary
-adds `ALLOW` and `NAME` columns after `ENERGY`; listed disabled cards show
-`false`, while observed RFIDs missing from the file show `missing`. Supplying a
+including transaction count and total energy. The authorization columns adapt to
+the sources that are actually known at report time:
+
+- with `rfid.csv` only, `ALLOW` and `NAME` describe the current file;
+- with no `rfid.csv` but a connected charger whose current local-list version
+  matches accepted CSMS history, `ALLOW` and `NAME` describe that charger
+  cache;
+- with both a file and a known connected charger cache, `ALLOW` describes the
+  file and `CACHE` describes the charger;
+- an observed RFID absent from a known source shows `missing`; an unrecognized
+  live charger-list version shows `unknown` for `CACHE`;
+- when the charger is disconnected, or when the CSMS has never successfully sent
+  it a list, charger cache columns are omitted rather than inferred from stale
+  history.
+
+When a connected charger has accepted-list history, the report also shows
+`Charger cache: version N`. If `rfid.csv` is present, a `Sync:` line reports
+`current`, `differs`, or `unknown` by comparing the current enabled-card
+set with the stored snapshot for the charger's live list version. Supplying a
 tag keeps the detailed per-RFID report:
 
 ```bash
