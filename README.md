@@ -48,15 +48,21 @@ ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
-`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`; `--txn` aliases `--transaction`.
+### Status and charger views
 
-### Configuration snapshots
+`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`.
+
+### Transactions and events
+
+`transactions`/`txn` expose transaction history and active/last transaction views. `--txn` aliases `--transaction` where a transaction ID is accepted. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger.
+
+### Configuration
 
 `config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
 
 When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
 
-Full configuration queries are blocked while the selected charger has an active transaction because field testing has shown that some chargers become unstable under extra OCPP traffic while charging. `-f` / `--force` deliberately bypasses that guard.
+Full configuration queries are blocked while the selected charger has an active transaction. This keeps nonessential OCPP traffic out of the active-charging path. `-f` / `--force` deliberately bypasses that guard.
 
 Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
 
@@ -73,6 +79,8 @@ ocpp-csms config download CHARGER --force
 
 `--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
 
+### Remote start, stop, and reset
+
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
 
 Remote start, stop, and reset commands require one timing mode:
@@ -83,6 +91,8 @@ Remote start, stop, and reset commands require one timing mode:
 - Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
 
 Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
+
+### Smart Charging
 
 The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored by default at `2000-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks. Use `--start` with an ISO-8601 date-time including timezone to override that anchor; explicit values are normalized to UTC before being sent.
 
@@ -185,6 +195,8 @@ remains in the normal event log. Standard OCPP 1.6 exposes the current list
 version but does not provide an operation to download the charger's list
 contents, so the CSMS keeps this accepted-list history itself.
 
+## Runtime architecture
+
 The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
 
 The listener uses plain `ws://` and is intended for a trusted charger LAN or equivalent private boundary. Do not expose it directly to an untrusted/public network.
@@ -218,7 +230,7 @@ The canonical appliance deployment is Ansible:
 
 Do not run the wrapper itself with `sudo`; the playbook uses privilege escalation only for host-level integration.
 
-The deployment wrapper exposes a small field-oriented surface before any raw
+The deployment wrapper exposes a small operator surface before any raw
 Ansible arguments:
 
 ```bash
