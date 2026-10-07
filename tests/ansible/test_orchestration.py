@@ -38,10 +38,20 @@ def test_legacy_detection_is_listener_owned_not_install_presence():
     legacy = read(TASKS / "legacy_arthexis.yml")
     assert "ActiveState,MainPID" in legacy
     assert "ss -H -ltnp" in legacy
-    assert "ocpp_csms_listener_pid.stdout" in legacy
+    assert "ocpp_csms_legacy_listener_states" in legacy
     defaults = load_yaml(DEFAULTS)
+    assert "arthexis.service" in defaults["ocpp_csms_legacy_arthexis_services"]
     assert "arthexis-web.service" in defaults["ocpp_csms_legacy_arthexis_services"]
     assert "arthexis-arthexis-arthexis.service" in defaults["ocpp_csms_legacy_arthexis_services"]
+    assert 8888 in defaults["ocpp_csms_legacy_arthexis_ports"]
+    assert "{{ ocpp_csms_port }}" in defaults["ocpp_csms_legacy_arthexis_ports"]
+
+
+def test_legacy_takeover_tracks_the_actual_listener_port():
+    stop = task_by_name(TASKS / "legacy_arthexis_stop.yml", "Wait for legacy Arthexis OCPP listener to release port")
+    restore = task_by_name(TASKS / "legacy_arthexis_restore.yml", "Verify restored legacy Arthexis listener")
+    assert stop["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_legacy_arthexis_port }}"
+    assert restore["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_legacy_arthexis_port }}"
 
 
 def test_handoff_captures_reconnect_baseline_before_downtime():
