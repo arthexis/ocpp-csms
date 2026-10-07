@@ -8,6 +8,7 @@ from typing import Any
 
 from ocpp_csms.events import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
+from ocpp_csms.rfid_authorization import load_rfid_authorization
 from ocpp_csms.transaction_query import TransactionQuery
 
 
@@ -47,6 +48,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
     running = process_is_running(root)
+    rfid_authorization = load_rfid_authorization(root)
     active_chargers = sorted(
         {
             view.charge_point_id
@@ -62,6 +64,16 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         "started_at": None,
         "chargers": [],
         "active_chargers": active_chargers,
+        "rfid_authorization": (
+            None
+            if rfid_authorization.allow_all
+            else {
+                "source": rfid_authorization.source.name if rfid_authorization.source else None,
+                "entries": len(rfid_authorization.entries),
+                "valid": rfid_authorization.valid,
+                "error": rfid_authorization.error,
+            }
+        ),
     }
     live_since_id: int | None = None
     if database.exists():
@@ -288,6 +300,15 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         f"Started: {data.get('started_at') or '-'}",
         f"Database: {data.get('database', 'unknown')}",
         f"JSON archive: {data.get('transactions', 'unknown')}",
+        (
+            "RFID authorization: Allow All"
+            if data.get("rfid_authorization") is None
+            else (
+                f"RFID authorization: {data['rfid_authorization'].get('source', 'rfid.csv')} (invalid)"
+                if not data["rfid_authorization"].get("valid", False)
+                else f"RFID authorization: {data['rfid_authorization'].get('source', 'rfid.csv')} ({data['rfid_authorization'].get('entries', 0)} cards)"
+            )
+        ),
         f"Data dir: {data.get('data_dir', '-')}",
         "",
         ])
