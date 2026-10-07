@@ -18,7 +18,7 @@ def add_control_commands(
     start = subcommands.add_parser("start", help="Request remote transaction start")
     add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
     add(start, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(start, "--connector", "--cp", dest="connector", type=int, help="Connector ID")
+    add(start, "--connector", "--c", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
     _add_timing_options(start)
 
