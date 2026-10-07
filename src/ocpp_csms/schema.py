@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-import uuid
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
 CURRENT_SCHEMA_VERSION = 4
