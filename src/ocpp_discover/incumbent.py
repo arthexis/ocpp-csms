@@ -65,17 +65,31 @@ def observe_endpoint(interface: str, seconds: float) -> tuple[int, str, str] | N
     return port, peer, evidence
 
 
-def listener_pids(port: int) -> list[int]:
+def _socket_pids(command: list[str], error: str) -> list[int]:
     result = subprocess.run(
-        ["ss", "-H", "-ltnp", f"sport = :{port}"],
+        command,
         text=True,
         capture_output=True,
         check=False,
     )
     if result.returncode != 0:
-        detail = result.stderr.strip() or "listener_query_failed"
+        detail = result.stderr.strip() or error
         raise RuntimeError(detail)
     return sorted({int(value) for value in _PID.findall(result.stdout)})
+
+
+def listener_pids(port: int) -> list[int]:
+    return _socket_pids(
+        ["ss", "-H", "-ltnp", f"sport = :{port}"],
+        "listener_query_failed",
+    )
+
+
+def established_pids(port: int) -> list[int]:
+    return _socket_pids(
+        ["ss", "-H", "-tnp", "state", "established", f"sport = :{port}"],
+        "established_socket_query_failed",
+    )
 
 
 def service_for_pid(pid: int) -> str | None:
@@ -102,7 +116,9 @@ def resolve_incumbent(interface: str, seconds: float, managed_service: str) -> I
     port, peer_ip, evidence = observed
     pids = listener_pids(port)
     if not pids:
-        raise RuntimeError("observed_ocpp_endpoint_has_no_local_listener")
+        pids = established_pids(port)
+    if not pids:
+        raise RuntimeError("observed_ocpp_endpoint_has_no_local_socket_owner")
 
     owners = {(pid, service_for_pid(pid)) for pid in pids}
     resolved = {(pid, service) for pid, service in owners if service}

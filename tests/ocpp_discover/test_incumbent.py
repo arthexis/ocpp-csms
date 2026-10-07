@@ -61,3 +61,42 @@ def test_managed_service_is_not_an_incumbent(monkeypatch):
     monkeypatch.setattr(incumbent, "service_for_pid", lambda pid: "ocpp-csms.service")
 
     assert incumbent.resolve_incumbent("eth0", 1, "ocpp-csms.service") is None
+
+
+
+def test_resolve_incumbent_falls_back_to_established_socket_owner(monkeypatch):
+    monkeypatch.setattr(incumbent.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        incumbent,
+        "observe_endpoint",
+        lambda *args, **kwargs: (8888, "192.168.50.20", "ocpp_frame"),
+    )
+    monkeypatch.setattr(incumbent, "listener_pids", lambda port: [])
+    monkeypatch.setattr(incumbent, "established_pids", lambda port: [689])
+    monkeypatch.setattr(incumbent, "service_for_pid", lambda pid: "another-csms.service")
+    monkeypatch.setattr(
+        incumbent.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+    )
+
+    endpoint = incumbent.resolve_incumbent("eth0", 1, "ocpp-csms.service")
+
+    assert endpoint is not None
+    assert endpoint.service == "another-csms.service"
+    assert endpoint.port == 8888
+    assert endpoint.pid == 689
+
+
+def test_resolve_incumbent_rejects_traffic_without_socket_owner(monkeypatch):
+    monkeypatch.setattr(incumbent.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        incumbent,
+        "observe_endpoint",
+        lambda *args, **kwargs: (8888, "192.168.50.20", "ocpp_frame"),
+    )
+    monkeypatch.setattr(incumbent, "listener_pids", lambda port: [])
+    monkeypatch.setattr(incumbent, "established_pids", lambda port: [])
+
+    with pytest.raises(RuntimeError, match="observed_ocpp_endpoint_has_no_local_socket_owner"):
+        incumbent.resolve_incumbent("eth0", 1, "ocpp-csms.service")
