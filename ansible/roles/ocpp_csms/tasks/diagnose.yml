@@ -1,0 +1,111 @@
+---
+- name: Validate diagnostic target
+  ansible.builtin.assert:
+    that:
+      - ansible_user_id != 'root'
+      - ansible_user_uid | int != 0
+      - ocpp_csms_incumbent_observe_seconds | int > 0
+    fail_msg: >-
+      Deployment diagnosis must run as the normal deployment user with a
+      positive observation window.
+
+- name: Run read-only install safety preflight
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - ocpp_csms.install_preflight
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - --json
+  environment:
+    PYTHONPATH: "{{ ocpp_csms_controller_source_dir }}/src"
+  register: ocpp_csms_diagnose_preflight
+  changed_when: false
+  failed_when: false
+
+- name: Observe incumbent host-local OCPP service
+  become: true
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - ocpp_discover.incumbent
+      - --interface
+      - "{{ ocpp_csms_incumbent_interface }}"
+      - --seconds
+      - "{{ ocpp_csms_incumbent_observe_seconds | string }}"
+      - --managed-service
+      - "{{ ocpp_csms_service_name }}"
+  environment:
+    PYTHONPATH: "{{ ocpp_csms_controller_source_dir }}/src"
+  register: ocpp_csms_diagnose_incumbent
+  changed_when: false
+  failed_when: false
+
+- name: Inspect managed OCPP CSMS service state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ ocpp_csms_service_name }}"
+  register: ocpp_csms_diagnose_service
+  changed_when: false
+  failed_when: false
+
+- name: Inspect current OCPP CSMS release
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ ocpp_csms_current_link }}"
+  register: ocpp_csms_diagnose_current
+  changed_when: false
+  failed_when: false
+
+- name: Inspect OCPP Discover state
+  become: true
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -m
+      - ocpp_discover
+      - diagnostics
+      - --json
+  environment:
+    PYTHONPATH: "{{ ocpp_csms_controller_source_dir }}/src"
+  register: ocpp_csms_diagnose_discover
+  changed_when: false
+  failed_when: false
+
+- name: Report deployment diagnosis
+  ansible.builtin.debug:
+    msg:
+      observation_seconds: "{{ ocpp_csms_incumbent_observe_seconds | int }}"
+      interface: "{{ ocpp_csms_incumbent_interface }}"
+      safety_preflight: >-
+        {{
+          (ocpp_csms_diagnose_preflight.stdout | from_json)
+          if ocpp_csms_diagnose_preflight.stdout | length > 0
+          else {'allowed': false, 'reason': 'preflight did not return JSON'}
+        }}
+      incumbent: >-
+        {{
+          (ocpp_csms_diagnose_incumbent.stdout | from_json)
+          if ocpp_csms_diagnose_incumbent.rc == 0 and ocpp_csms_diagnose_incumbent.stdout | length > 0
+          else {'found': false, 'error': ocpp_csms_diagnose_incumbent.stdout | default('incumbent observation failed')}
+        }}
+      managed_service: "{{ ocpp_csms_diagnose_service.stdout | default('unknown') }}"
+      current_release: >-
+        {{
+          ocpp_csms_diagnose_current.stdout
+          if ocpp_csms_diagnose_current.rc == 0
+          else 'none'
+        }}
+      discover: >-
+        {{
+          (ocpp_csms_diagnose_discover.stdout | from_json)
+          if ocpp_csms_diagnose_discover.rc == 0 and ocpp_csms_diagnose_discover.stdout | length > 0
+          else {'error': ocpp_csms_diagnose_discover.stdout | default('discover diagnostics failed')}
+        }}
+      takeover_preflight_passed: "{{ ocpp_csms_diagnose_preflight.rc == 0 and ocpp_csms_diagnose_incumbent.rc == 0 }}"
