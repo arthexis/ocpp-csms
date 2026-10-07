@@ -6,6 +6,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
@@ -103,6 +104,29 @@ def wait_for_reconnect(
         time.sleep(interval)
 
 
+def wait_for_any_connection(
+    data_dir: str | Path,
+    *,
+    timeout: float = 30.0,
+    interval: float = 0.5,
+) -> str | None:
+    """Wait until any charger is currently connected to this CSMS."""
+    if timeout < 0 or interval <= 0:
+        raise ValueError("invalid_wait_interval")
+    deadline = time.monotonic() + timeout
+    while True:
+        chargers = [
+            item.charger_id
+            for item in appliance_status(data_dir).get("chargers", [])
+            if item.connected
+        ]
+        if chargers:
+            return chargers[0]
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Installer cutover helpers")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -122,6 +146,10 @@ def _parser() -> argparse.ArgumentParser:
     reconnect.add_argument("--data-dir", required=True)
     reconnect.add_argument("--baseline", required=True)
     reconnect.add_argument("--timeout", type=float, default=30.0)
+
+    wait_any = subcommands.add_parser("wait-any")
+    wait_any.add_argument("--data-dir", required=True)
+    wait_any.add_argument("--timeout", type=float, default=30.0)
     return parser
 
 
@@ -140,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
             markers = connection_markers(args.data_dir, expected)
             Path(args.output).write_text(json.dumps(markers, sort_keys=True), encoding="utf-8")
             return 0
+        if args.command == "wait-any":
+            charger = wait_for_any_connection(args.data_dir, timeout=args.timeout)
+            if charger is None:
+                print("No charger connected")
+                return 1
+            print(charger)
+            return 0
+
         markers = {
             str(key): int(value)
             for key, value in json.loads(Path(args.baseline).read_text(encoding="utf-8")).items()
