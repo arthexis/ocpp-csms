@@ -10,6 +10,7 @@ def test_profile_registry_exposes_only_max_power():
     assert template is not None
     assert template.parameters == ("--watts [watts]",)
     assert "ChargePointMaxProfile" in template.ocpp_template
+    assert "startSchedule: 2008-01-01T00:00:00Z" in template.ocpp_template
     assert "chargingRateUnit: W" in template.ocpp_template
     assert "limit: [watts]" in template.ocpp_template
 
@@ -20,6 +21,7 @@ def test_max_power_builder_maps_watts_to_station_wide_profile():
     assert profile["chargingProfilePurpose"] == "ChargePointMaxProfile"
     assert profile["chargingProfileKind"] == "Absolute"
     assert profile["stackLevel"] == 0
+    assert profile["chargingSchedule"]["startSchedule"] == "2008-01-01T00:00:00Z"
     assert profile["chargingSchedule"]["chargingRateUnit"] == "W"
     assert profile["chargingSchedule"]["chargingSchedulePeriod"] == [{"startPeriod": 0, "limit": 60000}]
 
