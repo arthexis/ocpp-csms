@@ -70,6 +70,28 @@ class CSMSServer:
     ) -> None:
         self._record_runtime(event, charger_id=charger_id, details=details)
 
+    def latest_rfid_list_version(self, charger_id: str) -> int | None:
+        return self.events.latest_rfid_list_version(charger_id)
+
+    def record_rfid_list(
+        self,
+        charger_id: str,
+        *,
+        list_version: int,
+        entries: list[dict[str, Any]],
+        source_file: str | None,
+        list_hash: str,
+        verified_version: int | None,
+    ) -> int:
+        return self.events.record_rfid_list(
+            charger_id,
+            list_version=list_version,
+            entries=entries,
+            source_file=source_file,
+            list_hash=list_hash,
+            verified_version=verified_version,
+        )
+
     def _record_runtime(
         self,
         event: str,
