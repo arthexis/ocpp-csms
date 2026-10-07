@@ -412,6 +412,9 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             }
         elif command == "rfid_version":
             response = await session.get_local_list_version()
+            payload = _response_payload(response)
+            payload["charger"] = charger
+            return {"ok": True, "response": payload}
         elif command == "rfid_export":
             entries = _rfid_entries(request)
             if entries is _INVALID:
