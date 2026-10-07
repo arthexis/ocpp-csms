@@ -5,8 +5,8 @@ import pytest
 from ocpp_csms.cli.profile import run_profile
 
 
-def test_profile_list_outputs_template_name_and_description(cli_parser, capsys):
-    args = cli_parser.parse_args(["profile", "list"])
+def test_profile_templates_outputs_template_name_and_description(cli_parser, capsys):
+    args = cli_parser.parse_args(["profile", "templates"])
     assert run_profile(args) == 0
     output = capsys.readouterr().out
     assert "max-power" in output
@@ -26,8 +26,8 @@ def test_profile_help_unknown_template_fails(cli_parser, capsys):
     assert "unknown profile template" in capsys.readouterr().out
 
 
-def test_profile_set_sends_built_profile_and_reports_acceptance(cli_parser, profile_control, capsys):
-    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "set", "max-power", "--watts", "60000", "--charger", "charger-a"])
+def test_profile_send_sends_built_profile_and_reports_acceptance(cli_parser, profile_control, capsys):
+    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "send", "max-power", "--watts", "60000", "--charger", "charger-a"])
     assert run_profile(args) == 0
     assert capsys.readouterr().out.strip() == "Accepted"
     data_dir, request = profile_control.calls[0]
@@ -38,20 +38,20 @@ def test_profile_set_sends_built_profile_and_reports_acceptance(cli_parser, prof
     assert request["profile"]["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 60000
 
 
-def test_profile_set_relies_on_single_charger_inference_when_unspecified(cli_parser, profile_control):
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "60000"])) == 0
+def test_profile_send_relies_on_single_charger_inference_when_unspecified(cli_parser, profile_control):
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "60000"])) == 0
     assert "charger" not in profile_control.calls[0][1]
 
 
-def test_profile_set_rejects_nonpositive_watts_without_contacting_control(cli_parser, profile_control, capsys):
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "0"])) == 1
+def test_profile_send_rejects_nonpositive_watts_without_contacting_control(cli_parser, profile_control, capsys):
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "0"])) == 1
     assert profile_control.calls == []
     assert "watts" in capsys.readouterr().out
 
 
-def test_profile_set_propagates_rejected_status(cli_parser, profile_control, capsys):
+def test_profile_send_propagates_rejected_status(cli_parser, profile_control, capsys):
     profile_control.response = {"ok": True, "response": {"status": "Rejected"}}
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "60000"])) == 1
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "60000"])) == 1
     assert capsys.readouterr().out.strip() == "Rejected"
 
 
@@ -100,5 +100,5 @@ def test_bare_profile_prints_subcommand_help(cli_parser, capsys):
     assert run_profile(args) == 0
 
     output = capsys.readouterr().out
-    for subcommand in ("list", "help", "set", "composite", "clear"):
+    for subcommand in ("templates", "help", "send", "composite", "clear"):
         assert subcommand in output
