@@ -95,6 +95,7 @@ jobs:
         run: |
           ocpp-csms --help >/dev/null
           ocpp-discover --help >/dev/null
+          ocpp-forwarder --help >/dev/null
 
       - name: CSMS tests
         if: matrix.suite == 'CSMS tests'
