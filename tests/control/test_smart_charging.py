@@ -57,7 +57,7 @@ class Registry:
         raise AssertionError("smart charging transport should not use configuration guards")
 
 
-def make_session(tmp_path):
+def charge_point_session:
     return ChargePointSession(
         "charger-a",
         SimpleNamespace(last_frame="test"),
@@ -162,8 +162,8 @@ async def test_smart_charging_commands_require_live_charger():
 
 
 @pytest.mark.asyncio
-async def test_set_charging_profile_builds_ocpp_request_and_records_evidence(tmp_path):
-    session = make_session(tmp_path)
+async def test_set_charging_profile_builds_ocpp_request_and_records_evidence(charge_point_session):
+    session = charge_point_session
     sent = []
 
     async def accepted(payload):
@@ -194,8 +194,8 @@ async def test_set_charging_profile_builds_ocpp_request_and_records_evidence(tmp
 
 
 @pytest.mark.asyncio
-async def test_clear_charging_profile_builds_filters_and_records_evidence(tmp_path):
-    session = make_session(tmp_path)
+async def test_clear_charging_profile_builds_filters_and_records_evidence(charge_point_session):
+    session = charge_point_session
     sent = []
 
     async def accepted(payload):
@@ -220,8 +220,8 @@ async def test_clear_charging_profile_builds_filters_and_records_evidence(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_get_composite_schedule_preserves_semantic_response_and_evidence(tmp_path):
-    session = make_session(tmp_path)
+async def test_get_composite_schedule_preserves_semantic_response_and_evidence(charge_point_session):
+    session = charge_point_session
     sent = []
 
     async def accepted(payload):
