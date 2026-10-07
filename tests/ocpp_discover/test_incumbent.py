@@ -50,7 +50,7 @@ def test_resolve_incumbent_maps_observed_port_to_systemd_service(monkeypatch):
 
     assert endpoint is not None
     assert endpoint.service == "another-csms.service"
-    assert endpoint.port == 9001
+    assert endpoint.port == 8888
     assert endpoint.pid == 689
 
 
@@ -88,7 +88,7 @@ def test_resolve_incumbent_falls_back_to_established_socket_owner(monkeypatch):
 
     assert endpoint is not None
     assert endpoint.service == "another-csms.service"
-    assert endpoint.port == 8888
+    assert endpoint.port == 9001
     assert endpoint.pid == 689
 
 
