@@ -244,22 +244,71 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_release_install_phases_use_expected_packages_and_venv():
-    build = task_by_name(TASKS / "main.yml", "Install release build requirements")
-    runtime = task_by_name(TASKS / "main.yml", "Install release runtime dependencies")
-    development = task_by_name(TASKS / "main.yml", "Install release development dependencies")
-    application = task_by_name(
-        TASKS / "main.yml", "Install OCPP CSMS application into immutable release"
+def test_reusable_environments_are_keyed_by_requirements_and_platform():
+    defaults = load_yaml(DEFAULTS)
+
+    assert defaults["ocpp_csms_build_requirements"] == ["setuptools>=68"]
+    assert defaults["ocpp_csms_runtime_dependencies"] == [
+        "websockets>=12,<14",
+        "ocpp>=0.26,<1",
+    ]
+    assert "hash('sha256')" in read(DEFAULTS)
+    assert defaults["ocpp_csms_builds_dir"].endswith("/builds")
+    assert defaults["ocpp_csms_dependencies_dir"].endswith("/dependencies")
+
+
+def test_runtime_dependencies_are_installed_once_and_timed_separately():
+    websocket = task_by_name(TASKS / "main.yml", "Install reusable WebSockets dependency")
+    ocpp = task_by_name(TASKS / "main.yml", "Install reusable OCPP dependency")
+    ready = task_by_name(TASKS / "main.yml", "Mark reusable runtime dependency environment ready")
+
+    assert websocket["ansible.builtin.pip"] == {
+        "name": "websockets>=12,<14",
+        "virtualenv": "{{ ocpp_csms_dependency_venv }}",
+    }
+    assert ocpp["ansible.builtin.pip"] == {
+        "name": "ocpp>=0.26,<1",
+        "virtualenv": "{{ ocpp_csms_dependency_venv }}",
+    }
+    for task in (websocket, ocpp, ready):
+        assert "not ocpp_csms_dependency_ready.stat.exists" in task["when"]
+
+
+def test_release_reuses_runtime_site_packages_without_mutating_dependency_environment():
+    dependency_site = task_by_name(
+        TASKS / "main.yml", "Resolve reusable runtime dependency site packages"
+    )
+    release_site = task_by_name(TASKS / "main.yml", "Resolve release site packages")
+    link = task_by_name(TASKS / "main.yml", "Link reusable runtime dependencies into release")
+
+    assert dependency_site["changed_when"] is False
+    assert release_site["changed_when"] is False
+    assert link["ansible.builtin.copy"]["dest"].endswith("/ocpp_csms_dependencies.pth")
+    assert link["ansible.builtin.copy"]["content"] == "{{ ocpp_csms_dependency_site_packages.stdout }}\n"
+
+
+def test_application_is_built_outside_release_venv_and_installed_as_wheel():
+    build = task_by_name(TASKS / "main.yml", "Build OCPP CSMS application wheel")
+    install = task_by_name(
+        TASKS / "main.yml", "Install OCPP CSMS application wheel into immutable release"
     )
 
-    assert build["ansible.builtin.pip"] == {
-        "name": ["setuptools>=68"],
-        "virtualenv": "{{ ocpp_csms_release_venv }}",
-    }
-    assert runtime["ansible.builtin.pip"] == {
-        "name": ["ocpp>=0.26,<1", "websockets>=12,<14"],
-        "virtualenv": "{{ ocpp_csms_release_venv }}",
-    }
+    argv = build["ansible.builtin.command"]["argv"]
+    assert argv[0] == "{{ ocpp_csms_build_venv }}/bin/python"
+    assert "--no-deps" in argv
+    assert "--no-build-isolation" in argv
+    assert "{{ ocpp_csms_release_wheels_dir }}" in argv
+
+    assert install["ansible.builtin.pip"]["virtualenv"] == "{{ ocpp_csms_release_venv }}"
+    assert install["ansible.builtin.pip"]["name"] == (
+        "{{ ocpp_csms_built_application_wheels.files[0].path }}"
+    )
+    assert install["ansible.builtin.pip"]["extra_args"] == "--no-index --no-deps"
+
+
+def test_development_dependencies_remain_release_local_and_opt_in():
+    development = task_by_name(TASKS / "main.yml", "Install release development dependencies")
+
     assert development["ansible.builtin.pip"] == {
         "name": [
             "pytest>=8,<9",
@@ -273,17 +322,6 @@ def test_release_install_phases_use_expected_packages_and_venv():
         "ocpp_csms_install_mode == 'online'",
         "ocpp_csms_dev | bool",
     ]
-    assert application["ansible.builtin.pip"] == {
-        "name": "{{ ocpp_csms_install_source }}",
-        "virtualenv": "{{ ocpp_csms_release_venv }}",
-        "extra_args": "--no-deps --no-build-isolation",
-    }
-
-    for task in (build, runtime, application):
-        assert task["when"] == [
-            "not ocpp_csms_release_ready.stat.exists",
-            "ocpp_csms_install_mode == 'online'",
-        ]
 
 
 def test_development_deploy_gets_distinct_immutable_release():
@@ -294,16 +332,19 @@ def test_development_deploy_gets_distinct_immutable_release():
     assert "'-dev' if ocpp_csms_dev | bool else ''" in release_id
 
 
-
 def test_release_install_phases_precede_verification_and_readiness():
     main = read(TASKS / "main.yml")
 
     assert_task_order(
         main,
-        "Install release build requirements",
-        "Install release runtime dependencies",
-        "Install release development dependencies",
-        "Install OCPP CSMS application into immutable release",
+        "Check reusable build environment",
+        "Install reusable build requirements",
+        "Check reusable runtime dependency environment",
+        "Install reusable WebSockets dependency",
+        "Install reusable OCPP dependency",
+        "Link reusable runtime dependencies into release",
+        "Build OCPP CSMS application wheel",
+        "Install OCPP CSMS application wheel into immutable release",
         "Verify immutable release command",
         "Mark immutable release ready",
         "Render candidate OCPP CSMS systemd unit",
@@ -312,24 +353,6 @@ def test_release_install_phases_precede_verification_and_readiness():
     verify = task_by_name(TASKS / "main.yml", "Verify immutable release command")
     assert verify["ansible.builtin.command"]["cmd"] == "{{ ocpp_csms_release_command }} --help"
     assert verify["changed_when"] is False
-
-
-def test_release_install_has_no_wheelhouse_or_dependency_download_phase():
-    main = load_yaml(TASKS / "main.yml")
-    defaults = load_yaml(DEFAULTS)
-    task_names = {
-        task["name"]
-        for task in main
-        if isinstance(task, dict) and "name" in task
-    }
-
-    assert "ocpp_csms_release_wheelhouse" not in defaults
-    assert "ocpp_csms_dependency_cache" not in defaults
-    assert "ocpp_csms_dependencies_dir" not in defaults
-    assert "Create immutable release wheelhouse" not in task_names
-    assert "Download immutable release dependency wheels" not in task_names
-    assert "Download dependency wheels into persistent cache" not in task_names
-    assert "Build OCPP CSMS application wheel" not in task_names
 
 
 def test_ansible_reports_elapsed_time_for_each_task():
