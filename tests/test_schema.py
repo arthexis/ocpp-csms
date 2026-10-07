@@ -77,7 +77,7 @@ def test_event_store_refuses_newer_schema(tmp_path):
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA user_version = 99")
 
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 2"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 3"):
         EventStore(tmp_path)
 
 
