@@ -2,6 +2,8 @@
 - name: Diagnose OCPP CSMS satellite deployment
   hosts: all
   gather_facts: true
-  roles:
-    - role: ocpp_csms
-      tasks_from: diagnose
+  tasks:
+    - name: Run OCPP CSMS deployment diagnosis
+      ansible.builtin.include_role:
+        name: ocpp_csms
+        tasks_from: diagnose
