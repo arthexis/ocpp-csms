@@ -242,27 +242,48 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_immutable_release_installs_directly_from_source():
-    main = read(TASKS / "main.yml")
-    defaults = load_yaml(DEFAULTS)
+def test_immutable_release_install_uses_source_and_release_venv():
+    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
 
-    assert "ocpp_csms_release_wheelhouse" not in defaults
-    assert "ocpp_csms_dependency_cache" not in defaults
+    assert install["ansible.builtin.pip"] == {
+        "name": "{{ ocpp_csms_install_source }}",
+        "virtualenv": "{{ ocpp_csms_release_venv }}",
+    }
+    assert install["when"] == "not ocpp_csms_release_ready.stat.exists"
+
+
+def test_release_is_verified_before_it_is_marked_ready():
+    main = read(TASKS / "main.yml")
 
     assert_task_order(
         main,
-        "Use release source as install source for remote execution",
         "Install OCPP CSMS into immutable release",
         "Verify immutable release command",
+        "Mark immutable release ready",
+        "Render candidate OCPP CSMS systemd unit",
     )
 
-    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
-    assert install["ansible.builtin.pip"]["name"] == "{{ ocpp_csms_install_source }}"
-    assert install["ansible.builtin.pip"]["virtualenv"] == "{{ ocpp_csms_release_venv }}"
+    verify = task_by_name(TASKS / "main.yml", "Verify immutable release command")
+    assert verify["ansible.builtin.command"]["cmd"] == "{{ ocpp_csms_release_command }} --help"
+    assert verify["changed_when"] is False
 
-    assert "Download dependency wheels" not in main
-    assert "Create immutable release wheelhouse" not in main
-    assert "--no-index" not in main
+
+def test_release_install_has_no_separate_dependency_packaging_phase():
+    main = load_yaml(TASKS / "main.yml")
+    defaults = load_yaml(DEFAULTS)
+    task_names = {
+        task["name"]
+        for task in main
+        if isinstance(task, dict) and "name" in task
+    }
+
+    assert "ocpp_csms_release_wheelhouse" not in defaults
+    assert "ocpp_csms_dependency_cache" not in defaults
+    assert "ocpp_csms_dependencies_dir" not in defaults
+    assert "Create immutable release wheelhouse" not in task_names
+    assert "Download immutable release dependency wheels" not in task_names
+    assert "Download dependency wheels into persistent cache" not in task_names
+    assert "Build OCPP CSMS application wheel" not in task_names
 
 
 def test_ansible_reports_elapsed_time_for_each_task():
