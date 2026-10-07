@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 
@@ -138,3 +139,20 @@ def test_profile_send_rejects_invalid_start_without_contacting_control(cli_parse
     assert run_profile(args) == 1
     assert profile_control.calls == []
     assert "--start" in capsys.readouterr().out
+
+
+def test_profile_composite_local_time_converts_schedule_start_for_display(cli_parser, profile_control, capsys):
+    profile_control.response = composite_response()
+    args = cli_parser.parse_args(["profile", "composite", "-T"])
+    assert run_profile(args) == 0
+    output = capsys.readouterr().out
+    expected = datetime.fromisoformat("2026-10-03T20:00:00+00:00").astimezone().isoformat(timespec="seconds")
+    assert f"Schedule start: {expected}" in output
+
+
+def test_profile_composite_local_time_does_not_mutate_json(cli_parser, profile_control, capsys):
+    profile_control.response = composite_response()
+    args = cli_parser.parse_args(["profile", "composite", "-T", "--json"])
+    assert run_profile(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schedule_start"] == "2026-10-03T20:00:00Z"
