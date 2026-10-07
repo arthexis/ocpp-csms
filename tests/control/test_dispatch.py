@@ -280,6 +280,75 @@ async def test_now_blocks_start_and_reset_when_transaction_is_active():
 
 
 @pytest.mark.asyncio
+async def test_start_allows_free_connector_when_another_connector_is_active():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("start", "REMOTE", 2)]
+
+
+@pytest.mark.asyncio
+async def test_start_blocks_when_requested_connector_is_active():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 2), (18, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response == {
+        "error": "active_transaction",
+        "charger": "charger-a",
+        "transactions": [17],
+    }
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_without_connector_remains_blocked_by_any_active_transaction():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response["error"] == "active_transaction"
+    assert response["transactions"] == [17]
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_within_waits_only_for_requested_connector(monkeypatch):
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 2), (18, 1)]})
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        registry.active["charger-a"] = [(18, 1)]
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "within", "seconds": 3},
+    )
+
+    assert response["ok"] is True
+    assert sleeps == [1]
+    assert session.calls == [("start", "REMOTE", 2)]
+
+
+@pytest.mark.asyncio
 async def test_after_waits_before_checking_active_transaction(monkeypatch):
     session = Session()
     registry = Registry(session)
