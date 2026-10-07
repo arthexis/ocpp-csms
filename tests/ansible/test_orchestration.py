@@ -1,6 +1,7 @@
 from .helpers import (
     DEFAULTS,
     DEPLOY_SCRIPT,
+    ROOT,
     TASKS,
     assert_task_order,
     load_yaml,
@@ -271,3 +272,16 @@ def test_immutable_release_installs_only_from_local_wheelhouse():
     assert build["environment"]["PIP_NO_INDEX"] == "1"
     assert build["environment"]["PIP_FIND_LINKS"] == "{{ ocpp_csms_release_wheelhouse }}"
     assert "Ensure current pip in release virtual environment" not in main
+
+
+
+def test_ansible_reports_elapsed_time_for_each_task():
+    config = read(ROOT / "ansible.cfg")
+    callback = read(ROOT / "ansible" / "callback_plugins" / "task_timing.py")
+
+    assert "callback_plugins = ansible/callback_plugins" in config
+    assert "callbacks_enabled = task_timing" in config
+    assert 'CALLBACK_TYPE = "aggregate"' in callback
+    assert 'CALLBACK_NAME = "task_timing"' in callback
+    assert "time.monotonic()" in callback
+    assert 'TIMING [{task.get_name()}] {elapsed:.2f}s' in callback
