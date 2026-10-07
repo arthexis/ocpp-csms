@@ -317,5 +317,3 @@
     fail_msg: >-
       Stable OCPP CSMS command does not resolve to the active current release.
 
-- name: Remove legacy install.sh artifacts after verified takeover
-  ansible.builtin.include_tasks: cleanup_legacy.yml
