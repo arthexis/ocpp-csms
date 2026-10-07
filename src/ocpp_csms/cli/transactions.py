@@ -22,7 +22,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     selection.add_argument("--active", action="store_true", help="Show only active transactions")
     selection.add_argument("--last", action="store_true", help="Show the most recent non-active transaction")
     add(transactions, "-c", "--charger", help="Filter by charge point ID")
-    add(transactions, "--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
+    add(transactions, "--connector", "--c", dest="connector", type=int, help="Filter by connector ID")
     add(transactions, "--id-tag", help="Filter by OCPP idTag")
     add(transactions, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 7D)")
     add(transactions, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 2H)")
@@ -82,7 +82,7 @@ def run_transactions(args: argparse.Namespace) -> str:
     if args.transaction_id is not None and args.transaction_id < 0:
         raise ValueError("transaction ID must be zero or greater")
     if args.connector is not None and args.connector < 0:
-        raise ValueError("--connector/--cp must be zero or greater")
+        raise ValueError("--connector/--c must be zero or greater")
     if args.limit < 1:
         raise ValueError("--limit must be at least 1")
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until, args.between, args.at, args.today))
