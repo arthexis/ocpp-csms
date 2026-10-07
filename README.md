@@ -150,23 +150,23 @@ Common operations include:
 ```text
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
-ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
+ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
 ocpp-csms txn ...
 ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--charger CHARGER]
-ocpp-csms profile composite [--charger CHARGER] [--connector N|--cp N] [--duration SECONDS] [--json]
+ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [--json]
 ocpp-csms profile clear ...
-ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
+ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
 ocpp-csms reboot CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
-`--cp` aliases `--connector`; `--txn` aliases `--transaction`.
+`--c` aliases `--connector`; `--txn` aliases `--transaction`.
 
 ### Configuration snapshots
 
