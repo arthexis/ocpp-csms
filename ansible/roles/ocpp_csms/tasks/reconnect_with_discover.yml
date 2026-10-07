@@ -1,7 +1,8 @@
 ---
-# Give a normal reconnect a short chance first. Most deployments do not need
-# Discover during release activation, so keep their handoff path unchanged.
-- name: Probe charger reconnect before Discover recovery
+# Give a normal reconnect a short chance first. Managed upgrades can verify the
+# exact pre-cutover charger set; a first takeover has no old CSMS database, so
+# require at least one real charger connection before considering it successful.
+- name: Probe managed charger reconnect before Discover recovery
   ansible.builtin.command:
     argv:
       - "{{ ocpp_csms_release_venv }}/bin/python"
@@ -14,12 +15,38 @@
       - "{{ ocpp_csms_reconnect_baseline_path }}"
       - --timeout
       - "5"
-  register: ocpp_csms_reconnect_probe
+  register: ocpp_csms_managed_reconnect_probe
   changed_when: false
   failed_when: false
+  when: ocpp_csms_incumbent_service | length == 0
+
+- name: Probe incumbent charger reconnect before Discover recovery
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - wait-any
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+      - --timeout
+      - "5"
+  register: ocpp_csms_incumbent_reconnect_probe
+  changed_when: false
+  failed_when: false
+  when: ocpp_csms_incumbent_service | length > 0
+
+- name: Decide whether Discover reconnect recovery is required
+  ansible.builtin.set_fact:
+    ocpp_csms_reconnect_recovery_required: >-
+      {{
+        (ocpp_csms_incumbent_reconnect_probe.rc | default(1)) != 0
+        if ocpp_csms_incumbent_service | length > 0
+        else (ocpp_csms_managed_reconnect_probe.rc | default(1)) != 0
+      }}
 
 - name: Recover charger reconnect with candidate OCPP Discover
-  when: ocpp_csms_reconnect_probe.rc != 0
+  when: ocpp_csms_reconnect_recovery_required | bool
   block:
     - name: Inspect resident OCPP Discover service before recovery
       become: true
@@ -77,7 +104,7 @@
           - "{{ ocpp_csms_port | string }}"
       changed_when: true
 
-    - name: Verify charger reconnect after candidate Discover recovery
+    - name: Verify managed charger reconnect after candidate Discover recovery
       ansible.builtin.command:
         argv:
           - "{{ ocpp_csms_release_venv }}/bin/python"
@@ -91,6 +118,21 @@
           - --timeout
           - "{{ ocpp_csms_reconnect_timeout }}"
       changed_when: false
+      when: ocpp_csms_incumbent_service | length == 0
+
+    - name: Verify incumbent charger reconnect after candidate Discover recovery
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - wait-any
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+          - --timeout
+          - "{{ ocpp_csms_reconnect_timeout }}"
+      changed_when: false
+      when: ocpp_csms_incumbent_service | length > 0
 
     # Reconnect can become visible to the CSMS while Discover is still inside its
     # bounded proof capture. Durable promotion has its own timeout so Ansible does
