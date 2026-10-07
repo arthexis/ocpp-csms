@@ -93,3 +93,12 @@ def test_profile_composite_rejects_invalid_bounds_without_contacting_control(cli
     assert run_profile(cli_parser.parse_args(argv)) == 1
     assert profile_control.calls == []
     assert "error:" in capsys.readouterr().out
+
+
+def test_bare_profile_prints_subcommand_help(cli_parser, capsys):
+    args = cli_parser.parse_args(["profile"])
+    assert run_profile(args) == 0
+
+    output = capsys.readouterr().out
+    for subcommand in ("list", "help", "set", "composite", "clear"):
+        assert subcommand in output
