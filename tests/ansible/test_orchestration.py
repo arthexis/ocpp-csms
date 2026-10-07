@@ -195,3 +195,48 @@ def test_base_role_refuses_root_deployment_identity():
     conditions = validation["ansible.builtin.assert"]["that"]
     assert "ansible_user_id != 'root'" in conditions
     assert "ansible_user_uid | int != 0" in conditions
+
+
+def test_stage_only_stops_before_handoff():
+    main = read(TASKS / "main.yml")
+    assert_task_order(
+        main,
+        "Inspect incumbent host-local OCPP service",
+        "Inspect database schema cutover action",
+        "Report staged OCPP CSMS handoff plan",
+        "End host after safe staging",
+        "Perform controlled OCPP CSMS handoff",
+    )
+    end_host = task_by_name(TASKS / "main.yml", "End host after safe staging")
+    assert end_host["ansible.builtin.meta"] == "end_host"
+    assert end_host["when"] == "ocpp_csms_stage_only | bool"
+
+
+def test_diagnose_tasks_are_read_only_and_report_takeover_preflight():
+    diagnose = read(TASKS / "diagnose.yml")
+    assert "ocpp_discover.incumbent" in diagnose
+    assert "ocpp_csms.install_preflight" in diagnose
+    assert "diagnostics" in diagnose
+    assert "takeover_preflight_passed" in diagnose
+    for mutating_module in (
+        "ansible.builtin.apt:",
+        "ansible.builtin.copy:",
+        "ansible.builtin.file:",
+        "ansible.builtin.systemd_service:",
+        "ansible.builtin.template:",
+    ):
+        assert mutating_module not in diagnose
+
+
+def test_deploy_wrapper_exposes_field_friendly_options():
+    wrapper = read(DEPLOY_SCRIPT)
+    assert "--observe" in wrapper
+    assert "ocpp_csms_incumbent_observe_seconds" in wrapper
+    assert "--interface" in wrapper
+    assert "ocpp_discover_interface" in wrapper
+    assert "--reconnect" in wrapper
+    assert "ocpp_csms_reconnect_timeout" in wrapper
+    assert "--stage-only" in wrapper
+    assert "ocpp_csms_stage_only=true" in wrapper
+    assert "--diagnose" in wrapper
+    assert "ansible/playbooks/diagnose.yml" in wrapper
