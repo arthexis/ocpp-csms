@@ -4,6 +4,210 @@ A deliberately small Python OCPP 1.6J CSMS intended to run as an appliance-style
 
 Its default policy is simple: **accept chargers, avoid blocking charging, preserve evidence, and expose a small diagnostic and control surface.**
 
+## CSMS operating model
+
+The CSMS is permissive by default:
+
+- unknown charge-point identities are accepted;
+- RFID authorization is accepted by default when no `rfid.csv` authorization file is present;
+- a charger is not rejected solely for an unexpected/missing `ocpp1.6` subprotocol negotiation;
+- anomalies are recorded as evidence instead of automatically blocking charging.
+
+The design principle is: **observe aggressively; block reluctantly.**
+
+## Commands
+
+Run `ocpp-csms --help` for the authoritative current surface.
+
+Common operations include:
+
+```text
+ocpp-csms status [CHARGER]
+ocpp-csms status --charging
+ocpp-csms chargers [--charging] [--json]
+ocpp-csms cps ...
+ocpp-csms charger CHARGE_POINT [--json]
+ocpp-csms cp CHARGE_POINT [--json]
+ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
+ocpp-csms txn ...
+ocpp-csms rfid report [RFID]
+ocpp-csms rfid export [CHARGER]
+ocpp-csms rfid version [CHARGER]
+ocpp-csms rfid clear [CHARGER]
+ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
+ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
+ocpp-csms profile templates
+ocpp-csms profile help TEMPLATE
+ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--charger CHARGER]
+ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [-T|--local-time] [--json]
+ocpp-csms profile clear ...
+ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
+ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
+ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
+ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
+ocpp-csms explain CHARGER --at TIME [--minutes N]
+```
+
+`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`; `--txn` aliases `--transaction`.
+
+### Configuration snapshots
+
+`config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
+
+When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
+
+Full configuration queries are blocked while the selected charger has an active transaction because field testing has shown that some chargers become unstable under extra OCPP traffic while charging. `-f` / `--force` deliberately bypasses that guard.
+
+Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
+
+Examples:
+
+```bash
+ocpp-csms config download
+ocpp-csms config download CHARGER
+ocpp-csms config download CHARGER --json
+ocpp-csms config download CHARGER --output charger-config.json
+ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
+ocpp-csms config download CHARGER --force
+```
+
+`--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
+
+Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
+
+Remote start, stop, and reset commands require one timing mode:
+
+- `--now` attempts the command immediately.
+- `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
+- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reset, it waits up to that many seconds for charging to stop before proceeding.
+- Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
+
+Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
+
+The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored by default at `2000-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks. Use `--start` with an ISO-8601 date-time including timezone to override that anchor; explicit values are normalized to UTC before being sent.
+
+`profile composite -T` converts the returned `scheduleStart` to the CSMS host local timezone for human-readable output. JSON output remains unchanged and preserves the charger/OCPP timestamp exactly as returned.\n\nSmart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
+
+## RFID authorization
+
+RFID authorization is optional and file-backed. With no
+`<data-dir>/rfid.csv`, every RFID remains accepted. When the file exists it
+becomes the allow list and is re-read for every authorization decision, so
+editing it does not require restarting the service.
+
+The smallest valid file is one RFID per line:
+
+```text
+CARD-A
+CARD-B
+```
+
+An optional header makes richer CSV files self-describing and allows columns to
+be reordered:
+
+```csv
+rfid,name,enabled
+CARD-A,Alice,true
+CARD-B,Former employee,false
+```
+
+Without a header, extended rows use the fixed order
+`rfid[,name[,enabled]]`. With a header, supported columns are `rfid`,
+`name`, and `enabled`; `rfid` is required. Blank lines and lines beginning
+with `#` are ignored. Duplicate RFIDs or malformed values make the file
+invalid.
+
+When `rfid.csv` is present, an enabled listed RFID is `Accepted`, an
+unlisted RFID is `Invalid`, and a listed disabled RFID is `Blocked`. An
+invalid authorization file fails closed as `Blocked`. The same policy is
+applied to both OCPP `Authorize` and `StartTransaction`.
+
+Human-readable `ocpp-csms status` reports one of:
+
+```text
+RFID authorization: Allow All
+RFID authorization: rfid.csv (27 cards)
+RFID authorization: rfid.csv (invalid)
+```
+
+Machine-readable status uses `null` when no RFID authorization file is
+configured and a structured object when one is present.
+
+`ocpp-csms rfid report` summarizes every RFID observed in transaction history,
+including transaction count and total energy. The authorization columns adapt to
+the sources that are actually known at report time:
+
+- with `rfid.csv` only, `ALLOW` and `NAME` describe the current file;
+- with no `rfid.csv` but a connected charger whose current local-list version
+  matches accepted CSMS history, `ALLOW` and `NAME` describe that charger
+  cache;
+- with both a file and a known connected charger cache, `ALLOW` describes the
+  file and `CACHE` describes the charger;
+- an observed RFID absent from a known source shows `missing`; an unrecognized
+  live charger-list version shows `unknown` for `CACHE`;
+- when the charger is disconnected, or when the CSMS has never successfully sent
+  it a list, charger cache columns are omitted rather than inferred from stale
+  history.
+
+When a connected charger has accepted-list history, the report also shows
+`Charger cache: version N`. If `rfid.csv` is present, a `Sync:` line reports
+`current`, `differs`, or `unknown` by comparing the current enabled-card
+set with the stored snapshot for the charger's live list version. Supplying a
+tag keeps the detailed per-RFID report:
+
+```bash
+ocpp-csms rfid report
+ocpp-csms rfid report CARD-A
+```
+
+The same `rfid.csv` can be exported to a connected OCPP 1.6 charge point's
+Local Authorization List:
+
+```bash
+ocpp-csms rfid export [CHARGER]
+ocpp-csms rfid version [CHARGER]
+ocpp-csms rfid clear [CHARGER]
+```
+
+`export` sends only entries whose `enabled` value is true, using a Full
+`SendLocalList` update. The CSMS first reads `GetLocalListVersion`, chooses a
+new version that does not reuse any version previously accepted for that
+charger, sends the list, and then reads the charger version again for
+verification. `clear` sends an empty Full list at version 0 and verifies that
+the charger reports version 0. These operations require charger support for the
+optional OCPP 1.6 Local Authorization List Management feature.
+
+Accepted lists are stored in SQLite by charger and list version, together with
+the exact RFID/name snapshot that was sent, its hash, and the version reported
+by the charger after the update. Rejected or failed `SendLocalList` attempts
+are not stored in the RFID-list history; their OCPP request/response evidence
+remains in the normal event log. Standard OCPP 1.6 exposes the current list
+version but does not provide an operation to download the charger's list
+contents, so the CSMS keeps this accepted-list history itself.
+
+The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
+
+The listener uses plain `ws://` and is intended for a trusted charger LAN or equivalent private boundary. Do not expose it directly to an untrusted/public network.
+
+Operator control uses `<data-dir>/control.sock`, a Unix-domain socket, rather than a second TCP control service.
+
+## Data and evidence
+
+Default CSMS data:
+
+```text
+~/ocpp-csms-data/
+  control.sock
+  ocpp-csms.sqlite3
+  ocpp-csms.sqlite3.schema-<old-version>.bak
+  transactions/
+  transactions-unresolved/
+```
+
+SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and diagnostic state. JSON transaction archives remain directly readable.
+
+Schema versions are independent from application releases. Startup does not silently upgrade an old database. Deployment performs explicit compatibility inspection and creates a SQLite-safe backup before a supported upgrade.
+
 ## Quick start
 
 The canonical appliance deployment is Ansible:
@@ -144,210 +348,6 @@ tcpdump
 nftables
 iproute2
 ```
-
-## CSMS operating model
-
-The CSMS is permissive by default:
-
-- unknown charge-point identities are accepted;
-- RFID authorization is accepted by default when no `rfid.csv` authorization file is present;
-- a charger is not rejected solely for an unexpected/missing `ocpp1.6` subprotocol negotiation;
-- anomalies are recorded as evidence instead of automatically blocking charging.
-
-The design principle is: **observe aggressively; block reluctantly.**
-
-### RFID authorization file
-
-RFID authorization is optional and file-backed. With no
-`<data-dir>/rfid.csv`, every RFID remains accepted. When the file exists it
-becomes the allow list and is re-read for every authorization decision, so
-editing it does not require restarting the service.
-
-The smallest valid file is one RFID per line:
-
-```text
-CARD-A
-CARD-B
-```
-
-An optional header makes richer CSV files self-describing and allows columns to
-be reordered:
-
-```csv
-rfid,name,enabled
-CARD-A,Alice,true
-CARD-B,Former employee,false
-```
-
-Without a header, extended rows use the fixed order
-`rfid[,name[,enabled]]`. With a header, supported columns are `rfid`,
-`name`, and `enabled`; `rfid` is required. Blank lines and lines beginning
-with `#` are ignored. Duplicate RFIDs or malformed values make the file
-invalid.
-
-When `rfid.csv` is present, an enabled listed RFID is `Accepted`, an
-unlisted RFID is `Invalid`, and a listed disabled RFID is `Blocked`. An
-invalid authorization file fails closed as `Blocked`. The same policy is
-applied to both OCPP `Authorize` and `StartTransaction`.
-
-Human-readable `ocpp-csms status` reports one of:
-
-```text
-RFID authorization: Allow All
-RFID authorization: rfid.csv (27 cards)
-RFID authorization: rfid.csv (invalid)
-```
-
-Machine-readable status uses `null` when no RFID authorization file is
-configured and a structured object when one is present.
-
-`ocpp-csms rfid report` summarizes every RFID observed in transaction history,
-including transaction count and total energy. The authorization columns adapt to
-the sources that are actually known at report time:
-
-- with `rfid.csv` only, `ALLOW` and `NAME` describe the current file;
-- with no `rfid.csv` but a connected charger whose current local-list version
-  matches accepted CSMS history, `ALLOW` and `NAME` describe that charger
-  cache;
-- with both a file and a known connected charger cache, `ALLOW` describes the
-  file and `CACHE` describes the charger;
-- an observed RFID absent from a known source shows `missing`; an unrecognized
-  live charger-list version shows `unknown` for `CACHE`;
-- when the charger is disconnected, or when the CSMS has never successfully sent
-  it a list, charger cache columns are omitted rather than inferred from stale
-  history.
-
-When a connected charger has accepted-list history, the report also shows
-`Charger cache: version N`. If `rfid.csv` is present, a `Sync:` line reports
-`current`, `differs`, or `unknown` by comparing the current enabled-card
-set with the stored snapshot for the charger's live list version. Supplying a
-tag keeps the detailed per-RFID report:
-
-```bash
-ocpp-csms rfid report
-ocpp-csms rfid report CARD-A
-```
-
-The same `rfid.csv` can be exported to a connected OCPP 1.6 charge point's
-Local Authorization List:
-
-```bash
-ocpp-csms rfid export [CHARGER]
-ocpp-csms rfid version [CHARGER]
-ocpp-csms rfid clear [CHARGER]
-```
-
-`export` sends only entries whose `enabled` value is true, using a Full
-`SendLocalList` update. The CSMS first reads `GetLocalListVersion`, chooses a
-new version that does not reuse any version previously accepted for that
-charger, sends the list, and then reads the charger version again for
-verification. `clear` sends an empty Full list at version 0 and verifies that
-the charger reports version 0. These operations require charger support for the
-optional OCPP 1.6 Local Authorization List Management feature.
-
-Accepted lists are stored in SQLite by charger and list version, together with
-the exact RFID/name snapshot that was sent, its hash, and the version reported
-by the charger after the update. Rejected or failed `SendLocalList` attempts
-are not stored in the RFID-list history; their OCPP request/response evidence
-remains in the normal event log. Standard OCPP 1.6 exposes the current list
-version but does not provide an operation to download the charger's list
-contents, so the CSMS keeps this accepted-list history itself.
-
-The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
-
-The listener uses plain `ws://` and is intended for a trusted charger LAN or equivalent private boundary. Do not expose it directly to an untrusted/public network.
-
-Operator control uses `<data-dir>/control.sock`, a Unix-domain socket, rather than a second TCP control service.
-
-## Commands
-
-Run `ocpp-csms --help` for the authoritative current surface.
-
-Common operations include:
-
-```text
-ocpp-csms status [CHARGER]
-ocpp-csms status --charging
-ocpp-csms chargers [--charging] [--json]
-ocpp-csms cps ...
-ocpp-csms charger CHARGE_POINT [--json]
-ocpp-csms cp CHARGE_POINT [--json]
-ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
-ocpp-csms txn ...
-ocpp-csms rfid report [RFID]
-ocpp-csms rfid export [CHARGER]
-ocpp-csms rfid version [CHARGER]
-ocpp-csms rfid clear [CHARGER]
-ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
-ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
-ocpp-csms profile templates
-ocpp-csms profile help TEMPLATE
-ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--charger CHARGER]
-ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [-T|--local-time] [--json]
-ocpp-csms profile clear ...
-ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
-ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
-ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
-ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
-ocpp-csms explain CHARGER --at TIME [--minutes N]
-```
-
-`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`; `--txn` aliases `--transaction`.
-
-### Configuration snapshots
-
-`config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
-
-When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
-
-Full configuration queries are blocked while the selected charger has an active transaction because field testing has shown that some chargers become unstable under extra OCPP traffic while charging. `-f` / `--force` deliberately bypasses that guard.
-
-Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
-
-Examples:
-
-```bash
-ocpp-csms config download
-ocpp-csms config download CHARGER
-ocpp-csms config download CHARGER --json
-ocpp-csms config download CHARGER --output charger-config.json
-ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
-ocpp-csms config download CHARGER --force
-```
-
-`--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
-
-Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
-
-Remote start, stop, and reset commands require one timing mode:
-
-- `--now` attempts the command immediately.
-- `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
-- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reset, it waits up to that many seconds for charging to stop before proceeding.
-- Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
-
-Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
-
-The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored by default at `2000-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks. Use `--start` with an ISO-8601 date-time including timezone to override that anchor; explicit values are normalized to UTC before being sent.
-
-`profile composite -T` converts the returned `scheduleStart` to the CSMS host local timezone for human-readable output. JSON output remains unchanged and preserves the charger/OCPP timestamp exactly as returned.\n\nSmart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
-
-## Data and evidence
-
-Default CSMS data:
-
-```text
-~/ocpp-csms-data/
-  control.sock
-  ocpp-csms.sqlite3
-  ocpp-csms.sqlite3.schema-<old-version>.bak
-  transactions/
-  transactions-unresolved/
-```
-
-SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and diagnostic state. JSON transaction archives remain directly readable.
-
-Schema versions are independent from application releases. Startup does not silently upgrade an old database. Deployment performs explicit compatibility inspection and creates a SQLite-safe backup before a supported upgrade.
 
 ## Installed layout
 
