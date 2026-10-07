@@ -428,7 +428,10 @@ async def test_rfid_version_queries_charger():
         {"command": "rfid_version"},
     )
 
-    assert response == {"ok": True, "response": {"list_version": 3}}
+    assert response == {
+        "ok": True,
+        "response": {"list_version": 3, "charger": "charger-a"},
+    }
     assert session.calls == [("rfid_version",)]
 
 
