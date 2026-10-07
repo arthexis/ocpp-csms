@@ -102,3 +102,9 @@ def test_bare_profile_prints_subcommand_help(cli_parser, capsys):
     output = capsys.readouterr().out
     for subcommand in ("templates", "help", "send", "composite", "clear"):
         assert subcommand in output
+
+
+@pytest.mark.parametrize("legacy", ["list", "set"])
+def test_ambiguous_legacy_profile_commands_are_not_kept(cli_parser, legacy):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["profile", legacy])
