@@ -29,7 +29,7 @@ def test_missing_database_has_no_rfid_history(tmp_path):
     assert query.latest("charger-a") is None
     assert query.version("charger-a", 1) is None
     assert query.has_history("charger-a") is False
-    assert not tmp_path.exists()
+    assert not query.path.exists()
 
 
 def test_query_lists_accepted_snapshots_with_entries(tmp_path):
