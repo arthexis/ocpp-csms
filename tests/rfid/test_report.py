@@ -119,7 +119,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
     header = report.splitlines()[0]
 
     assert header.index("ENERGY") < header.index("ALLOW") < header.index("NAME")
-    rows = {line.split()[0]: line for line in report.splitlines()[1:] if line.strip() and not line.startswith(("Charger cache:", "Sync:"))}
+    rows = {line.split()[0]: line for line in report.splitlines()[1:] if line.strip() and not line.startswith(("Charger local list:", "Sync:"))}
     assert "true" in rows["card-a"]
     assert "Alice" in rows["card-a"]
     assert "false" in rows["card-b"]
@@ -174,7 +174,7 @@ async def test_summary_uses_known_cache_as_allow_source_when_no_rfid_file(monkey
     report = run_rfid(args(tmp_path, None))
     lines = report.splitlines()
     header = lines[0]
-    rows = {line.split()[0]: line for line in lines[1:] if line.strip() and not line.startswith(("Charger cache:", "Sync:"))}
+    rows = {line.split()[0]: line for line in lines[1:] if line.strip() and not line.startswith(("Charger local list:", "Sync:"))}
 
     assert "ALLOW" in header
     assert "CACHE" not in header
@@ -225,7 +225,7 @@ async def test_summary_shows_allow_and_cache_when_file_and_known_cache_both_exis
     rows = {
         line.split()[0]: line
         for line in report.splitlines()[1:]
-        if line.strip() and not line.startswith(("Charger cache:", "Sync:"))
+        if line.strip() and not line.startswith(("Charger local list:", "Sync:"))
     }
 
     assert header.index("ENERGY") < header.index("ALLOW") < header.index("CACHE") < header.index("NAME")
@@ -316,7 +316,7 @@ async def test_summary_reports_current_sync_when_file_hash_matches_known_cache(m
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache: version 7" in report
+    assert "Charger local list: version 7" in report
     assert "Sync:" in report and "current" in report
 
 
@@ -339,7 +339,7 @@ async def test_summary_reports_differs_when_file_hash_differs_from_known_cache(m
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache: version 7" in report
+    assert "Charger local list: version 7" in report
     assert "Sync:" in report and "differs" in report
 
 
@@ -358,7 +358,7 @@ async def test_summary_reports_unknown_sync_for_unrecognized_live_cache(monkeypa
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache: version 9" in report
+    assert "Charger local list: version 9" in report
     assert "Sync:" in report and "unknown" in report
 
 
@@ -379,7 +379,7 @@ async def test_summary_with_cache_but_no_file_omits_sync_line(monkeypatch, tmp_p
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache: version 7" in report
+    assert "Charger local list: version 7" in report
     assert "Sync:" not in report
 
 
@@ -394,7 +394,7 @@ async def test_summary_without_live_cache_omits_cache_summary(monkeypatch, tmp_p
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache:" not in report
+    assert "Charger local list:" not in report
     assert "Sync:" not in report
 
 
@@ -413,5 +413,5 @@ async def test_summary_with_no_cache_history_omits_cache_summary(monkeypatch, tm
 
     report = run_rfid(args(tmp_path, None))
 
-    assert "Charger cache:" not in report
+    assert "Charger local list:" not in report
     assert "Sync:" not in report

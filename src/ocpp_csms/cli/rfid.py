@@ -146,7 +146,7 @@ def _summary_table(data_dir: str) -> str:
     output = [line(headers), *(line(row) for row in rows)]
 
     if cache_available and cache is not None:
-        output.extend(("", f"Charger cache: version {cache.list_version}"))
+        output.extend(("", f"Charger local list: version {cache.list_version}"))
         if file_configured:
             if not policy.valid or not cache.known or cache.snapshot is None:
                 sync = "unknown"
@@ -225,6 +225,54 @@ def _control_request(args: argparse.Namespace) -> dict[str, object]:
     return request
 
 
+_RFID_CONFIG_LABELS = (
+    ("LocalAuthListEnabled", "Charger local list"),
+    ("AuthorizationCacheEnabled", "Auth cache"),
+    ("LocalAuthorizeOffline", "Offline auth"),
+    ("LocalPreAuthorize", "Local preauth"),
+    ("AllowOfflineTxForUnknownId", "Unknown offline"),
+    ("StopTransactionOnInvalidId", "Stop invalid ID"),
+    ("MaxEnergyOnInvalidId", "Invalid ID energy"),
+    ("AuthorizeRemoteTxRequests", "Remote TX auth"),
+    ("SupportedFeatureProfiles", "Feature profiles"),
+    ("LocalAuthListMaxLength", "Local list capacity"),
+    ("SendLocalListMaxLength", "Send list capacity"),
+)
+
+
+def _configuration_values(payload: object) -> tuple[dict[str, str], set[str], str | None]:
+    if not isinstance(payload, dict):
+        return {}, set(), "unavailable"
+    error = payload.get("error")
+    if error is not None:
+        return {}, set(), str(error)
+    rows = payload.get("configuration_key")
+    unknown = payload.get("unknown_key")
+    values: dict[str, str] = {}
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict) and isinstance(row.get("key"), str):
+                value = row.get("value")
+                values[row["key"]] = str(value) if value is not None else ""
+    unknown_keys = {key for key in unknown or [] if isinstance(key, str)} if isinstance(unknown, list) else set()
+    return values, unknown_keys, None
+
+
+def _print_rfid_configuration(payload: object) -> None:
+    values, unknown, error = _configuration_values(payload)
+    print("")
+    print("RFID configuration:")
+    if error is not None:
+        print(f"  unavailable: {error}")
+        return
+    for key, label in _RFID_CONFIG_LABELS:
+        value = values.get(key, "unknown" if key in unknown else "not reported")
+        print(f"  {label + ':':21} {value}")
+    if values.get("LocalAuthListEnabled", "").lower() == "false":
+        print("")
+        print("Warning: charger local list is disabled; stored list changes will not affect authorization.")
+
+
 def _print_failure(command: str, response: dict[str, object]) -> int:
     error = response.get("error", "command_failed")
     detail = response.get("detail")
@@ -257,7 +305,8 @@ def run_rfid_action(args: argparse.Namespace) -> int:
         if not isinstance(version, int):
             print("RFID version failed: charger returned no local-list version")
             return 1
-        print(f"RFID local list version: {version}")
+        print(f"RFID charger local list version: {version}")
+        _print_rfid_configuration(response.get("configuration"))
         return 0
 
     status = response.get("status")
@@ -275,6 +324,7 @@ def run_rfid_action(args: argparse.Namespace) -> int:
     print(f"Sent version:     {list_version}")
     print(f"Result:           {status or '-'}")
     print(f"Verified:         {verified if verified is not None else '-'}")
+    _print_rfid_configuration(response.get("configuration"))
 
     if status != "Accepted":
         return 1

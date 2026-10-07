@@ -215,6 +215,28 @@ def _list_version(response: Any) -> int:
     return value
 
 
+RFID_CONFIGURATION_KEYS = [
+    "LocalAuthListEnabled",
+    "AuthorizationCacheEnabled",
+    "LocalAuthorizeOffline",
+    "LocalPreAuthorize",
+    "AllowOfflineTxForUnknownId",
+    "StopTransactionOnInvalidId",
+    "MaxEnergyOnInvalidId",
+    "AuthorizeRemoteTxRequests",
+    "SupportedFeatureProfiles",
+    "LocalAuthListMaxLength",
+    "SendLocalListMaxLength",
+]
+
+
+async def _rfid_configuration(session: Session) -> dict[str, Any]:
+    try:
+        return _response_payload(await session.get_configuration(RFID_CONFIGURATION_KEYS))
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 async def _send_rfid_list(
     registry: SessionRegistry,
     session: Session,
@@ -225,6 +247,7 @@ async def _send_rfid_list(
     list_hash: str,
     clear: bool,
 ) -> dict[str, Any]:
+    configuration = await _rfid_configuration(session)
     current_response = await session.get_local_list_version()
     current_version = _list_version(current_response)
     recorded_version = registry.latest_rfid_list_version(charger)
@@ -245,6 +268,7 @@ async def _send_rfid_list(
         "previous_version": current_version,
         "list_version": list_version,
         "cards": len(entries),
+        "configuration": configuration,
     }
     if status != "Accepted":
         return result
@@ -414,6 +438,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             response = await session.get_local_list_version()
             payload = _response_payload(response)
             payload["charger"] = charger
+            payload["configuration"] = await _rfid_configuration(session)
             return {"ok": True, "response": payload}
         elif command == "rfid_export":
             entries = _rfid_entries(request)

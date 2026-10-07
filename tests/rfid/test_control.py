@@ -9,6 +9,10 @@ class Session:
     def __init__(self):
         self.calls = []
 
+    async def get_configuration(self, keys):
+        self.calls.append(("rfid_config", tuple(keys)))
+        return SimpleNamespace(configuration_key=[], unknown_key=[])
+
     async def get_local_list_version(self):
         self.calls.append(("rfid_version",))
         return SimpleNamespace(list_version=3)
@@ -77,9 +81,10 @@ async def test_version_queries_charger():
 
     assert response == {
         "ok": True,
-        "response": {"list_version": 3, "charger": "charger-a"},
+        "response": {"list_version": 3, "charger": "charger-a", "configuration": {"configuration_key": [], "unknown_key": []}},
     }
-    assert session.calls == [("rfid_version",)]
+    assert session.calls[0][0] == "rfid_version"
+    assert session.calls[1][0] == "rfid_config"
 
 
 @pytest.mark.asyncio
@@ -105,6 +110,7 @@ async def test_export_sends_next_full_list_and_records_only_after_acceptance():
     assert response["response"]["list_version"] == 4
     assert response["response"]["verified_version"] == 3
     assert session.calls == [
+        ("rfid_config", tuple(__import__("ocpp_csms.control", fromlist=["RFID_CONFIGURATION_KEYS"]).RFID_CONFIGURATION_KEYS)),
         ("rfid_version",),
         (
             "rfid_send",
@@ -143,6 +149,7 @@ async def test_rejected_export_is_not_stored():
     assert response["response"]["status"] == "Failed"
     assert registry.rfid_lists == []
     assert session.calls == [
+        ("rfid_config", tuple(__import__("ocpp_csms.control", fromlist=["RFID_CONFIGURATION_KEYS"]).RFID_CONFIGURATION_KEYS)),
         ("rfid_version",),
         ("rfid_send", 4, [{"rfid": "CARD-A", "name": None, "enabled": True}]),
     ]

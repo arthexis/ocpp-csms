@@ -54,6 +54,7 @@ def test_export_sends_only_enabled_cards(monkeypatch, tmp_path, capsys):
                 "list_version": 3,
                 "cards": 1,
                 "verified_version": 3,
+                "configuration": {"configuration_key": [{"key": "LocalAuthListEnabled", "readonly": False, "value": "false"}, {"key": "AuthorizationCacheEnabled", "readonly": False, "value": "true"}], "unknown_key": ["LocalPreAuthorize"]},
             },
         }
 
@@ -71,6 +72,10 @@ def test_export_sends_only_enabled_cards(monkeypatch, tmp_path, capsys):
     output = capsys.readouterr().out
     assert "Cards:            1" in output
     assert "Verified:         3" in output
+    assert "Charger local list:   false" in output
+    assert "Auth cache:           true" in output
+    assert "Local preauth:" in output and "unknown" in output
+    assert "Warning: charger local list is disabled" in output
 
 
 def test_export_returns_failure_when_charger_rejects(monkeypatch, tmp_path):
@@ -104,7 +109,7 @@ def test_version_and_clear_use_control_socket(monkeypatch, tmp_path, capsys):
     async def fake_send(data_dir, request):
         requests.append(request)
         if request["command"] == "rfid_version":
-            return {"ok": True, "response": {"list_version": 7}}
+            return {"ok": True, "response": {"list_version": 7, "configuration": {"configuration_key": [], "unknown_key": []}}}
         return {
             "ok": True,
             "response": {
@@ -123,7 +128,7 @@ def test_version_and_clear_use_control_socket(monkeypatch, tmp_path, capsys):
     clear = parser.parse_args(["--data-dir", str(tmp_path), "rfid", "clear"])
 
     assert run_rfid_action(version) == 0
-    assert "RFID local list version: 7" in capsys.readouterr().out
+    assert "RFID charger local list version: 7" in capsys.readouterr().out
     assert run_rfid_action(clear) == 0
     assert requests == [{"command": "rfid_version"}, {"command": "rfid_clear"}]
 
