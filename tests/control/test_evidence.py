@@ -2,18 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from ocpp_csms.events import EventStore
-from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transactions import TransactionArchive
-
-
-def make_session(tmp_path):
-    return ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="test"),
-        TransactionArchive(tmp_path),
-        EventStore(tmp_path),
-    )
 
 
 def transaction_state(session, transaction_id):
@@ -34,8 +22,8 @@ def evidence(session, action):
 
 
 @pytest.mark.asyncio
-async def test_remote_acceptance_does_not_replace_transaction_messages(tmp_path):
-    session = make_session(tmp_path)
+async def test_remote_acceptance_does_not_replace_transaction_messages(charge_point_session):
+    session = charge_point_session
 
     async def accepted(_payload):
         return SimpleNamespace(status="Accepted")
@@ -74,8 +62,8 @@ async def test_remote_acceptance_does_not_replace_transaction_messages(tmp_path)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reset_type", ["Soft", "Hard"])
-async def test_reset_request_and_confirmation_are_preserved_as_evidence(tmp_path, reset_type):
-    session = make_session(tmp_path)
+async def test_reset_request_and_confirmation_are_preserved_as_evidence(charge_point_session, reset_type):
+    session = charge_point_session
 
     async def accepted(_payload):
         return SimpleNamespace(status="Accepted")
