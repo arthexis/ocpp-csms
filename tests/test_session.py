@@ -123,6 +123,74 @@ async def test_start_transaction_is_permissive_and_persisted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_authorize_uses_rfid_allow_list(tmp_path):
+    (tmp_path / "rfid.csv").write_text(
+        "rfid,name,enabled\nCARD-A,Alice,true\nCARD-B,Former,false\n",
+        encoding="utf-8",
+    )
+    session, _ = make_session(tmp_path)
+
+    accepted = await session.on_authorize(id_tag="CARD-A")
+    blocked = await session.on_authorize(id_tag="CARD-B")
+    missing = await session.on_authorize(id_tag="CARD-X")
+
+    assert accepted.id_tag_info["status"] == "Accepted"
+    assert blocked.id_tag_info["status"] == "Blocked"
+    assert missing.id_tag_info["status"] == "Invalid"
+
+
+@pytest.mark.asyncio
+async def test_rejected_start_transaction_is_not_persisted(tmp_path):
+    (tmp_path / "rfid.csv").write_text("CARD-A\n", encoding="utf-8")
+    session, recorded = make_session(tmp_path)
+
+    response = await session.on_start_transaction(
+        connector_id=1,
+        id_tag="CARD-X",
+        timestamp="2026-10-07T04:00:00Z",
+        meter_start=10,
+    )
+
+    assert response.transaction_id == 0
+    assert response.id_tag_info["status"] == "Invalid"
+    assert transaction_records(tmp_path) == []
+    assert recorded == [
+        (
+            "StartTransaction",
+            {
+                "connector_id": 1,
+                "id_tag": "CARD-X",
+                "timestamp": "2026-10-07T04:00:00Z",
+                "meter_start": 10,
+            },
+            "in",
+            0,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_rfid_file_blocks_authorize_and_start(tmp_path):
+    (tmp_path / "rfid.csv").write_text(
+        "rfid,enabled\nCARD-A,maybe\n",
+        encoding="utf-8",
+    )
+    session, _ = make_session(tmp_path)
+
+    authorize = await session.on_authorize(id_tag="CARD-A")
+    start = await session.on_start_transaction(
+        connector_id=1,
+        id_tag="CARD-A",
+        timestamp="2026-10-07T04:00:00Z",
+        meter_start=10,
+    )
+
+    assert authorize.id_tag_info["status"] == "Blocked"
+    assert start.id_tag_info["status"] == "Blocked"
+    assert transaction_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
 async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
     events = EventStore(tmp_path)
     archive = TransactionArchive(tmp_path)
