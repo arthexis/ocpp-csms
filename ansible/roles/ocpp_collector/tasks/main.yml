@@ -11,6 +11,7 @@
       - ocpp_collector_database is match('^[a-z_][a-z0-9_]*$')
       - ocpp_collector_db_role is match('^[a-z_][a-z0-9_]*$')
       - ocpp_collector_proxy_mode in ['auto', 'nginx', 'none']
+      - not (ocpp_collector_pg_host | length == 0) or ocpp_collector_db_role == ocpp_collector_service_user
       - (ocpp_collector_tls_certificate | length == 0) == (ocpp_collector_tls_certificate_key | length == 0)
     fail_msg: >-
       OCPP Collector requires a Debian-family x86_64/ARM64 host and valid,
@@ -111,11 +112,11 @@
     dest: "{{ ocpp_collector_config_dir }}/bootstrap.sql"
     owner: root
     group: root
-    mode: "0600"
+    mode: "0644"
 
 - name: Bootstrap OCPP Collector database and roles
   become: "{{ ocpp_collector_pg_autodetected | bool }}"
-  become_user: "{{ ocpp_collector_pg_admin_user if ocpp_collector_pg_autodetected | bool else omit }}"
+  become_user: "{{ ocpp_collector_pg_admin_user }}"
   ansible.builtin.command:
     argv:
       - psql
@@ -150,7 +151,7 @@
 
 - name: Converge OCPP Collector schema
   become: "{{ ocpp_collector_pg_autodetected | bool }}"
-  become_user: "{{ ocpp_collector_pg_admin_user if ocpp_collector_pg_autodetected | bool else omit }}"
+  become_user: "{{ ocpp_collector_pg_admin_user }}"
   ansible.builtin.command:
     argv:
       - psql
@@ -262,11 +263,11 @@
     state: started
     daemon_reload: true
 
-- name: Detect installed nginx for automatic proxy mode
+- name: Inspect existing nginx installation
   ansible.builtin.stat:
     path: /etc/nginx/nginx.conf
   register: ocpp_collector_nginx_config
-  when: ocpp_collector_proxy_mode == 'auto'
+  when: ocpp_collector_proxy_mode in ['auto', 'nginx']
 
 - name: Resolve OCPP Collector proxy mode
   ansible.builtin.set_fact:
@@ -281,6 +282,7 @@
   ansible.builtin.assert:
     that:
       - ocpp_collector_resolved_proxy_mode != 'missing'
+      - ocpp_collector_resolved_proxy_mode != 'nginx' or ocpp_collector_nginx_config.stat.exists
     fail_msg: >-
       No existing nginx installation was detected. Set
       ocpp_collector_proxy_mode=nginx when nginx is installed in a nonstandard
@@ -326,6 +328,15 @@
     dest: "{{ ocpp_collector_nginx_site_link }}"
     state: link
   notify: Reload nginx
+  when: ocpp_collector_resolved_proxy_mode == 'nginx'
+
+- name: Validate nginx configuration before reload
+  become: true
+  ansible.builtin.command:
+    argv:
+      - nginx
+      - -t
+  changed_when: false
   when: ocpp_collector_resolved_proxy_mode == 'nginx'
 
 - name: Flush OCPP Collector handlers
