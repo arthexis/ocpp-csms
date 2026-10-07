@@ -55,11 +55,14 @@ class CSMSServer:
     def physical_connector_ids(self, charge_point_id: str) -> list[int]:
         return physical_connector_ids(self.events.data_dir, charge_point_id)
 
-    def active_transaction_ids(self, charge_point_id: str) -> list[int]:
+    def active_transactions(self, charge_point_id: str) -> list[tuple[int, int | None]]:
         return [
-            view.transaction_id
+            (view.transaction_id, view.connector_id)
             for view in TransactionQuery(self.transactions.data_dir).active(charger=charge_point_id)
         ]
+
+    def active_transaction_ids(self, charge_point_id: str) -> list[int]:
+        return [transaction_id for transaction_id, _connector_id in self.active_transactions(charge_point_id)]
 
     def record_control_event(
         self,
