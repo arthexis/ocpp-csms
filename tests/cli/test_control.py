@@ -7,12 +7,14 @@ from ocpp_csms.cli.control import control_request, run_control
 def test_start_command_builds_control_request_with_or_without_charger(parse_cli):
     assert control_request(parse_cli("start", "--connector", "2", "--id-tag", "REMOTE", "--now")) == {
         "command": "start",
+        "timing": "now",
         "id_tag": "REMOTE",
         "connector": 2,
     }
 
     expected = {
         "command": "start",
+        "timing": "now",
         "charger": "charger-a",
         "id_tag": "REMOTE",
         "connector": 2,
@@ -24,11 +26,13 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
     assert control_request(parse_cli("stop", "--transaction", "42", "--now")) == {
         "command": "stop",
+        "timing": "now",
         "transaction": 42,
     }
 
     expected = {
         "command": "stop",
+        "timing": "now",
         "charger": "charger-a",
         "transaction": 42,
     }
@@ -37,10 +41,11 @@ def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
 
 
 def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
-    assert control_request(parse_cli("reboot", "--now")) == {"command": "reboot", "type": "Soft"}
-    assert control_request(parse_cli("reboot", "--hard", "--now")) == {"command": "reboot", "type": "Hard"}
+    assert control_request(parse_cli("reboot", "--now")) == {"command": "reboot", "timing": "now", "type": "Soft"}
+    assert control_request(parse_cli("reboot", "--hard", "--now")) == {"command": "reboot", "timing": "now", "type": "Hard"}
     assert control_request(parse_cli("reboot", "--charger", "charger-a", "--now")) == {
         "command": "reboot",
+        "timing": "now",
         "charger": "charger-a",
         "type": "Soft",
     }
