@@ -142,7 +142,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
     header = report.splitlines()[0]
 
     assert header.index("ENERGY") < header.index("ALLOW") < header.index("NAME")
-    rows = {line.split()[0]: line for line in report.splitlines()[1:]}
+    rows = {line.split()[0]: line for line in report.splitlines()[1:] if line.strip() and not line.startswith(("Charger cache:", "Sync:"))}
     assert "true" in rows["card-a"]
     assert "Alice" in rows["card-a"]
     assert "false" in rows["card-b"]
@@ -292,7 +292,7 @@ def test_version_and_clear_use_control_socket(monkeypatch, tmp_path, capsys):
     assert requests == [{"command": "rfid_version"}, {"command": "rfid_clear"}]
 
 
-def cache_state(*, version=7, entries=(), known=True, has_history=True):
+def cache_state(*, version=7, entries=(), known=True, has_history=True, list_hash="hash"):
     snapshot = None
     if known:
         snapshot = RFIDListSnapshot(
@@ -301,7 +301,7 @@ def cache_state(*, version=7, entries=(), known=True, has_history=True):
             list_version=version,
             sent_at="2026-10-07T04:00:00Z",
             source_file="rfid.csv",
-            list_hash="hash",
+            list_hash=list_hash,
             verified_version=version,
             entries=tuple(entries),
         )
@@ -341,7 +341,7 @@ async def test_summary_uses_known_cache_as_allow_source_when_no_rfid_file(monkey
     report = run_rfid(args(tmp_path, None))
     lines = report.splitlines()
     header = lines[0]
-    rows = {line.split()[0]: line for line in lines[1:]}
+    rows = {line.split()[0]: line for line in lines[1:] if line.strip() and not line.startswith(("Charger cache:", "Sync:"))}
 
     assert "ALLOW" in header
     assert "CACHE" not in header
@@ -452,3 +452,129 @@ async def test_summary_ignores_connected_charger_cache_when_we_have_no_history(m
     header = report.splitlines()[0]
 
     assert header.split() == ["RFID", "TXNS", "ENERGY"]
+
+
+@pytest.mark.asyncio
+async def test_summary_reports_current_sync_when_file_hash_matches_known_cache(monkeypatch, tmp_path):
+    (tmp_path / "rfid.csv").write_text(
+        "rfid,name,enabled\ncard-a,Alice,true\ncard-b,Bob,false\n",
+        encoding="utf-8",
+    )
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    expected_hash = rfid_module._list_hash(
+        [{"rfid": "card-a", "name": "Alice", "enabled": True}]
+    )
+    monkeypatch.setattr(
+        rfid_module,
+        "resolve_rfid_cache_sync",
+        lambda data_dir: cache_state(
+            version=7,
+            list_hash=expected_hash,
+            entries=(RFIDListEntrySnapshot("card-a", "Alice", True),),
+        ),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache: version 7" in report
+    assert "Sync:          current" in report
+
+
+@pytest.mark.asyncio
+async def test_summary_reports_differs_when_file_hash_differs_from_known_cache(monkeypatch, tmp_path):
+    (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    monkeypatch.setattr(
+        rfid_module,
+        "resolve_rfid_cache_sync",
+        lambda data_dir: cache_state(
+            version=7,
+            list_hash="different",
+            entries=(RFIDListEntrySnapshot("card-a", "Alice", True),),
+        ),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache: version 7" in report
+    assert "Sync:          differs" in report
+
+
+@pytest.mark.asyncio
+async def test_summary_reports_unknown_sync_for_unrecognized_live_cache(monkeypatch, tmp_path):
+    (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    monkeypatch.setattr(
+        rfid_module,
+        "resolve_rfid_cache_sync",
+        lambda data_dir: cache_state(version=9, known=False, has_history=True),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache: version 9" in report
+    assert "Sync:          unknown" in report
+
+
+@pytest.mark.asyncio
+async def test_summary_with_cache_but_no_file_omits_sync_line(monkeypatch, tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    monkeypatch.setattr(
+        rfid_module,
+        "resolve_rfid_cache_sync",
+        lambda data_dir: cache_state(
+            version=7,
+            entries=(RFIDListEntrySnapshot("card-a", "Alice", True),),
+        ),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache: version 7" in report
+    assert "Sync:" not in report
+
+
+@pytest.mark.asyncio
+async def test_summary_without_live_cache_omits_cache_summary(monkeypatch, tmp_path):
+    (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    monkeypatch.setattr(rfid_module, "resolve_rfid_cache_sync", lambda data_dir: None)
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache:" not in report
+    assert "Sync:" not in report
+
+
+@pytest.mark.asyncio
+async def test_summary_with_no_cache_history_omits_cache_summary(monkeypatch, tmp_path):
+    (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
+    await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
+
+    monkeypatch.setattr(
+        rfid_module,
+        "resolve_rfid_cache_sync",
+        lambda data_dir: cache_state(version=3, known=False, has_history=False),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+
+    assert "Charger cache:" not in report
+    assert "Sync:" not in report
