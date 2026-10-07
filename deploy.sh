@@ -6,7 +6,7 @@ PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"
 DIAGNOSE_PLAYBOOK="$ROOT/ansible/playbooks/diagnose.yml"
 
 if [ "$(id -u)" -eq 0 ]; then
-    printf 'Do not run ansible-deploy.sh as root or with sudo.\n' >&2
+    printf 'Do not run deploy.sh as root or with sudo.\n' >&2
     exit 1
 fi
 

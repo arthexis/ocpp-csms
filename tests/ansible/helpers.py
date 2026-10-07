@@ -10,7 +10,7 @@ ROLE = ANSIBLE / "roles" / "ocpp_csms"
 TASKS = ROLE / "tasks"
 DEFAULTS = ROLE / "defaults" / "main.yml"
 SERVICE_TEMPLATE = ROLE / "templates" / "ocpp-csms.service.j2"
-DEPLOY_SCRIPT = ROOT / "ansible-deploy.sh"
+DEPLOY_SCRIPT = ROOT / "deploy.sh"
 
 
 def read(path: Path) -> str:
