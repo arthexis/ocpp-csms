@@ -9,8 +9,8 @@
       - systemctl
       - show
       - "{{ item }}"
-      - --property=ActiveState,MainPID
-      - --value
+      - --property=ActiveState
+      - --property=MainPID
   loop: "{{ ocpp_csms_legacy_arthexis_services }}"
   register: ocpp_csms_legacy_service_states
   changed_when: false
@@ -39,13 +39,22 @@
     ocpp_csms_legacy_arthexis_port: "{{ item.1.item | int }}"
   vars:
     ocpp_csms_legacy_state_lines: "{{ item.0.stdout_lines | default([]) }}"
+    ocpp_csms_legacy_main_pid_line: >-
+      {{
+        (ocpp_csms_legacy_state_lines
+         | select('match', '^MainPID=[0-9]+$')
+         | list
+         | first)
+        | default('MainPID=')
+      }}
+    ocpp_csms_legacy_main_pid: "{{ ocpp_csms_legacy_main_pid_line | regex_replace('^MainPID=', '') }}"
   when:
     - ocpp_csms_legacy_arthexis_service | length == 0
     - item.0.rc | default(1) == 0
-    - ocpp_csms_legacy_state_lines | length >= 2
-    - ocpp_csms_legacy_state_lines[0] == 'active'
+    - "'ActiveState=active' in ocpp_csms_legacy_state_lines"
+    - ocpp_csms_legacy_main_pid | length > 0
     - item.1.stdout | length > 0
-    - ocpp_csms_legacy_state_lines[1] == item.1.stdout
+    - ocpp_csms_legacy_main_pid == item.1.stdout
   loop: "{{ ocpp_csms_legacy_service_states.results | product(ocpp_csms_legacy_listener_states.results) | list }}"
 
 - name: Report legacy Arthexis takeover preflight

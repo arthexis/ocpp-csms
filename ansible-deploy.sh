@@ -15,4 +15,23 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
     exit 1
 fi
 
-exec ansible-playbook "$PLAYBOOK" -i localhost, -c local "$@"
+started_at=$(date +%s)
+
+if ansible-playbook "$PLAYBOOK" -i localhost, -c local "$@"; then
+    status=0
+else
+    status=$?
+fi
+
+finished_at=$(date +%s)
+duration=$((finished_at - started_at))
+minutes=$((duration / 60))
+seconds=$((duration % 60))
+
+if [ "$minutes" -gt 0 ]; then
+    printf '\nOCPP CSMS deploy finished in %dm %02ds\n' "$minutes" "$seconds"
+else
+    printf '\nOCPP CSMS deploy finished in %ds\n' "$seconds"
+fi
+
+exit "$status"

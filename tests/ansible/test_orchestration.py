@@ -36,7 +36,11 @@ def test_legacy_inspection_occurs_after_candidate_validation_before_handoff():
 
 def test_legacy_detection_is_listener_owned_not_install_presence():
     legacy = read(TASKS / "legacy_arthexis.yml")
-    assert "ActiveState,MainPID" in legacy
+    assert "--property=ActiveState" in legacy
+    assert "--property=MainPID" in legacy
+    assert "--value" not in legacy
+    assert "'ActiveState=active' in ocpp_csms_legacy_state_lines" in legacy
+    assert "^MainPID=[0-9]+$" in legacy
     assert "ss -H -ltnp" in legacy
     assert "ocpp_csms_legacy_listener_states" in legacy
     defaults = load_yaml(DEFAULTS)
