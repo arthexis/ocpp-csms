@@ -212,20 +212,17 @@ async def _wait_for_control_window(
         return {"error": "active_transaction", "charger": charger, "transactions": active}
 
     assert seconds is not None
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + seconds
-    while active:
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return {
-                "error": "active_transaction_timeout",
-                "charger": charger,
-                "transactions": active,
-                "seconds": seconds,
-            }
-        await asyncio.sleep(min(1.0, remaining))
+    for _ in range(seconds):
+        await asyncio.sleep(1)
         active = registry.active_transaction_ids(charger)
-    return None
+        if not active:
+            return None
+    return {
+        "error": "active_transaction_timeout",
+        "charger": charger,
+        "transactions": active,
+        "seconds": seconds,
+    }
 
 
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
