@@ -87,11 +87,12 @@ CREATE TABLE IF NOT EXISTS rfid_lists (
     sent_at TEXT NOT NULL,
     source_file TEXT,
     list_hash TEXT NOT NULL,
-    verified_version INTEGER,
-    UNIQUE (charger_id, list_version)
+    verified_version INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_rfid_lists_charger_sent
     ON rfid_lists (charger_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_rfid_lists_charger_version
+    ON rfid_lists (charger_id, list_version);
 
 CREATE TABLE IF NOT EXISTS rfid_list_entries (
     list_id INTEGER NOT NULL,
