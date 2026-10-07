@@ -30,7 +30,8 @@
 
 - name: Capture immutable release identifier
   ansible.builtin.set_fact:
-    ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout }}"
+    ocpp_csms_release_id: >-
+      {{ ocpp_csms_release_revision.stdout }}{{ '-dev' if ocpp_csms_dev | bool else '' }}
 
 # The first safety gate must run before appliance mutation. Idle connected
 # chargers are expected; only active charging or unsafe persistence state blocks.
