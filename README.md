@@ -28,20 +28,20 @@ ocpp-csms chargers [--charging] [--json]
 ocpp-csms cps ...
 ocpp-csms charger CHARGE_POINT [--json]
 ocpp-csms cp CHARGE_POINT [--json]
-ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
+ocpp-csms transactions [ID] [--active|--last] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--events]
 ocpp-csms txn ...
 ocpp-csms rfid report [RFID]
 ocpp-csms rfid export [CHARGER]
 ocpp-csms rfid version [CHARGER]
 ocpp-csms rfid clear [CHARGER]
-ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
+ocpp-csms config [KEY ...] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
-ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--charger CHARGER]
-ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [-T|--local-time] [--json]
+ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT|--charger CHARGE_POINT]
+ocpp-csms profile composite [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
-ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
+ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
@@ -50,7 +50,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 
 ### Status and charger views
 
-`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`.
+`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
 
 ### Transactions and events
 

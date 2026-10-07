@@ -39,6 +39,7 @@ class SessionRegistry(Protocol):
     def session(self, charge_point_id: str) -> Session | None: ...
     def connected_chargers(self) -> list[str]: ...
     def physical_connector_ids(self, charge_point_id: str) -> list[int]: ...
+    def active_transactions(self, charge_point_id: str) -> list[tuple[int, int | None]]: ...
     def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
     def record_control_event(self, event: str, *, charger_id: str, details: dict[str, Any] | None = None) -> None: ...
     def latest_rfid_list_version(self, charger_id: str) -> int | None: ...
@@ -318,8 +319,25 @@ def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, di
     return timing, seconds, None
 
 
-def _requires_idle(command: str) -> bool:
-    return command in {"start", "reset"}
+def _blocking_transactions(
+    registry: SessionRegistry,
+    charger: str,
+    *,
+    command: str,
+    connector: int | None,
+) -> list[int]:
+    if command == "reset":
+        return registry.active_transaction_ids(charger)
+    if command != "start":
+        return []
+    active = registry.active_transactions(charger)
+    if connector is None:
+        return [transaction_id for transaction_id, _connector_id in active]
+    return [
+        transaction_id
+        for transaction_id, connector_id in active
+        if connector_id == connector
+    ]
 
 
 async def _wait_for_control_window(
@@ -327,6 +345,7 @@ async def _wait_for_control_window(
     charger: str,
     *,
     command: str,
+    connector: int | None,
     timing: str,
     seconds: int | None,
 ) -> dict[str, Any] | None:
@@ -334,10 +353,7 @@ async def _wait_for_control_window(
         assert seconds is not None
         await asyncio.sleep(seconds)
 
-    if not _requires_idle(command):
-        return None
-
-    active = registry.active_transaction_ids(charger)
+    active = _blocking_transactions(registry, charger, command=command, connector=connector)
     if not active:
         return None
 
@@ -347,7 +363,7 @@ async def _wait_for_control_window(
     assert seconds is not None
     for _ in range(seconds):
         await asyncio.sleep(1)
-        active = registry.active_transaction_ids(charger)
+        active = _blocking_transactions(registry, charger, command=command, connector=connector)
         if not active:
             return None
     return {
@@ -379,6 +395,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             registry,
             charger,
             command=command,
+            connector=request.get("connector") if command == "start" else None,
             timing=timing,
             seconds=seconds,
         )

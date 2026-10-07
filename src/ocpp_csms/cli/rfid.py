@@ -35,7 +35,7 @@ def add_rfid_command(
             nargs="?",
             help="Charge point ID (optional when exactly one charger is connected)",
         )
-        command.add_argument("-c", "--charger", dest="charger_option", help="Explicit charge point ID")
+        command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
 
     return rfid
 
@@ -189,7 +189,7 @@ def _requested_charger(args: argparse.Namespace) -> str | None:
     positional = getattr(args, "charger", None)
     option = getattr(args, "charger_option", None)
     if positional and option:
-        raise ValueError("charger may be provided either positionally or with --charger, not both")
+        raise ValueError("charger may be provided either positionally or with --cp, not both")
     return option or positional
 
 

@@ -10,8 +10,8 @@ from ocpp_csms.cli.config import configuration_request, run_configuration
         (("config",), None, None, False),
         (("config", "HeartbeatInterval", "GetConfigurationMaxKeys"), None, ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
         (("config", "-f"), None, None, True),
-        (("config", "--charger", "charger-a"), "charger-a", None, False),
-        (("config", "--charger", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"], False),
+        (("config", "--cp", "charger-a"), "charger-a", None, False),
+        (("config", "--cp", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"], False),
         (("config", "HeartbeatInterval", "--force"), None, ["HeartbeatInterval"], True),
     ],
 )
@@ -40,7 +40,7 @@ def test_config_set_builds_change_request(parse_cli):
 
 def test_config_set_supports_explicit_charger_and_force(parse_cli):
     assert configuration_request(
-        parse_cli("config", "--charger", "charger-a", "set", "HeartbeatInterval", "60", "--force")
+        parse_cli("config", "--cp", "charger-a", "set", "HeartbeatInterval", "60", "--force")
     ) == {
         "command": "config_set",
         "key": "HeartbeatInterval",

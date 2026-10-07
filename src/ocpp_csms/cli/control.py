@@ -17,20 +17,20 @@ def add_control_commands(
 
     start = subcommands.add_parser("start", help="Request remote transaction start")
     add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(start, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(start, "--connector", "--c", dest="connector", type=int, help="Connector ID")
+    add(start, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(start, "-c", "--connector", dest="connector", type=int, help="Connector ID")
     add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
     _add_timing_options(start)
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
     add(stop, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(stop, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(stop, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
     add(stop, "-t", "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
     _add_timing_options(stop)
 
     reset = subcommands.add_parser("reset", help="Request charger reset")
     add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(reset, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(reset, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
     _add_timing_options(reset)
 
@@ -53,7 +53,7 @@ def _requested_charger(args: argparse.Namespace) -> str | None:
     positional = getattr(args, "charger", None)
     option = getattr(args, "charger_option", None)
     if positional and option:
-        raise ValueError("charger may be provided either positionally or with --charger, not both")
+        raise ValueError("charger may be provided either positionally or with --cp, not both")
     return option or positional
 
 
