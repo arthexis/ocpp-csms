@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, run_appliance
+from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
 from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, run_config_download, run_configuration
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
@@ -20,6 +21,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands: dict[str, argparse.ArgumentParser] = {}
     commands.update(add_appliance_commands(subcommands))
     commands.update(add_control_commands(subcommands))
+    commands.update(add_charger_commands(subcommands))
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
     commands["energy"] = add_energy_command(subcommands)
@@ -49,6 +51,7 @@ def main() -> int:
     try:
         if args.command in APPLIANCE_COMMANDS: return run_appliance(args)
         if args.command in CONTROL_COMMANDS: return run_control(args)
+        if args.command in ("charger", "chargers"): return run_chargers(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
@@ -61,4 +64,4 @@ def main() -> int:
     return 2
 
 
-__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_diagnostic", "run_energy", "run_profile", "run_transactions"]
+__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_chargers", "run_diagnostic", "run_energy", "run_profile", "run_transactions"]

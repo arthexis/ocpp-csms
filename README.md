@@ -150,6 +150,10 @@ Common operations include:
 ```text
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
+ocpp-csms chargers [--charging] [--json]
+ocpp-csms cps ...
+ocpp-csms charger CHARGE_POINT [--json]
+ocpp-csms cp CHARGE_POINT [--json]
 ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
 ocpp-csms txn ...
 ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
@@ -166,7 +170,7 @@ ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
-`--c` aliases `--connector`; `--txn` aliases `--transaction`.
+`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`; `--txn` aliases `--transaction`.
 
 ### Configuration snapshots
 
