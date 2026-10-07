@@ -1,5 +1,6 @@
 from .helpers import (
     DEFAULTS,
+    DEPLOY_SCRIPT,
     TASKS,
     assert_task_order,
     load_yaml,
