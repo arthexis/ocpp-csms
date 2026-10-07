@@ -150,7 +150,7 @@ the sources that are actually known at report time:
   history.
 
 When a connected charger has accepted-list history, the report also shows
-`Charger cache: version N`. If `rfid.csv` is present, a `Sync:` line reports
+`Charger local list: version N`. If `rfid.csv` is present, a `Sync:` line reports
 `current`, `differs`, or `unknown` by comparing the current enabled-card
 set with the stored snapshot for the charger's live list version. Supplying a
 tag keeps the detailed per-RFID report:
