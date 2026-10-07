@@ -17,7 +17,7 @@ def test_profile_help_exposes_parameter_and_ocpp_mapping(cli_parser, capsys):
     args = cli_parser.parse_args(["profile", "help", "max-power"])
     assert run_profile(args) == 0
     output = capsys.readouterr().out
-    for fragment in ("max-power", "--watts [watts]", "SetChargingProfile", "connectorId: 0", "ChargePointMaxProfile", "Absolute", "chargingRateUnit: W", "startPeriod: 0", "limit: [watts]"):
+    for fragment in ("max-power", "--watts [watts]", "SetChargingProfile", "connectorId: 0", "ChargePointMaxProfile", "Absolute", "startSchedule: 2008-01-01T00:00:00Z", "chargingRateUnit: W", "startPeriod: 0", "limit: [watts]"):
         assert fragment in output
 
 
@@ -35,6 +35,7 @@ def test_profile_send_sends_built_profile_and_reports_acceptance(cli_parser, pro
     assert request["command"] == "set_charging_profile"
     assert request["charger"] == "charger-a"
     assert request["connector"] == 0
+    assert request["profile"]["chargingSchedule"]["startSchedule"] == "2008-01-01T00:00:00Z"
     assert request["profile"]["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 60000
 
 
