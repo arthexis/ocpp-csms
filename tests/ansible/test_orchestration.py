@@ -280,7 +280,10 @@ def test_release_install_phases_use_expected_packages_and_venv():
     }
 
     for task in (build, runtime, application):
-        assert task["when"] == "not ocpp_csms_release_ready.stat.exists"
+        assert task["when"] == [
+            "not ocpp_csms_release_ready.stat.exists",
+            "ocpp_csms_install_mode == 'online'",
+        ]
 
 
 def test_development_deploy_gets_distinct_immutable_release():
