@@ -12,7 +12,7 @@ from ocpp_csms.cli import build_parser
         (["stop", "--transaction", "1", "--now"], "stop"),
         (["reboot", "--now"], "reboot"),
         (["config"], "config"),
-        (["profile", "list"], "profile"),
+        (["profile", "templates"], "profile"),
         (["status"], "status"),
         (["transactions"], "transactions"),
         (["transaction"], "transactions"),
