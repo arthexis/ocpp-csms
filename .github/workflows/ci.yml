@@ -75,7 +75,6 @@ jobs:
         suite:
           - CSMS tests
           - Discover tests
-          - Ansible tests
         include:
           - platform: Debian 12 / Python 3.11
             image: python:3.11-bookworm
@@ -97,26 +96,6 @@ jobs:
           ocpp-csms --help >/dev/null
           ocpp-discover --help >/dev/null
 
-      - name: Appliance script syntax
-        if: matrix.suite == 'Ansible tests'
-        run: sh -n deploy.sh
-
-      - name: Install Ansible validation tools
-        if: matrix.suite == 'Ansible tests'
-        run: python -m pip install ansible-core ansible-lint
-
-      - name: Ansible syntax check
-        if: matrix.suite == 'Ansible tests'
-        run: ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
-
-      - name: Ansible lint
-        if: matrix.suite == 'Ansible tests'
-        run: ansible-lint --profile basic ansible/
-
-      - name: Ansible contract tests
-        if: matrix.suite == 'Ansible tests'
-        run: python -m pytest tests/ansible
-
       - name: CSMS tests
         if: matrix.suite == 'CSMS tests'
         run: python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
@@ -126,12 +105,39 @@ jobs:
         run: python -m pytest tests/ocpp_discover
 
 
+  ansible:
+    name: Ansible tests
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Appliance script syntax
+        run: sh -n deploy.sh
+
+      - name: Install Ansible validation tools
+        run: python -m pip install pytest ansible-core ansible-lint
+
+      - name: Ansible syntax check
+        run: ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
+
+      - name: Ansible lint
+        run: ansible-lint --profile basic ansible/
+
+      - name: Ansible contract tests
+        run: PYTHONPATH=src python -m pytest tests/ansible
+
+
   ci:
     name: CI
     needs:
       - changes
       - docs
       - test
+      - ansible
     if: always()
     runs-on: ubuntu-latest
 
@@ -143,6 +149,7 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           DOCS_RESULT: ${{ needs.docs.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          ANSIBLE_RESULT: ${{ needs.ansible.result }}
         run: |
           set -euo pipefail
 
@@ -161,5 +168,10 @@ jobs:
 
           if [[ "$TEST_RESULT" != "success" ]]; then
             echo "Test matrix did not succeed: $TEST_RESULT"
+            exit 1
+          fi
+
+          if [[ "$ANSIBLE_RESULT" != "success" ]]; then
+            echo "Ansible validation did not succeed: $ANSIBLE_RESULT"
             exit 1
           fi
