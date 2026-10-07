@@ -104,6 +104,20 @@
           - "{{ ocpp_csms_port | string }}"
       changed_when: true
 
+    - name: Verify candidate OCPP Discover recovery unit is active
+      become: true
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - ocpp-discover-handoff.service
+      register: ocpp_csms_candidate_discover_active
+      changed_when: false
+      retries: 5
+      delay: 1
+      until: ocpp_csms_candidate_discover_active.rc == 0
+
     - name: Verify managed charger reconnect after candidate Discover recovery
       ansible.builtin.command:
         argv:
@@ -167,6 +181,20 @@
           durable ownership promotion before handoff verification ended.
 
   rescue:
+    - name: Capture failed candidate Discover recovery journal
+      become: true
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - --unit
+          - ocpp-discover-handoff.service
+          - --lines
+          - "50"
+          - --no-pager
+      register: ocpp_csms_candidate_discover_journal
+      changed_when: false
+      failed_when: false
+
     - name: Stop failed candidate Discover recovery unit
       become: true
       ansible.builtin.command:
@@ -193,6 +221,8 @@
         msg: >-
           Candidate OCPP Discover could not restore the charger connection:
           {{ ansible_failed_result.msg | default('reconnect verification failure') }}
+          Candidate journal:
+          {{ ocpp_csms_candidate_discover_journal.stdout | default('unavailable') }}
 
   always:
     - name: Stop candidate Discover recovery unit after verification
