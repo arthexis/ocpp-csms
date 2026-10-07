@@ -106,6 +106,7 @@
     - "{{ ocpp_csms_prefix }}"
     - "{{ ocpp_csms_data_dir }}"
     - "{{ ocpp_csms_releases_dir }}"
+    - "{{ ocpp_csms_dependencies_dir }}"
     - "{{ ocpp_csms_candidate_dir }}"
 
 - name: Check whether immutable release is already complete
@@ -177,24 +178,51 @@
     mode: "0755"
   when: not ocpp_csms_release_ready.stat.exists
 
-- name: Download immutable release dependency wheels
+- name: Check persistent dependency wheel cache
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_dependency_ready }}"
+  register: ocpp_csms_dependency_cache_ready
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Create persistent dependency wheel cache
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_dependency_cache }}"
+    state: directory
+    mode: "0755"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - not ocpp_csms_dependency_cache_ready.stat.exists
+
+- name: Download dependency wheels into persistent cache
   ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - pip
-      - download
-      - "--only-binary=:all:"
-      - --dest
-      - "{{ ocpp_csms_release_wheelhouse }}"
-      - "hatchling"
-      - "ocpp>=0.26,<1"
-      - "websockets>=12,<14"
+    argv: >-
+      {{
+        [
+          ocpp_csms_release_venv ~ '/bin/python',
+          '-m',
+          'pip',
+          'download',
+          '--only-binary=:all:',
+          '--dest',
+          ocpp_csms_dependency_cache
+        ] + ocpp_csms_dependency_specs
+      }}
   environment:
     PIP_DEFAULT_TIMEOUT: "15"
     PIP_RETRIES: "1"
   changed_when: true
-  when: not ocpp_csms_release_ready.stat.exists
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - not ocpp_csms_dependency_cache_ready.stat.exists
+
+- name: Mark persistent dependency wheel cache ready
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_dependency_ready }}"
+    content: "{{ ocpp_csms_dependency_key }}\n"
+    mode: "0644"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - not ocpp_csms_dependency_cache_ready.stat.exists
 
 - name: Build OCPP CSMS application wheel
   ansible.builtin.command:
@@ -209,7 +237,7 @@
       - "{{ ocpp_csms_install_source }}"
   environment:
     PIP_NO_INDEX: "1"
-    PIP_FIND_LINKS: "{{ ocpp_csms_release_wheelhouse }}"
+    PIP_FIND_LINKS: "{{ ocpp_csms_dependency_cache }}"
   changed_when: true
   when: not ocpp_csms_release_ready.stat.exists
 
@@ -234,7 +262,10 @@
   ansible.builtin.pip:
     name: "{{ ocpp_csms_built_wheels.files[0].path }}"
     virtualenv: "{{ ocpp_csms_release_venv }}"
-    extra_args: "--no-index --find-links {{ ocpp_csms_release_wheelhouse }}"
+    extra_args: >-
+      --no-index
+      --find-links {{ ocpp_csms_release_wheelhouse }}
+      --find-links {{ ocpp_csms_dependency_cache }}
   when: not ocpp_csms_release_ready.stat.exists
 
 - name: Verify immutable release command
