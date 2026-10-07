@@ -20,12 +20,9 @@ def test_singular_charger_renders_connector_detail(parse_cli, tmp_path, capsys):
 
     store = EventStore(tmp_path)
     store.record_runtime("charger_connected", charger_id="charger-a", details={"subprotocol": "ocpp1.6"})
-    store.record(
-        "StatusNotification",
-        {"connector_id": 1, "status": "Available", "error_code": "NoError"},
-        charger_id="charger-a",
-        direction="in",
-    )
+    payload = {"connector_id": 1, "status": "Available", "error_code": "NoError"}
+    store.record_ocpp("charger-a", "StatusNotification", payload)
+    store.record_connector_status("charger-a", payload)
     args = parse_cli("--data-dir", str(tmp_path), "charger", "charger-a")
     assert run_chargers(args) == 0
     output = capsys.readouterr().out
