@@ -242,37 +242,57 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_immutable_release_installs_only_from_local_wheelhouse():
+def test_immutable_release_reuses_persistent_dependency_cache():
     main = read(TASKS / "main.yml")
     defaults = load_yaml(DEFAULTS)
+
     assert defaults["ocpp_csms_release_wheelhouse"].endswith("/wheelhouse")
+    assert defaults["ocpp_csms_dependencies_dir"].endswith("/dependencies")
+    assert defaults["ocpp_csms_dependency_cache"].endswith(
+        "/{{ ocpp_csms_dependency_key }}"
+    )
+    assert defaults["ocpp_csms_dependency_specs"] == [
+        "hatchling",
+        "ocpp>=0.26,<1",
+        "websockets>=12,<14",
+    ]
+
     assert_task_order(
         main,
         "Create immutable release wheelhouse",
-        "Download immutable release dependency wheels",
+        "Check persistent dependency wheel cache",
+        "Create persistent dependency wheel cache",
+        "Download dependency wheels into persistent cache",
+        "Mark persistent dependency wheel cache ready",
         "Build OCPP CSMS application wheel",
         "Find built OCPP CSMS wheel",
         "Validate built OCPP CSMS wheel",
         "Install OCPP CSMS into immutable release",
         "Verify immutable release command",
     )
-    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
-    assert install["ansible.builtin.pip"]["name"] == "{{ ocpp_csms_built_wheels.files[0].path }}"
-    assert install["ansible.builtin.pip"]["extra_args"] == (
-        "--no-index --find-links {{ ocpp_csms_release_wheelhouse }}"
-    )
+
     download = task_by_name(
-        TASKS / "main.yml", "Download immutable release dependency wheels"
+        TASKS / "main.yml", "Download dependency wheels into persistent cache"
     )
-    assert "--only-binary=:all:" in download["ansible.builtin.command"]["argv"]
-    assert "hatchling" in download["ansible.builtin.command"]["argv"]
+    assert "ocpp_csms_dependency_specs" in str(
+        download["ansible.builtin.command"]["argv"]
+    )
+    assert download["when"] == [
+        "not ocpp_csms_release_ready.stat.exists",
+        "not ocpp_csms_dependency_cache_ready.stat.exists",
+    ]
 
     build = task_by_name(TASKS / "main.yml", "Build OCPP CSMS application wheel")
     assert "--no-deps" in build["ansible.builtin.command"]["argv"]
     assert build["environment"]["PIP_NO_INDEX"] == "1"
-    assert build["environment"]["PIP_FIND_LINKS"] == "{{ ocpp_csms_release_wheelhouse }}"
-    assert "Ensure current pip in release virtual environment" not in main
+    assert build["environment"]["PIP_FIND_LINKS"] == "{{ ocpp_csms_dependency_cache }}"
 
+    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
+    assert install["ansible.builtin.pip"]["name"] == "{{ ocpp_csms_built_wheels.files[0].path }}"
+    extra_args = install["ansible.builtin.pip"]["extra_args"]
+    assert "--no-index" in extra_args
+    assert "--find-links {{ ocpp_csms_release_wheelhouse }}" in extra_args
+    assert "--find-links {{ ocpp_csms_dependency_cache }}" in extra_args
 
 
 def test_ansible_reports_elapsed_time_for_each_task():
