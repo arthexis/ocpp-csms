@@ -150,6 +150,8 @@
     - "{{ ocpp_csms_prefix }}"
     - "{{ ocpp_csms_data_dir }}"
     - "{{ ocpp_csms_releases_dir }}"
+    - "{{ ocpp_csms_builds_dir }}"
+    - "{{ ocpp_csms_dependencies_dir }}"
     - "{{ ocpp_csms_candidate_dir }}"
 
 - name: Check whether immutable release is already complete
@@ -265,21 +267,182 @@
     - not ocpp_csms_release_ready.stat.exists
     - ocpp_csms_install_mode == 'bundle'
 
-- name: Install release build requirements
-  ansible.builtin.pip:
-    name:
-      - "setuptools>=68"
-    virtualenv: "{{ ocpp_csms_release_venv }}"
+- name: Check reusable build environment
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_build_dir }}/.ready"
+  register: ocpp_csms_build_ready
   when:
     - not ocpp_csms_release_ready.stat.exists
     - ocpp_csms_install_mode == 'online'
 
-- name: Install release runtime dependencies
+- name: Create reusable build environment directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_build_dir }}"
+    state: directory
+    mode: "0755"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_build_ready.stat.exists
+
+- name: Create reusable build virtual environment
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ ocpp_csms_build_venv }}"
+    creates: "{{ ocpp_csms_build_venv }}/bin/python"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_build_ready.stat.exists
+
+- name: Install reusable build requirements
   ansible.builtin.pip:
-    name:
-      - "ocpp>=0.26,<1"
-      - "websockets>=12,<14"
-    virtualenv: "{{ ocpp_csms_release_venv }}"
+    name: "{{ ocpp_csms_build_requirements }}"
+    virtualenv: "{{ ocpp_csms_build_venv }}"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_build_ready.stat.exists
+
+- name: Mark reusable build environment ready
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_build_dir }}/.ready"
+    content: "{{ ocpp_csms_build_key }}\n"
+    mode: "0644"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_build_ready.stat.exists
+
+- name: Check reusable runtime dependency environment
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_dependency_dir }}/.ready"
+  register: ocpp_csms_dependency_ready
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Create reusable runtime dependency directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_dependency_dir }}"
+    state: directory
+    mode: "0755"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_dependency_ready.stat.exists
+
+- name: Create reusable runtime dependency virtual environment
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ ocpp_csms_dependency_venv }}"
+    creates: "{{ ocpp_csms_dependency_venv }}/bin/python"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_dependency_ready.stat.exists
+
+- name: Install reusable WebSockets dependency
+  ansible.builtin.pip:
+    name: "websockets>=12,<14"
+    virtualenv: "{{ ocpp_csms_dependency_venv }}"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_dependency_ready.stat.exists
+
+- name: Install reusable OCPP dependency
+  ansible.builtin.pip:
+    name: "ocpp>=0.26,<1"
+    virtualenv: "{{ ocpp_csms_dependency_venv }}"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_dependency_ready.stat.exists
+
+- name: Mark reusable runtime dependency environment ready
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_dependency_dir }}/.ready"
+    content: "{{ ocpp_csms_dependency_key }}\n"
+    mode: "0644"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+    - not ocpp_csms_dependency_ready.stat.exists
+
+- name: Resolve reusable runtime dependency site packages
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_dependency_venv }}/bin/python"
+      - -c
+      - "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+  register: ocpp_csms_dependency_site_packages
+  changed_when: false
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Resolve release site packages
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -c
+      - "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+  register: ocpp_csms_release_site_packages
+  changed_when: false
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Link reusable runtime dependencies into release
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_release_site_packages.stdout }}/ocpp_csms_dependencies.pth"
+    content: "{{ ocpp_csms_dependency_site_packages.stdout }}\n"
+    mode: "0644"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Create release wheel directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_release_wheels_dir }}"
+    state: directory
+    mode: "0755"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Build OCPP CSMS application wheel
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_build_venv }}/bin/python"
+      - -m
+      - pip
+      - wheel
+      - --no-deps
+      - --no-build-isolation
+      - --wheel-dir
+      - "{{ ocpp_csms_release_wheels_dir }}"
+      - "{{ ocpp_csms_install_source }}"
+  changed_when: true
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Find built OCPP CSMS application wheel
+  ansible.builtin.find:
+    paths: "{{ ocpp_csms_release_wheels_dir }}"
+    patterns: "ocpp_csms-*.whl"
+    file_type: file
+  register: ocpp_csms_built_application_wheels
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_install_mode == 'online'
+
+- name: Validate built OCPP CSMS application wheel
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_built_application_wheels.matched | int == 1
+    fail_msg: >-
+      Expected exactly one built OCPP CSMS application wheel for the release.
   when:
     - not ocpp_csms_release_ready.stat.exists
     - ocpp_csms_install_mode == 'online'
@@ -296,11 +459,11 @@
     - ocpp_csms_install_mode == 'online'
     - ocpp_csms_dev | bool
 
-- name: Install OCPP CSMS application into immutable release
+- name: Install OCPP CSMS application wheel into immutable release
   ansible.builtin.pip:
-    name: "{{ ocpp_csms_install_source }}"
+    name: "{{ ocpp_csms_built_application_wheels.files[0].path }}"
     virtualenv: "{{ ocpp_csms_release_venv }}"
-    extra_args: "--no-deps --no-build-isolation"
+    extra_args: "--no-index --no-deps"
   when:
     - not ocpp_csms_release_ready.stat.exists
     - ocpp_csms_install_mode == 'online'

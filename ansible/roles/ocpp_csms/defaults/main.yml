@@ -19,6 +19,36 @@ ocpp_csms_bundle_source_dir: "{{ ocpp_csms_bundle_path }}/source"
 ocpp_csms_bundle_wheels_dir: "{{ ocpp_csms_bundle_path }}/wheels"
 ocpp_csms_bundle_manifest_path: "{{ ocpp_csms_bundle_path }}/manifest.yml"
 
+ocpp_csms_build_requirements:
+  - "setuptools>=68"
+ocpp_csms_runtime_dependencies:
+  - "websockets>=12,<14"
+  - "ocpp>=0.26,<1"
+
+ocpp_csms_build_key: >-
+  {{
+    (
+      ocpp_csms_build_requirements | join('|')
+      ~ '|python=' ~ ansible_facts.python.version.major ~ '.' ~ ansible_facts.python.version.minor
+      ~ '|arch=' ~ ansible_facts.architecture
+    ) | hash('sha256')
+  }}
+ocpp_csms_builds_dir: "{{ ocpp_csms_prefix }}/builds"
+ocpp_csms_build_dir: "{{ ocpp_csms_builds_dir }}/{{ ocpp_csms_build_key }}"
+ocpp_csms_build_venv: "{{ ocpp_csms_build_dir }}/venv"
+
+ocpp_csms_dependency_key: >-
+  {{
+    (
+      ocpp_csms_runtime_dependencies | join('|')
+      ~ '|python=' ~ ansible_facts.python.version.major ~ '.' ~ ansible_facts.python.version.minor
+      ~ '|arch=' ~ ansible_facts.architecture
+    ) | hash('sha256')
+  }}
+ocpp_csms_dependencies_dir: "{{ ocpp_csms_prefix }}/dependencies"
+ocpp_csms_dependency_dir: "{{ ocpp_csms_dependencies_dir }}/{{ ocpp_csms_dependency_key }}"
+ocpp_csms_dependency_venv: "{{ ocpp_csms_dependency_dir }}/venv"
+
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.
 ocpp_csms_controller_source_dir: "{{ playbook_dir }}/../.."
@@ -29,6 +59,7 @@ ocpp_csms_releases_dir: "{{ ocpp_csms_prefix }}/releases"
 ocpp_csms_release_dir: "{{ ocpp_csms_releases_dir }}/{{ ocpp_csms_release_id }}"
 ocpp_csms_release_venv: "{{ ocpp_csms_release_dir }}/venv"
 ocpp_csms_release_source_dir: "{{ ocpp_csms_release_dir }}/source"
+ocpp_csms_release_wheels_dir: "{{ ocpp_csms_release_dir }}/wheels"
 ocpp_csms_release_command: "{{ ocpp_csms_release_venv }}/bin/ocpp-csms"
 ocpp_csms_current_link: "{{ ocpp_csms_prefix }}/current"
 ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
