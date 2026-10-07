@@ -23,6 +23,7 @@ MAX_POWER = ProfileTemplate(
     chargingProfilePurpose: ChargePointMaxProfile
     chargingProfileKind: Absolute
     chargingSchedule:
+      startSchedule: 2008-01-01T00:00:00Z
       chargingRateUnit: W
       chargingSchedulePeriod:
         - startPeriod: 0
@@ -52,6 +53,7 @@ def build_profile(name: str, *, watts: int) -> tuple[int, dict[str, object]]:
         "chargingProfilePurpose": "ChargePointMaxProfile",
         "chargingProfileKind": "Absolute",
         "chargingSchedule": {
+            "startSchedule": "2008-01-01T00:00:00Z",
             "chargingRateUnit": "W",
             "chargingSchedulePeriod": [
                 {"startPeriod": 0, "limit": watts},
