@@ -30,6 +30,7 @@ def add_profile_command(
     add(profile_send, "template", help="Built-in profile template name")
     add(profile_send, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_send, "--watts", type=int, required=True, help="Maximum charging power in watts")
+    add(profile_send, "--start", help="Absolute profile start as ISO-8601 datetime with timezone (default: 2000-01-01T00:00:00Z)")
     profile_composite = profile_subcommands.add_parser("composite", help="Show the charger's effective composite schedule")
     add(profile_composite, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_composite, "--connector", "--c", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
@@ -45,7 +46,7 @@ def add_profile_command(
 
 
 def _profile_send_request(args: argparse.Namespace) -> dict[str, object]:
-    connector, profile = build_profile(args.template, watts=args.watts)
+    connector, profile = build_profile(args.template, watts=args.watts, start=args.start)
     request: dict[str, object] = {"command": "set_charging_profile", "connector": connector, "profile": profile}
     if args.charger is not None:
         request["charger"] = args.charger
