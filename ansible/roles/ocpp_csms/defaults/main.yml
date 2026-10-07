@@ -6,17 +6,11 @@ ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
 
-# Legacy Arthexis appliances have used more than one generated unit name and
-# more than one OCPP listener port. The takeover only acts on a listed unit
-# when systemd reports it active and its process owns one of these ports. This
-# avoids stopping unrelated Arthexis web/worker/beat services.
-ocpp_csms_legacy_arthexis_services:
-  - arthexis.service
-  - arthexis-web.service
-  - arthexis-arthexis-arthexis.service
-ocpp_csms_legacy_arthexis_ports:
-  - 8888
-  - "{{ ocpp_csms_port }}"
+# A takeover target is discovered from observed host-local OCPP traffic rather
+# than from a catalog of product-specific service names or ports. Keep the
+# observation window bounded so ordinary converged deploys remain predictable.
+ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
+ocpp_csms_incumbent_observe_seconds: 15
 
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.

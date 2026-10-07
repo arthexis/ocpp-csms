@@ -1,0 +1,42 @@
+---
+- name: Observe host-local OCPP traffic for incumbent service
+  become: true
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_discover.incumbent
+      - --interface
+      - "{{ ocpp_csms_incumbent_interface }}"
+      - --seconds
+      - "{{ ocpp_csms_incumbent_observe_seconds | string }}"
+      - --managed-service
+      - "{{ ocpp_csms_service_name }}"
+  register: ocpp_csms_incumbent_observation
+  changed_when: false
+
+- name: Capture incumbent OCPP service state
+  ansible.builtin.set_fact:
+    ocpp_csms_incumbent_result: "{{ ocpp_csms_incumbent_observation.stdout | from_json }}"
+    ocpp_csms_incumbent_service: >-
+      {{
+        (ocpp_csms_incumbent_observation.stdout | from_json).service
+        if (ocpp_csms_incumbent_observation.stdout | from_json).found
+        else ''
+      }}
+    ocpp_csms_incumbent_port: >-
+      {{
+        ((ocpp_csms_incumbent_observation.stdout | from_json).port | int)
+        if (ocpp_csms_incumbent_observation.stdout | from_json).found
+        else 0
+      }}
+
+- name: Report incumbent OCPP takeover preflight
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        'incumbent OCPP service detected from live traffic: ' ~ ocpp_csms_incumbent_service ~
+        ' on port ' ~ (ocpp_csms_incumbent_port | string)
+        if ocpp_csms_incumbent_service | length > 0
+        else 'no incumbent host-local OCPP service detected'
+      }}

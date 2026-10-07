@@ -60,3 +60,26 @@ def test_capture_baseline_cli_uses_preflight_connected_set(tmp_path, record_runt
         "--output", str(baseline),
     ]) == 0
     assert json.loads(baseline.read_text(encoding="utf-8")) == {"charger-a": marker}
+
+
+def test_wait_for_any_connection_accepts_connected_charger(monkeypatch, tmp_path):
+    charger = type("Charger", (), {"charger_id": "charger-a", "connected": True})()
+    monkeypatch.setattr(
+        install_cutover,
+        "appliance_status",
+        lambda data_dir: {"chargers": [charger]},
+    )
+    assert install_cutover.wait_for_any_connection(tmp_path, timeout=0) == "charger-a"
+
+
+def test_wait_any_cli_fails_without_connected_charger(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        install_cutover,
+        "appliance_status",
+        lambda data_dir: {"chargers": []},
+    )
+    assert install_cutover.main([
+        "wait-any",
+        "--data-dir", str(tmp_path),
+        "--timeout", "0",
+    ]) == 1

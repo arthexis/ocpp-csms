@@ -1,0 +1,15 @@
+---
+- name: Stop incumbent OCPP listener for takeover
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_csms_incumbent_service }}"
+    state: stopped
+  when: ocpp_csms_incumbent_service | length > 0
+
+- name: Wait for incumbent OCPP listener to release port
+  ansible.builtin.wait_for:
+    host: "{{ ocpp_csms_verify_host }}"
+    port: "{{ ocpp_csms_incumbent_port }}"
+    timeout: "{{ ocpp_csms_listener_timeout }}"
+    state: stopped
+  when: ocpp_csms_incumbent_service | length > 0

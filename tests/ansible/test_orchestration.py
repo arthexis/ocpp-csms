@@ -23,39 +23,35 @@ def test_safety_gates_bracket_staging_and_handoff():
         )
 
 
-def test_legacy_inspection_occurs_after_candidate_validation_before_handoff():
+def test_incumbent_inspection_occurs_after_candidate_validation_before_handoff():
     main = read(TASKS / "main.yml")
     assert_task_order(
         main,
         "Verify candidate systemd unit before handoff",
         "Run final install safety preflight",
-        "Inspect legacy Arthexis OCPP listener",
+        "Inspect incumbent host-local OCPP service",
         "Perform controlled OCPP CSMS handoff",
     )
 
 
-def test_legacy_detection_is_listener_owned_not_install_presence():
-    legacy = read(TASKS / "legacy_arthexis.yml")
-    assert "--property=ActiveState" in legacy
-    assert "--property=MainPID" in legacy
-    assert "--value" not in legacy
-    assert "'ActiveState=active' in ocpp_csms_legacy_state_lines" in legacy
-    assert "^MainPID=[0-9]+$" in legacy
-    assert "ss -H -ltnp" in legacy
-    assert "ocpp_csms_legacy_listener_states" in legacy
+def test_incumbent_detection_is_traffic_driven_not_product_catalog_driven():
+    incumbent = read(TASKS / "incumbent.yml")
     defaults = load_yaml(DEFAULTS)
-    assert "arthexis.service" in defaults["ocpp_csms_legacy_arthexis_services"]
-    assert "arthexis-web.service" in defaults["ocpp_csms_legacy_arthexis_services"]
-    assert "arthexis-arthexis-arthexis.service" in defaults["ocpp_csms_legacy_arthexis_services"]
-    assert 8888 in defaults["ocpp_csms_legacy_arthexis_ports"]
-    assert "{{ ocpp_csms_port }}" in defaults["ocpp_csms_legacy_arthexis_ports"]
+    assert "ocpp_discover.incumbent" in incumbent
+    assert "--interface" in incumbent
+    assert "--seconds" in incumbent
+    assert "--managed-service" in incumbent
+    assert "ocpp_csms_incumbent_observe_seconds" in defaults
+    assert "ocpp_csms_legacy_arthexis_services" not in defaults
+    assert "ocpp_csms_legacy_arthexis_ports" not in defaults
+    assert "arthexis.service" not in incumbent
 
 
-def test_legacy_takeover_tracks_the_actual_listener_port():
-    stop = task_by_name(TASKS / "legacy_arthexis_stop.yml", "Wait for legacy Arthexis OCPP listener to release port")
-    restore = task_by_name(TASKS / "legacy_arthexis_restore.yml", "Verify restored legacy Arthexis listener")
-    assert stop["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_legacy_arthexis_port }}"
-    assert restore["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_legacy_arthexis_port }}"
+def test_incumbent_takeover_tracks_observed_listener_port():
+    stop = task_by_name(TASKS / "incumbent_stop.yml", "Wait for incumbent OCPP listener to release port")
+    restore = task_by_name(TASKS / "incumbent_restore.yml", "Verify restored incumbent OCPP listener")
+    assert stop["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_incumbent_port }}"
+    assert restore["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_incumbent_port }}"
 
 
 def test_handoff_captures_reconnect_baseline_before_downtime():
@@ -63,34 +59,34 @@ def test_handoff_captures_reconnect_baseline_before_downtime():
     assert_task_order(
         cutover,
         "Capture charger reconnect baseline",
-        "Stop legacy Arthexis listener at cutover",
+        "Stop incumbent OCPP service listener at cutover",
         "Stop existing OCPP CSMS service",
     )
 
 
-def test_legacy_service_is_disabled_only_after_verified_promotion():
+def test_incumbent_service_is_disabled_only_after_verified_promotion():
     cutover = read(TASKS / "cutover.yml")
     assert_task_order(
         cutover,
         "Wait for OCPP CSMS listener",
         "Verify candidate OCPP CSMS application status",
         "Promote verified release to current",
-        "Disable legacy Arthexis OCPP service after verified takeover",
+        "Disable incumbent OCPP service after verified takeover",
     )
 
 
-def test_failed_legacy_takeover_restores_old_listener():
-    restore = read(TASKS / "legacy_arthexis_restore.yml")
+def test_failed_incumbent_takeover_restores_old_listener():
+    restore = read(TASKS / "incumbent_restore.yml")
     assert_task_order(
         restore,
-        "Stop failed replacement before legacy Arthexis rollback",
-        "Restore legacy Arthexis OCPP listener",
-        "Verify restored legacy Arthexis listener",
+        "Stop failed replacement before incumbent rollback",
+        "Restore incumbent OCPP listener",
+        "Verify restored incumbent OCPP listener",
     )
     failure = task_by_name(
-        TASKS / "cutover.yml", "Report failed legacy Arthexis takeover after restoration"
+        TASKS / "cutover.yml", "Report failed incumbent OCPP service takeover after restoration"
     )
-    assert failure["when"] == "ocpp_csms_legacy_arthexis_service | length > 0"
+    assert failure["when"] == "ocpp_csms_incumbent_service | length > 0"
 
 
 def test_schema_upgrade_happens_only_after_old_service_stops():
@@ -101,6 +97,14 @@ def test_schema_upgrade_happens_only_after_old_service_stops():
         "Upgrade database schema after service stop",
         "Install live OCPP CSMS systemd unit",
     )
+
+
+def test_incumbent_takeover_requires_a_real_charger_reconnect():
+    reconnect = read(TASKS / "reconnect_with_discover.yml")
+    assert "Probe incumbent charger reconnect before Discover recovery" in reconnect
+    assert "wait-any" in reconnect
+    assert "Verify incumbent charger reconnect after candidate Discover recovery" in reconnect
+    assert "ocpp_csms_incumbent_service | length > 0" in reconnect
 
 
 def test_replacement_health_is_proven_before_current_is_promoted():
