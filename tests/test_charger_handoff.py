@@ -10,7 +10,7 @@ class Session:
         self.calls = []
 
     async def reset(self, reset_type="Soft"):
-        self.calls.append(("reboot", reset_type))
+        self.calls.append(("reset", reset_type))
         return SimpleNamespace(status="Accepted")
 
 
@@ -41,18 +41,18 @@ async def test_inference_follows_live_charger_after_hardware_handoff():
     # The first physical charger is connected, then removed. Its identity can
     # remain in historical evidence without remaining eligible for live control.
     registry.sessions["charger-a"] = charger_a
-    first = await dispatch_control(registry, {"command": "reboot", "timing": "now"})
+    first = await dispatch_control(registry, {"command": "reset", "timing": "now"})
     registry.historical_chargers.add("charger-a")
     del registry.sessions["charger-a"]
 
     # A different physical charger connects to the same CSMS under its own
     # charge-point ID. Omitted selection must now resolve to this live charger.
     registry.sessions["charger-b"] = charger_b
-    second = await dispatch_control(registry, {"command": "reboot", "timing": "now"})
+    second = await dispatch_control(registry, {"command": "reset", "timing": "now"})
 
     assert first["ok"] is True
     assert second["ok"] is True
-    assert charger_a.calls == [("reboot", "Soft")]
-    assert charger_b.calls == [("reboot", "Soft")]
+    assert charger_a.calls == [("reset", "Soft")]
+    assert charger_b.calls == [("reset", "Soft")]
     assert registry.historical_chargers == {"charger-a"}
     assert registry.connected_chargers() == ["charger-b"]
