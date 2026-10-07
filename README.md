@@ -154,9 +154,9 @@ ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N
 ocpp-csms txn ...
 ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
-ocpp-csms profile list
+ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
-ocpp-csms profile set max-power --watts WATTS [--charger CHARGER]
+ocpp-csms profile send max-power --watts WATTS [--charger CHARGER]
 ocpp-csms profile composite [--charger CHARGER] [--connector N|--cp N] [--duration SECONDS] [--json]
 ocpp-csms profile clear ...
 ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
