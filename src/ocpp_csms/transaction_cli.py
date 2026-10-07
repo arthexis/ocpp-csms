@@ -65,15 +65,20 @@ def _energy_wh(start: dict[str, Any], stop: dict[str, Any]) -> int | None:
     return consumed if consumed >= 0 else None
 
 
+def transaction_energy_wh(view: TransactionView) -> int | None:
+    """Return reliable start-to-stop energy for a transaction, when available."""
+    record = view.record
+    start = record.get("start") if isinstance(record.get("start"), dict) else {}
+    stop = record.get("stop") if isinstance(record.get("stop"), dict) else {}
+    return _energy_wh(start, stop)
+
+
 def _format_energy(energy_wh: int) -> str:
     return f"{energy_wh / 1000:.3f} kWh" if energy_wh >= 1000 else f"{energy_wh} Wh"
 
 
 def _transaction_energy(view: TransactionView) -> str:
-    record = view.record
-    start = record.get("start") if isinstance(record.get("start"), dict) else {}
-    stop = record.get("stop") if isinstance(record.get("stop"), dict) else {}
-    energy_wh = _energy_wh(start, stop)
+    energy_wh = transaction_energy_wh(view)
     return _format_energy(energy_wh) if energy_wh is not None else "-"
 
 
@@ -144,7 +149,7 @@ def format_transaction(view: TransactionView, *, local_time: bool = False) -> st
     else:
         started, stopped = start.get("timestamp"), stop.get("timestamp")
     duration = _duration(started, stopped)
-    energy_wh = _energy_wh(start, stop)
+    energy_wh = transaction_energy_wh(view)
     meter = _meter_summary(record, local_time=local_time)
     lines = [
         f"Transaction {view.transaction_id}", f"Status:       {view.status or 'unknown'}", f"Origin:       {origin}",
