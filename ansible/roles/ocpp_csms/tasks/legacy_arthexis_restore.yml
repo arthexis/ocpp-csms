@@ -18,7 +18,7 @@
 - name: Verify restored legacy Arthexis listener
   ansible.builtin.wait_for:
     host: "{{ ocpp_csms_verify_host }}"
-    port: "{{ ocpp_csms_port }}"
+    port: "{{ ocpp_csms_legacy_arthexis_port }}"
     timeout: "{{ ocpp_csms_listener_timeout }}"
     state: started
   when: ocpp_csms_legacy_arthexis_service | length > 0
