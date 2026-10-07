@@ -21,6 +21,7 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
     }
     assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE", "--now")) == expected
     assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "--charger", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
@@ -136,6 +137,7 @@ def test_delayed_timing_requires_positive_seconds(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_remote_start_uses_cp_for_charge_point(cli_parser):
-    with pytest.raises(SystemExit):
-        cli_parser.parse_args(["start", "--cp", "2", "--id-tag", "REMOTE", "--now"])
+def test_remote_start_uses_cp_for_charge_point(parse_cli):
+    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")
+    assert args.charger_option == "charger-a"
+    assert args.connector == 2
