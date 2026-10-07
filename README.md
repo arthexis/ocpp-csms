@@ -159,9 +159,9 @@ ocpp-csms profile help TEMPLATE
 ocpp-csms profile set max-power --watts WATTS [--charger CHARGER]
 ocpp-csms profile composite [--charger CHARGER] [--connector N|--cp N] [--duration SECONDS] [--json]
 ocpp-csms profile clear ...
-ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG
-ocpp-csms stop CHARGER (--transaction ID|--txn ID)
-ocpp-csms reboot CHARGER [--hard]
+ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
+ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
+ocpp-csms reboot CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
@@ -192,6 +192,15 @@ ocpp-csms config download CHARGER --force
 `--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
 
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
+
+Remote start, stop, and reboot commands require one timing mode:
+
+- `--now` attempts the command immediately.
+- `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
+- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reboot, it waits up to that many seconds for charging to stop before proceeding.
+- Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
+
+Start and reboot are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
 
 Smart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
 
