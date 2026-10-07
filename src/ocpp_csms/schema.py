@@ -158,12 +158,18 @@ def require_supported_schema(info: SchemaInfo) -> int:
 
 
 def can_upgrade_schema(info: SchemaInfo) -> bool:
-    """Return whether this exact historical schema has a defined upgrade path."""
-    return bool(
-        info.exists
-        and info.version is not None
-        and _SUPPORTED_UPGRADES.get(info.version) == CURRENT_SCHEMA_VERSION
-    )
+    """Return whether this historical schema has a complete upgrade path."""
+    if not info.exists or info.version is None:
+        return False
+    version = info.version
+    seen: set[int] = set()
+    while version < CURRENT_SCHEMA_VERSION and version not in seen:
+        seen.add(version)
+        next_version = _SUPPORTED_UPGRADES.get(version)
+        if next_version is None or next_version <= version:
+            return False
+        version = next_version
+    return version == CURRENT_SCHEMA_VERSION
 
 
 def schema_backup_path(info: SchemaInfo) -> Path:
