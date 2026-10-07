@@ -16,6 +16,10 @@ _OCPP_FRAME = re.compile(
     r'\[(?:2|3|4)\s*,\s*"[^"\r\n]{1,128}"(?:\s*,|\s*\])'
 )
 _PID = re.compile(r"pid=(\d+)")
+_ESTABLISHED_SOCKET = re.compile(
+    r"^\S+\s+\S+\s+(?P<local_ip>\d+\.\d+\.\d+\.\d+):(?P<local_port>\d+)\s+"
+    r"(?P<peer_ip>\d+\.\d+\.\d+\.\d+):(?P<peer_port>\d+)\s+(?P<process>.*)$"
+)
 _SERVICE_CGROUP = re.compile(r"/([^/]+\.service)(?:/|$)")
 
 
@@ -85,11 +89,25 @@ def listener_pids(port: int) -> list[int]:
     )
 
 
-def established_pids(port: int) -> list[int]:
-    return _socket_pids(
-        ["ss", "-H", "-tnp", "state", "established", f"sport = :{port}"],
-        "established_socket_query_failed",
+def established_socket_owners(peer_ip: str) -> list[tuple[int, int]]:
+    result = subprocess.run(
+        ["ss", "-H", "-tnp", "state", "established"],
+        text=True,
+        capture_output=True,
+        check=False,
     )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "established_socket_query_failed"
+        raise RuntimeError(detail)
+
+    owners: set[tuple[int, int]] = set()
+    for line in result.stdout.splitlines():
+        match = _ESTABLISHED_SOCKET.match(line.strip())
+        if not match or match.group("peer_ip") != peer_ip:
+            continue
+        local_port = int(match.group("local_port"))
+        owners.update((local_port, int(value)) for value in _PID.findall(match.group("process")))
+    return sorted(owners)
 
 
 def service_for_pid(pid: int) -> str | None:
@@ -113,12 +131,19 @@ def resolve_incumbent(interface: str, seconds: float, managed_service: str) -> I
     if observed is None:
         return None
 
-    port, peer_ip, evidence = observed
-    pids = listener_pids(port)
+    observed_port, peer_ip, evidence = observed
+    pids = listener_pids(observed_port)
+    local_port = observed_port
+
     if not pids:
-        pids = established_pids(port)
-    if not pids:
-        raise RuntimeError("observed_ocpp_endpoint_has_no_local_socket_owner")
+        peer_owners = established_socket_owners(peer_ip)
+        if not peer_owners:
+            raise RuntimeError("observed_ocpp_endpoint_has_no_local_socket_owner")
+        local_ports = {port for port, _ in peer_owners}
+        if len(local_ports) != 1:
+            raise RuntimeError("ambiguous_incumbent_local_ports")
+        local_port = next(iter(local_ports))
+        pids = sorted({pid for _, pid in peer_owners})
 
     owners = {(pid, service_for_pid(pid)) for pid in pids}
     resolved = {(pid, service) for pid, service in owners if service}
@@ -143,7 +168,7 @@ def resolve_incumbent(interface: str, seconds: float, managed_service: str) -> I
 
     return IncumbentEndpoint(
         service=service,
-        port=port,
+        port=local_port,
         pid=pid,
         peer_ip=peer_ip,
         evidence=evidence,
