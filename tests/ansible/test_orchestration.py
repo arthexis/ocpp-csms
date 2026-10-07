@@ -242,37 +242,48 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_immutable_release_installs_only_from_local_wheelhouse():
+def test_immutable_release_install_uses_source_and_release_venv():
+    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
+
+    assert install["ansible.builtin.pip"] == {
+        "name": "{{ ocpp_csms_install_source }}",
+        "virtualenv": "{{ ocpp_csms_release_venv }}",
+    }
+    assert install["when"] == "not ocpp_csms_release_ready.stat.exists"
+
+
+def test_release_is_verified_before_it_is_marked_ready():
     main = read(TASKS / "main.yml")
-    defaults = load_yaml(DEFAULTS)
-    assert defaults["ocpp_csms_release_wheelhouse"].endswith("/wheelhouse")
+
     assert_task_order(
         main,
-        "Create immutable release wheelhouse",
-        "Download immutable release dependency wheels",
-        "Build OCPP CSMS application wheel",
-        "Find built OCPP CSMS wheel",
-        "Validate built OCPP CSMS wheel",
         "Install OCPP CSMS into immutable release",
         "Verify immutable release command",
+        "Mark immutable release ready",
+        "Render candidate OCPP CSMS systemd unit",
     )
-    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
-    assert install["ansible.builtin.pip"]["name"] == "{{ ocpp_csms_built_wheels.files[0].path }}"
-    assert install["ansible.builtin.pip"]["extra_args"] == (
-        "--no-index --find-links {{ ocpp_csms_release_wheelhouse }}"
-    )
-    download = task_by_name(
-        TASKS / "main.yml", "Download immutable release dependency wheels"
-    )
-    assert "--only-binary=:all:" in download["ansible.builtin.command"]["argv"]
-    assert "hatchling" in download["ansible.builtin.command"]["argv"]
 
-    build = task_by_name(TASKS / "main.yml", "Build OCPP CSMS application wheel")
-    assert "--no-deps" in build["ansible.builtin.command"]["argv"]
-    assert build["environment"]["PIP_NO_INDEX"] == "1"
-    assert build["environment"]["PIP_FIND_LINKS"] == "{{ ocpp_csms_release_wheelhouse }}"
-    assert "Ensure current pip in release virtual environment" not in main
+    verify = task_by_name(TASKS / "main.yml", "Verify immutable release command")
+    assert verify["ansible.builtin.command"]["cmd"] == "{{ ocpp_csms_release_command }} --help"
+    assert verify["changed_when"] is False
 
+
+def test_release_install_has_no_separate_dependency_packaging_phase():
+    main = load_yaml(TASKS / "main.yml")
+    defaults = load_yaml(DEFAULTS)
+    task_names = {
+        task["name"]
+        for task in main
+        if isinstance(task, dict) and "name" in task
+    }
+
+    assert "ocpp_csms_release_wheelhouse" not in defaults
+    assert "ocpp_csms_dependency_cache" not in defaults
+    assert "ocpp_csms_dependencies_dir" not in defaults
+    assert "Create immutable release wheelhouse" not in task_names
+    assert "Download immutable release dependency wheels" not in task_names
+    assert "Download dependency wheels into persistent cache" not in task_names
+    assert "Build OCPP CSMS application wheel" not in task_names
 
 
 def test_ansible_reports_elapsed_time_for_each_task():
