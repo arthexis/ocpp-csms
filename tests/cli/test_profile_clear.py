@@ -32,5 +32,5 @@ def test_profile_clear_propagates_rejected_status(cli_parser, profile_control, c
 
 
 def test_profile_clear_c_alias_selects_connector(cli_parser):
-    args = cli_parser.parse_args(["profile", "clear", "--c", "2"])
+    args = cli_parser.parse_args(["profile", "clear", "-c", "2"])
     assert args.connector == 2

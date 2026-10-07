@@ -52,8 +52,15 @@ class Registry:
     def physical_connector_ids(self, charge_point_id):
         return []
 
+    def active_transactions(self, charge_point_id):
+        values = self.active.get(charge_point_id, [])
+        return [
+            value if isinstance(value, tuple) else (value, None)
+            for value in values
+        ]
+
     def active_transaction_ids(self, charge_point_id):
-        return list(self.active.get(charge_point_id, []))
+        return [transaction_id for transaction_id, _connector_id in self.active_transactions(charge_point_id)]
 
     def record_control_event(self, event, *, charger_id, details=None):
         self.events.append({"event": event, "charger_id": charger_id, "details": details or {}})
@@ -270,6 +277,75 @@ async def test_now_blocks_start_and_reset_when_transaction_is_active():
             "transactions": [17],
         }
         assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_allows_free_connector_when_another_connector_is_active():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response["ok"] is True
+    assert session.calls == [("start", "REMOTE", 2)]
+
+
+@pytest.mark.asyncio
+async def test_start_blocks_when_requested_connector_is_active():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 2), (18, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response == {
+        "error": "active_transaction",
+        "charger": "charger-a",
+        "transactions": [17],
+    }
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_without_connector_remains_blocked_by_any_active_transaction():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 1)]})
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "now"},
+    )
+
+    assert response["error"] == "active_transaction"
+    assert response["transactions"] == [17]
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_within_waits_only_for_requested_connector(monkeypatch):
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(17, 2), (18, 1)]})
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        registry.active["charger-a"] = [(18, 1)]
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "within", "seconds": 3},
+    )
+
+    assert response["ok"] is True
+    assert sleeps == [1]
+    assert session.calls == [("start", "REMOTE", 2)]
 
 
 @pytest.mark.asyncio

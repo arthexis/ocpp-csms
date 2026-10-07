@@ -20,7 +20,8 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
         "connector": 2,
     }
     assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE", "--now")) == expected
-    assert control_request(parse_cli("start", "--charger", "charger-a", "--c", "2", "--id-tag", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "--charger", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
@@ -37,13 +38,13 @@ def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
         "transaction": 42,
     }
     assert control_request(parse_cli("stop", "charger-a", "--transaction", "42", "--now")) == expected
-    assert control_request(parse_cli("stop", "--charger", "charger-a", "--txn", "42", "--now")) == expected
+    assert control_request(parse_cli("stop", "--cp", "charger-a", "--txn", "42", "--now")) == expected
 
 
 def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
     assert control_request(parse_cli("reset", "--now")) == {"command": "reset", "timing": "now", "type": "Soft"}
     assert control_request(parse_cli("reset", "--hard", "--now")) == {"command": "reset", "timing": "now", "type": "Hard"}
-    assert control_request(parse_cli("reset", "--charger", "charger-a", "--now")) == {
+    assert control_request(parse_cli("reset", "--cp", "charger-a", "--now")) == {
         "command": "reset",
         "timing": "now",
         "charger": "charger-a",
@@ -53,7 +54,7 @@ def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
 
 def test_control_rejects_two_charger_selectors(parse_cli):
     with pytest.raises(ValueError):
-        control_request(parse_cli("reset", "charger-a", "--charger", "charger-b", "--now"))
+        control_request(parse_cli("reset", "charger-a", "--cp", "charger-b", "--now"))
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -86,7 +87,7 @@ def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     "args",
     [
         ("start", "--connector", "-1", "--id-tag", "REMOTE", "--now"),
-        ("start", "--c", "-1", "--id-tag", "REMOTE", "--now"),
+        ("start", "-c", "-1", "--id-tag", "REMOTE", "--now"),
         ("stop", "--transaction", "-1", "--now"),
         ("stop", "--txn", "-1", "--now"),
     ],
@@ -136,6 +137,7 @@ def test_delayed_timing_requires_positive_seconds(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_remote_start_rejects_cp_as_connector_alias(cli_parser):
-    with pytest.raises(SystemExit):
-        cli_parser.parse_args(["start", "--cp", "2", "--id-tag", "REMOTE", "--now"])
+def test_remote_start_uses_cp_for_charge_point(parse_cli):
+    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")
+    assert args.charger_option == "charger-a"
+    assert args.connector == 2
