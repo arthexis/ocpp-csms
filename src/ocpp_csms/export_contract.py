@@ -65,8 +65,7 @@ def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         entries = payload.get("meter_value")
         if not isinstance(entries, list):
             continue
-        sample_index = 0
-        for entry in entries:
+        for sample_index, entry in enumerate(entries):
             if not isinstance(entry, dict):
                 continue
             sample = _entry_sample(
@@ -89,7 +88,6 @@ def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
                     "energy_wh": sample.energy_wh,
                 }
             )
-            sample_index += 1
     return samples
 
 
