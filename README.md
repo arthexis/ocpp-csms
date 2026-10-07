@@ -9,7 +9,7 @@ Its default policy is simple: **accept chargers, avoid blocking charging, preser
 The canonical appliance deployment is Ansible:
 
 ```bash
-./ansible-deploy.sh
+./deploy.sh
 ```
 
 Do not run the wrapper itself with `sudo`; the playbook uses privilege escalation only for host-level integration.
@@ -18,11 +18,11 @@ The deployment wrapper exposes a small field-oriented surface before any raw
 Ansible arguments:
 
 ```bash
-./ansible-deploy.sh --observe 180
-./ansible-deploy.sh --interface eno1
-./ansible-deploy.sh --reconnect 60
-./ansible-deploy.sh --stage-only
-./ansible-deploy.sh --diagnose
+./deploy.sh --observe 180
+./deploy.sh --interface eno1
+./deploy.sh --reconnect 60
+./deploy.sh --stage-only
+./deploy.sh --diagnose
 ```
 
 `--observe SECONDS` changes the bounded incumbent-traffic observation window
@@ -56,10 +56,8 @@ sudo systemctl status ocpp-csms ocpp-discover
 ```
 
 If the charger-facing interface is not `eth0`, prefer the wrapper form
-`./ansible-deploy.sh --interface eno1`. Raw Ansible `-e` arguments remain
+`./deploy.sh --interface eno1`. Raw Ansible `-e` arguments remain
 available for advanced overrides.
-
-`install.sh` remains only as a transitional legacy installer. New appliance deployment and validation should use Ansible.
 
 ## Appliance handoff and rollback
 
@@ -374,8 +372,6 @@ Shared appliance state/integration:
 /run/ocpp-discover/
 ```
 
-The legacy installer may still create older mutable paths during the migration period, but they are not the canonical deployment model.
-
 ## Development and tests
 
 Install development dependencies with:
@@ -409,9 +405,7 @@ src/
   ocpp_discover/      resident discovery, adaptation and reconciliation
 
 ansible/              canonical appliance convergence
-systemd/              legacy installer service templates
-install.sh             transitional installer
-ansible-deploy.sh      canonical deployment wrapper
+deploy.sh              canonical deployment wrapper
 ```
 
 This README is the canonical project documentation.
