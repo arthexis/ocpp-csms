@@ -10,7 +10,7 @@ from ocpp_csms.output import emit_json
 
 def add_energy_command(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
     energy = subcommands.add_parser("energy", help="Show normalized charger energy telemetry")
-    energy.add_argument("--cp", "--charger", help="Filter by charge point ID")
+    energy.add_argument("--cp", "--charger", dest="charger", help="Filter by charge point ID")
     energy.add_argument("-c", "--connector", dest="connector", type=int, help="Filter by connector ID")
     energy.add_argument("--since", help="ISO-8601 lower sample timestamp bound")
     energy.add_argument("--until", help="ISO-8601 upper sample timestamp bound")
