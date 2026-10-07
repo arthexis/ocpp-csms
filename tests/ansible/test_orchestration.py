@@ -248,7 +248,8 @@ def test_immutable_release_installs_only_from_local_wheelhouse():
     assert_task_order(
         main,
         "Create immutable release wheelhouse",
-        "Build immutable release wheels",
+        "Download immutable release dependency wheels",
+        "Build OCPP CSMS application wheel",
         "Find built OCPP CSMS wheel",
         "Validate built OCPP CSMS wheel",
         "Install OCPP CSMS into immutable release",
@@ -259,4 +260,14 @@ def test_immutable_release_installs_only_from_local_wheelhouse():
     assert install["ansible.builtin.pip"]["extra_args"] == (
         "--no-index --find-links {{ ocpp_csms_release_wheelhouse }}"
     )
+    download = task_by_name(
+        TASKS / "main.yml", "Download immutable release dependency wheels"
+    )
+    assert "--only-binary=:all:" in download["ansible.builtin.command"]["argv"]
+    assert "hatchling" in download["ansible.builtin.command"]["argv"]
+
+    build = task_by_name(TASKS / "main.yml", "Build OCPP CSMS application wheel")
+    assert "--no-deps" in build["ansible.builtin.command"]["argv"]
+    assert build["environment"]["PIP_NO_INDEX"] == "1"
+    assert build["environment"]["PIP_FIND_LINKS"] == "{{ ocpp_csms_release_wheelhouse }}"
     assert "Ensure current pip in release virtual environment" not in main
