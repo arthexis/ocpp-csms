@@ -236,11 +236,11 @@
   ansible.builtin.set_fact:
     ocpp_csms_final_preflight_result: "{{ ocpp_csms_final_preflight.stdout | from_json }}"
 
-# Detect a legacy Arthexis owner only after the candidate and final safety gate
-# are ready. This inspection is read-only; legacy service downtime starts inside
-# the cutover transaction.
-- name: Inspect legacy Arthexis OCPP listener
-  ansible.builtin.include_tasks: legacy_arthexis.yml
+# Identify an incumbent only from observed host-local OCPP traffic. Product
+# names and historical ports are intentionally irrelevant; the observed port is
+# resolved to its owning PID and systemd service before any downtime begins.
+- name: Inspect incumbent host-local OCPP service
+  ansible.builtin.include_tasks: incumbent.yml
 
 - name: Inspect database schema cutover action
   ansible.builtin.command:
