@@ -170,10 +170,26 @@
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
 
-- name: Install OCPP CSMS into immutable release
+- name: Install release build requirements
+  ansible.builtin.pip:
+    name:
+      - hatchling
+    virtualenv: "{{ ocpp_csms_release_venv }}"
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Install release runtime dependencies
+  ansible.builtin.pip:
+    name:
+      - "ocpp>=0.26,<1"
+      - "websockets>=12,<14"
+    virtualenv: "{{ ocpp_csms_release_venv }}"
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Install OCPP CSMS application into immutable release
   ansible.builtin.pip:
     name: "{{ ocpp_csms_install_source }}"
     virtualenv: "{{ ocpp_csms_release_venv }}"
+    extra_args: "--no-deps --no-build-isolation"
   when: not ocpp_csms_release_ready.stat.exists
 
 - name: Verify immutable release command
