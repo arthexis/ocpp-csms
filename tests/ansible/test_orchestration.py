@@ -242,22 +242,39 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_immutable_release_install_uses_source_and_release_venv():
-    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
+def test_release_install_phases_use_expected_packages_and_venv():
+    build = task_by_name(TASKS / "main.yml", "Install release build requirements")
+    runtime = task_by_name(TASKS / "main.yml", "Install release runtime dependencies")
+    application = task_by_name(
+        TASKS / "main.yml", "Install OCPP CSMS application into immutable release"
+    )
 
-    assert install["ansible.builtin.pip"] == {
-        "name": "{{ ocpp_csms_install_source }}",
+    assert build["ansible.builtin.pip"] == {
+        "name": ["hatchling"],
         "virtualenv": "{{ ocpp_csms_release_venv }}",
     }
-    assert install["when"] == "not ocpp_csms_release_ready.stat.exists"
+    assert runtime["ansible.builtin.pip"] == {
+        "name": ["ocpp>=0.26,<1", "websockets>=12,<14"],
+        "virtualenv": "{{ ocpp_csms_release_venv }}",
+    }
+    assert application["ansible.builtin.pip"] == {
+        "name": "{{ ocpp_csms_install_source }}",
+        "virtualenv": "{{ ocpp_csms_release_venv }}",
+        "extra_args": "--no-deps --no-build-isolation",
+    }
+
+    for task in (build, runtime, application):
+        assert task["when"] == "not ocpp_csms_release_ready.stat.exists"
 
 
-def test_release_is_verified_before_it_is_marked_ready():
+def test_release_install_phases_precede_verification_and_readiness():
     main = read(TASKS / "main.yml")
 
     assert_task_order(
         main,
-        "Install OCPP CSMS into immutable release",
+        "Install release build requirements",
+        "Install release runtime dependencies",
+        "Install OCPP CSMS application into immutable release",
         "Verify immutable release command",
         "Mark immutable release ready",
         "Render candidate OCPP CSMS systemd unit",
@@ -268,7 +285,7 @@ def test_release_is_verified_before_it_is_marked_ready():
     assert verify["changed_when"] is False
 
 
-def test_release_install_has_no_separate_dependency_packaging_phase():
+def test_release_install_has_no_wheelhouse_or_dependency_download_phase():
     main = load_yaml(TASKS / "main.yml")
     defaults = load_yaml(DEFAULTS)
     task_names = {
