@@ -1,0 +1,19 @@
+---
+- name: Install OCPP CSMS satellite from offline release bundle
+  hosts: all
+  gather_facts: true
+  pre_tasks:
+    - name: Require offline release bundle path
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_bundle_path is defined
+          - ocpp_csms_bundle_path | length > 0
+        fail_msg: >-
+          Pass the unpacked USB bundle path with
+          -e ocpp_csms_bundle_path=/path/to/ocpp-csms-<release>.
+
+  roles:
+    - role: ocpp_csms
+      vars:
+        ocpp_csms_install_mode: bundle
+    - role: ocpp_discover
