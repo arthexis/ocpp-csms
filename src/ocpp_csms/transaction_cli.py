@@ -122,7 +122,7 @@ def format_transactions(views: Iterable[TransactionView], *, local_time: bool = 
     rows = list(views)
     if not rows:
         return "No transactions."
-    headers = ("TXN", "STATUS", "CHARGER", "CP", "RFID", "ENERGY", "EVENT TIME")
+    headers = ("TXN", "STATUS", "CHARGER", "C", "RFID", "ENERGY", "EVENT TIME")
     body = [
         (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_energy(view), _age_key(view.event_time(local_time=local_time)))
         for view in rows
