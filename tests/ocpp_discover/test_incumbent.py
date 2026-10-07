@@ -72,7 +72,11 @@ def test_resolve_incumbent_falls_back_to_established_socket_owner(monkeypatch):
         lambda *args, **kwargs: (8888, "192.168.50.20", "ocpp_frame"),
     )
     monkeypatch.setattr(incumbent, "listener_pids", lambda port: [])
-    monkeypatch.setattr(incumbent, "established_pids", lambda port: [689])
+    monkeypatch.setattr(
+        incumbent,
+        "established_socket_owners",
+        lambda peer_ip: [(9001, 689)],
+    )
     monkeypatch.setattr(incumbent, "service_for_pid", lambda pid: "another-csms.service")
     monkeypatch.setattr(
         incumbent.subprocess,
@@ -84,7 +88,7 @@ def test_resolve_incumbent_falls_back_to_established_socket_owner(monkeypatch):
 
     assert endpoint is not None
     assert endpoint.service == "another-csms.service"
-    assert endpoint.port == 8888
+    assert endpoint.port == 9001
     assert endpoint.pid == 689
 
 
@@ -96,7 +100,42 @@ def test_resolve_incumbent_rejects_traffic_without_socket_owner(monkeypatch):
         lambda *args, **kwargs: (8888, "192.168.50.20", "ocpp_frame"),
     )
     monkeypatch.setattr(incumbent, "listener_pids", lambda port: [])
-    monkeypatch.setattr(incumbent, "established_pids", lambda port: [])
+    monkeypatch.setattr(incumbent, "established_socket_owners", lambda peer_ip: [])
 
     with pytest.raises(RuntimeError, match="observed_ocpp_endpoint_has_no_local_socket_owner"):
+        incumbent.resolve_incumbent("eth0", 1, "ocpp-csms.service")
+
+
+
+def test_established_socket_owners_matches_peer_and_recovers_local_port(monkeypatch):
+    stdout = (
+        '0 0 192.168.50.1:9001 192.168.50.20:50000 '
+        'users:(("python3",pid=689,fd=9))\n'
+        '0 0 192.168.50.1:22 192.168.50.99:51000 '
+        'users:(("sshd",pid=42,fd=4))\n'
+    )
+    monkeypatch.setattr(
+        incumbent.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=stdout, stderr=""),
+    )
+
+    assert incumbent.established_socket_owners("192.168.50.20") == [(9001, 689)]
+
+
+def test_resolve_incumbent_rejects_multiple_local_ports_for_same_peer(monkeypatch):
+    monkeypatch.setattr(incumbent.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        incumbent,
+        "observe_endpoint",
+        lambda *args, **kwargs: (8888, "192.168.50.20", "ocpp_frame"),
+    )
+    monkeypatch.setattr(incumbent, "listener_pids", lambda port: [])
+    monkeypatch.setattr(
+        incumbent,
+        "established_socket_owners",
+        lambda peer_ip: [(9001, 689), (9002, 690)],
+    )
+
+    with pytest.raises(RuntimeError, match="ambiguous_incumbent_local_ports"):
         incumbent.resolve_incumbent("eth0", 1, "ocpp-csms.service")
