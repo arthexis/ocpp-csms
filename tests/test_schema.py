@@ -48,6 +48,7 @@ def test_current_schema_is_created_directly_at_version_four(tmp_path):
     assert ("table", "connector_status") in objects
     assert ("table", "rfid_lists") in objects
     assert ("table", "rfid_list_entries") in objects
+    assert ("table", "appliance_metadata") in objects
     assert ("view", "transaction_summary") in objects
 
 
