@@ -143,7 +143,23 @@ def _summary_table(data_dir: str) -> str:
             value.ljust(widths[index]) for index, value in enumerate(values)
         ).rstrip()
 
-    return "\n".join([line(headers), *(line(row) for row in rows)])
+    output = [line(headers), *(line(row) for row in rows)]
+
+    if cache_available and cache is not None:
+        output.extend(("", f"Charger cache: version {cache.list_version}"))
+        if file_configured:
+            if not policy.valid or not cache.known or cache.snapshot is None:
+                sync = "unknown"
+            else:
+                enabled_entries: list[dict[str, object]] = [
+                    {"rfid": entry.rfid, "name": entry.name, "enabled": True}
+                    for entry in policy.entries.values()
+                    if entry.enabled
+                ]
+                sync = "current" if _list_hash(enabled_entries) == cache.snapshot.list_hash else "differs"
+            output.append(f"Sync:          {sync}")
+
+    return "\n".join(output)
 
 
 def run_rfid(args: argparse.Namespace) -> str:
