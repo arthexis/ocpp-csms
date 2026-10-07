@@ -106,7 +106,6 @@
     - "{{ ocpp_csms_prefix }}"
     - "{{ ocpp_csms_data_dir }}"
     - "{{ ocpp_csms_releases_dir }}"
-    - "{{ ocpp_csms_dependencies_dir }}"
     - "{{ ocpp_csms_candidate_dir }}"
 
 - name: Check whether immutable release is already complete
