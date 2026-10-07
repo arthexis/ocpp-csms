@@ -1,0 +1,59 @@
+name: Appliance validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_deploy:
+        description: Perform a full OCPP CSMS deployment instead of stage-only validation
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appliance-validation-gway-001
+  cancel-in-progress: false
+
+jobs:
+  gway-001:
+    name: Gway-001 appliance
+    runs-on:
+      - self-hosted
+      - linux
+      - ARM64
+      - gway-001
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show appliance environment
+        run: |
+          set -eux
+          uname -a
+          uname -m
+          python3 --version
+          cat /etc/os-release
+          systemctl --version | head -n 1
+          ansible-playbook --version | head -n 1
+
+      - name: Validate deploy script
+        run: sh -n deploy.sh
+
+      - name: Validate Ansible playbook
+        run: |
+          ansible-playbook \
+            ansible/playbooks/satellite.yml \
+            -i localhost, \
+            -c local \
+            --syntax-check
+
+      - name: Stage OCPP CSMS deployment
+        if: ${{ !inputs.full_deploy }}
+        run: ./deploy.sh --stage-only
+
+      - name: Deploy OCPP CSMS
+        if: ${{ inputs.full_deploy }}
+        run: ./deploy.sh
