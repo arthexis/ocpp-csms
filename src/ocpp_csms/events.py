@@ -228,6 +228,66 @@ class EventStore:
                         )
         return True
 
+
+    def latest_rfid_list_version(self, charger_id: str) -> int | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT MAX(list_version)
+                FROM rfid_lists
+                WHERE charger_id = ?
+                """,
+                (charger_id,),
+            ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return int(row[0])
+
+    def record_rfid_list(
+        self,
+        charger_id: str,
+        *,
+        list_version: int,
+        entries: list[dict[str, Any]],
+        source_file: str | None,
+        list_hash: str,
+        verified_version: int | None,
+    ) -> int:
+        """Persist an RFID list only after the charger accepted SendLocalList."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO rfid_lists (
+                    charger_id, list_version, sent_at, source_file,
+                    list_hash, verified_version
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    charger_id,
+                    int(list_version),
+                    utc_now_iso(),
+                    source_file,
+                    list_hash,
+                    int(verified_version) if verified_version is not None else None,
+                ),
+            )
+            list_id = int(cursor.lastrowid)
+            for entry in entries:
+                connection.execute(
+                    """
+                    INSERT INTO rfid_list_entries (
+                        list_id, rfid, name, enabled
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        list_id,
+                        str(entry["rfid"]),
+                        str(entry["name"]) if entry.get("name") is not None else None,
+                        1 if bool(entry.get("enabled", True)) else 0,
+                    ),
+                )
+        return list_id
+
     def record_runtime(
         self,
         event: str,
