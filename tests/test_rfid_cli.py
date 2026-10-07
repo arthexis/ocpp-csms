@@ -389,7 +389,11 @@ async def test_summary_shows_allow_and_cache_when_file_and_known_cache_both_exis
 
     report = run_rfid(args(tmp_path, None))
     header = report.splitlines()[0]
-    rows = {line.split()[0]: line for line in report.splitlines()[1:]}
+    rows = {
+        line.split()[0]: line
+        for line in report.splitlines()[1:]
+        if line.strip() and not line.startswith(("Charger cache:", "Sync:"))
+    }
 
     assert header.index("ENERGY") < header.index("ALLOW") < header.index("CACHE") < header.index("NAME")
     assert "true" in rows["card-a"]
