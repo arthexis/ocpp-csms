@@ -234,7 +234,7 @@ def _charger_status(
     )
 
 
-def format_status(data: dict[str, Any], *, charger_id: str | None = None, charging_only: bool = False) -> str:
+def format_status(data: dict[str, Any], *, charger_id: str | None = None, charging_only: bool = False, appliance: bool = True) -> str:
     chargers: list[ChargerStatus] = data.get("chargers", [])
     active_chargers = set(data.get("active_chargers", []))
     if charger_id is not None:
@@ -281,19 +281,22 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             )
         return "\n".join(lines)
 
-    lines = [
+    lines = []
+    if appliance:
+        lines.extend([
         f"CSMS: {data.get('server', 'unknown')}",
         f"Started: {data.get('started_at') or '-'}",
         f"Database: {data.get('database', 'unknown')}",
         f"JSON archive: {data.get('transactions', 'unknown')}",
         f"Data dir: {data.get('data_dir', '-')}",
         "",
-    ]
+        ])
     if not chargers:
         lines.append("No chargers recorded.")
         return "\n".join(lines)
 
-    lines.append("Chargers:")
+    if appliance:
+        lines.append("Chargers:")
     lines.append("ID                 Connected  Status       Charging  Last seen")
     for item in chargers:
         lines.append(
