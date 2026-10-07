@@ -60,6 +60,7 @@ def status_contract(
             "database": status.get("database", "unknown"),
             "transactions": status.get("transactions", "unknown"),
         },
+        "rfid_authorization": status.get("rfid_authorization"),
         "chargers": [charger_status_data(item) for item in chargers],
     }
     return json_command_result(data, schema=STATUS_SCHEMA)
