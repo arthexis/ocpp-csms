@@ -44,6 +44,8 @@ def test_transaction_list_shows_derived_energy():
     output = format_transactions([view])
 
     assert "ENERGY" in output
+    assert " C " in f" {output.splitlines()[0]} "
+    assert " CP " not in f" {output.splitlines()[0]} "
     assert "6.420 kWh" in output
 
 
