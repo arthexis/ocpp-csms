@@ -205,8 +205,9 @@ configured and a structured object when one is present.
 
 `ocpp-csms rfid report` summarizes every RFID observed in transaction history,
 including transaction count and total energy. If `rfid.csv` exists, the summary
-adds `ALLOW` and `NAME` columns after `ENERGY`; unlisted or disabled cards
-show `false`. Supplying a tag keeps the detailed per-RFID report:
+adds `ALLOW` and `NAME` columns after `ENERGY`; listed disabled cards show
+`false`, while observed RFIDs missing from the file show `missing`. Supplying a
+tag keeps the detailed per-RFID report:
 
 ```bash
 ocpp-csms rfid report
