@@ -3,9 +3,6 @@ from types import SimpleNamespace
 import pytest
 
 from ocpp_csms.control import dispatch_control
-from ocpp_csms.events import EventStore
-from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transactions import TransactionArchive
 
 
 class ControlSession:
@@ -55,15 +52,6 @@ class Registry:
 
     def record_control_event(self, event, *, charger_id, details=None):
         raise AssertionError("smart charging transport should not use configuration guards")
-
-
-def charge_point_session:
-    return ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="test"),
-        TransactionArchive(tmp_path),
-        EventStore(tmp_path),
-    )
 
 
 def evidence(session, action):
