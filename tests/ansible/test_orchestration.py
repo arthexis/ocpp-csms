@@ -239,24 +239,39 @@ def test_deploy_wrapper_exposes_field_friendly_options():
     assert "ocpp_csms_stage_only=true" in wrapper
     assert "--diagnose" in wrapper
     assert "ansible/playbooks/diagnose.yml" in wrapper
+    assert "--dev" in wrapper
+    assert "ocpp_csms_dev=true" in wrapper
 
 
 
 def test_release_install_phases_use_expected_packages_and_venv():
     build = task_by_name(TASKS / "main.yml", "Install release build requirements")
     runtime = task_by_name(TASKS / "main.yml", "Install release runtime dependencies")
+    development = task_by_name(TASKS / "main.yml", "Install release development dependencies")
     application = task_by_name(
         TASKS / "main.yml", "Install OCPP CSMS application into immutable release"
     )
 
     assert build["ansible.builtin.pip"] == {
-        "name": ["hatchling"],
+        "name": ["setuptools>=68"],
         "virtualenv": "{{ ocpp_csms_release_venv }}",
     }
     assert runtime["ansible.builtin.pip"] == {
         "name": ["ocpp>=0.26,<1", "websockets>=12,<14"],
         "virtualenv": "{{ ocpp_csms_release_venv }}",
     }
+    assert development["ansible.builtin.pip"] == {
+        "name": [
+            "pytest>=8,<9",
+            "pytest-asyncio>=0.23,<2",
+            "pytest-xdist>=3,<4",
+        ],
+        "virtualenv": "{{ ocpp_csms_release_venv }}",
+    }
+    assert development["when"] == [
+        "not ocpp_csms_release_ready.stat.exists",
+        "ocpp_csms_dev | bool",
+    ]
     assert application["ansible.builtin.pip"] == {
         "name": "{{ ocpp_csms_install_source }}",
         "virtualenv": "{{ ocpp_csms_release_venv }}",
@@ -267,6 +282,15 @@ def test_release_install_phases_use_expected_packages_and_venv():
         assert task["when"] == "not ocpp_csms_release_ready.stat.exists"
 
 
+def test_development_deploy_gets_distinct_immutable_release():
+    capture = task_by_name(TASKS / "main.yml", "Capture immutable release identifier")
+    release_id = capture["ansible.builtin.set_fact"]["ocpp_csms_release_id"]
+
+    assert "ocpp_csms_release_revision.stdout" in release_id
+    assert "'-dev' if ocpp_csms_dev | bool else ''" in release_id
+
+
+
 def test_release_install_phases_precede_verification_and_readiness():
     main = read(TASKS / "main.yml")
 
@@ -274,6 +298,7 @@ def test_release_install_phases_precede_verification_and_readiness():
         main,
         "Install release build requirements",
         "Install release runtime dependencies",
+        "Install release development dependencies",
         "Install OCPP CSMS application into immutable release",
         "Verify immutable release command",
         "Mark immutable release ready",

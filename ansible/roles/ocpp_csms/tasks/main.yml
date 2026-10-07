@@ -30,7 +30,8 @@
 
 - name: Capture immutable release identifier
   ansible.builtin.set_fact:
-    ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout }}"
+    ocpp_csms_release_id: >-
+      {{ ocpp_csms_release_revision.stdout }}{{ '-dev' if ocpp_csms_dev | bool else '' }}
 
 # The first safety gate must run before appliance mutation. Idle connected
 # chargers are expected; only active charging or unsafe persistence state blocks.
@@ -173,7 +174,7 @@
 - name: Install release build requirements
   ansible.builtin.pip:
     name:
-      - hatchling
+      - "setuptools>=68"
     virtualenv: "{{ ocpp_csms_release_venv }}"
   when: not ocpp_csms_release_ready.stat.exists
 
@@ -184,6 +185,17 @@
       - "websockets>=12,<14"
     virtualenv: "{{ ocpp_csms_release_venv }}"
   when: not ocpp_csms_release_ready.stat.exists
+
+- name: Install release development dependencies
+  ansible.builtin.pip:
+    name:
+      - "pytest>=8,<9"
+      - "pytest-asyncio>=0.23,<2"
+      - "pytest-xdist>=3,<4"
+    virtualenv: "{{ ocpp_csms_release_venv }}"
+  when:
+    - not ocpp_csms_release_ready.stat.exists
+    - ocpp_csms_dev | bool
 
 - name: Install OCPP CSMS application into immutable release
   ansible.builtin.pip:

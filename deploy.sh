@@ -21,6 +21,7 @@ interface=""
 reconnect_seconds=""
 stage_only=0
 diagnose=0
+dev=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -57,6 +58,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --diagnose)
             diagnose=1
+            shift
+            ;;
+        --dev)
+            dev=1
             shift
             ;;
         --)
@@ -102,6 +107,10 @@ fi
 if [ -n "$reconnect_seconds" ]; then
     validate_positive_seconds --reconnect "$reconnect_seconds"
     set -- -e "ocpp_csms_reconnect_timeout=$reconnect_seconds" "$@"
+fi
+
+if [ "$dev" -eq 1 ]; then
+    set -- -e ocpp_csms_dev=true "$@"
 fi
 
 if [ "$diagnose" -eq 1 ]; then

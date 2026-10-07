@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ocpp-csms"
@@ -24,8 +24,8 @@ dev = [
 ocpp-csms = "ocpp_csms.cli:main"
 ocpp-discover = "ocpp_discover.__main__:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/ocpp_csms", "src/ocpp_discover"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
