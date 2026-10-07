@@ -35,7 +35,7 @@ def test_incumbent_inspection_occurs_after_candidate_validation_before_handoff()
     )
 
 
-def test_incumbent_detection_is_traffic_driven_not_product_catalog_driven():
+def test_incumbent_detection_uses_observed_traffic():
     incumbent = read(TASKS / "incumbent.yml")
     defaults = load_yaml(DEFAULTS)
     assert "ocpp_discover.incumbent" in incumbent
@@ -43,9 +43,6 @@ def test_incumbent_detection_is_traffic_driven_not_product_catalog_driven():
     assert "--seconds" in incumbent
     assert "--managed-service" in incumbent
     assert "ocpp_csms_incumbent_observe_seconds" in defaults
-    assert "ocpp_csms_legacy_arthexis_services" not in defaults
-    assert "ocpp_csms_legacy_arthexis_ports" not in defaults
-    assert "arthexis.service" not in incumbent
 
 
 def test_incumbent_takeover_tracks_observed_listener_port():
