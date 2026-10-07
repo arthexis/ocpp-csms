@@ -18,6 +18,7 @@ def test_json_read_commands_are_registered():
     assert parser.parse_args(["transactions", "--json"]).json is True
     assert parser.parse_args(["txn", "-j"]).json is True
     assert parser.parse_args(["energy", "-j"]).json is True
+    assert parser.parse_args(["energy", "--c", "2"]).connector == 2
     assert parser.parse_args(["config", "download", "--json"]).json is True
     assert parser.parse_args(["profile", "composite", "--json"]).json is True
 
