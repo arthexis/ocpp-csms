@@ -32,13 +32,13 @@ def add_profile_command(
     add(profile_send, "--watts", type=int, required=True, help="Maximum charging power in watts")
     profile_composite = profile_subcommands.add_parser("composite", help="Show the charger's effective composite schedule")
     add(profile_composite, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
-    add(profile_composite, "--connector", "--cp", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
+    add(profile_composite, "--connector", "--c", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
     add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
     add(profile_composite, "-j", "--json", action="store_true", help="Print the OCPP response as JSON")
     profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
     add(profile_clear, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
-    add(profile_clear, "--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
+    add(profile_clear, "--connector", "--c", dest="connector", type=int, help="Filter by connector ID")
     add(profile_clear, "--purpose", choices=PROFILE_PURPOSES, help="Filter by charging profile purpose")
     add(profile_clear, "--stack-level", type=int, help="Filter by stack level")
     return profile
@@ -54,7 +54,7 @@ def _profile_send_request(args: argparse.Namespace) -> dict[str, object]:
 
 def _profile_composite_request(args: argparse.Namespace) -> dict[str, object]:
     if args.connector < 0:
-        raise ValueError("--connector/--cp must be zero or greater")
+        raise ValueError("--connector/--c must be zero or greater")
     if args.duration < 1:
         raise ValueError("--duration must be at least 1 second")
     request: dict[str, object] = {"command": "get_composite_schedule", "connector": args.connector, "duration": args.duration}
@@ -67,7 +67,7 @@ def _profile_clear_request(args: argparse.Namespace) -> dict[str, object]:
     if args.profile_id is not None and args.profile_id < 0:
         raise ValueError("--id must be zero or greater")
     if args.connector is not None and args.connector < 0:
-        raise ValueError("--connector/--cp must be zero or greater")
+        raise ValueError("--connector/--c must be zero or greater")
     if args.stack_level is not None and args.stack_level < 0:
         raise ValueError("--stack-level must be zero or greater")
     request: dict[str, object] = {"command": "clear_charging_profile"}
