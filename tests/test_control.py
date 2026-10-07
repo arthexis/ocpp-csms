@@ -20,7 +20,7 @@ class Session:
         return SimpleNamespace(status="Accepted")
 
     async def reset(self, reset_type="Soft"):
-        self.calls.append(("reboot", reset_type))
+        self.calls.append(("reset", reset_type))
         return SimpleNamespace(status="Accepted")
 
     async def get_configuration(self, keys=None):
@@ -65,8 +65,8 @@ class Registry:
     [
         ({"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"}, ("start", "REMOTE", 2)),
         ({"command": "stop", "charger": "charger-a", "transaction": 42, "timing": "now"}, ("stop", 42)),
-        ({"command": "reboot", "charger": "charger-a", "timing": "now"}, ("reboot", "Soft")),
-        ({"command": "reboot", "charger": "charger-a", "type": "Hard", "timing": "now"}, ("reboot", "Hard")),
+        ({"command": "reset", "charger": "charger-a", "timing": "now"}, ("reset", "Soft")),
+        ({"command": "reset", "charger": "charger-a", "type": "Hard", "timing": "now"}, ("reset", "Hard")),
     ],
 )
 async def test_dispatches_supported_commands(control_request, expected_call):
@@ -82,7 +82,7 @@ async def test_dispatches_supported_commands(control_request, expected_call):
     [
         ({"command": "start", "id_tag": "REMOTE", "connector": 2, "timing": "now"}, ("start", "REMOTE", 2)),
         ({"command": "stop", "transaction": 42, "timing": "now"}, ("stop", 42)),
-        ({"command": "reboot", "timing": "now"}, ("reboot", "Soft")),
+        ({"command": "reset", "timing": "now"}, ("reset", "Soft")),
         ({"command": "config", "keys": ["HeartbeatInterval"]}, ("config", ["HeartbeatInterval"])),
     ],
 )
@@ -136,13 +136,13 @@ async def test_config_set_force_records_override_and_runs():
 
 @pytest.mark.asyncio
 async def test_missing_charger_fails_when_none_are_connected():
-    response = await dispatch_control(Registry(), {"command": "reboot", "timing": "now"})
+    response = await dispatch_control(Registry(), {"command": "reset", "timing": "now"})
     assert response == {"error": "no_charger_connected"}
 
 
 @pytest.mark.asyncio
 async def test_missing_charger_requires_selector_when_multiple_are_connected():
-    response = await dispatch_control(Registry(sessions={"charger-a": Session(), "charger-b": Session()}), {"command": "reboot", "timing": "now"})
+    response = await dispatch_control(Registry(sessions={"charger-a": Session(), "charger-b": Session()}), {"command": "reset", "timing": "now"})
     assert response == {"error": "charger_required", "chargers": ["charger-a", "charger-b"]}
 
 
@@ -186,7 +186,7 @@ async def test_configuration_dispatch_respects_active_transaction_policy(active,
 
 @pytest.mark.asyncio
 async def test_disconnected_explicit_charger_is_not_queued():
-    response = await dispatch_control(Registry(), {"command": "reboot", "charger": "charger-a", "timing": "now"})
+    response = await dispatch_control(Registry(), {"command": "reset", "charger": "charger-a", "timing": "now"})
     assert response == {"error": "charger_not_connected", "charger": "charger-a"}
 
 
@@ -200,7 +200,7 @@ async def test_disconnected_explicit_charger_is_not_queued():
         ({"command": "start", "charger": "charger-a", "timing": "now"}, "missing_id_tag"),
         ({"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": -1, "timing": "now"}, "invalid_connector"),
         ({"command": "stop", "charger": "charger-a", "timing": "now"}, "invalid_transaction"),
-        ({"command": "reboot", "charger": "charger-a", "type": "Warm", "timing": "now"}, "invalid_reset_type"),
+        ({"command": "reset", "charger": "charger-a", "type": "Warm", "timing": "now"}, "invalid_reset_type"),
         ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
         ({"command": "config", "charger": "charger-a", "force": "yes"}, "invalid_force"),
         ({"command": "config_set", "charger": "charger-a", "key": "", "value": "60"}, "invalid_key"),
@@ -218,7 +218,7 @@ async def test_command_failure_is_returned_to_caller():
     class FailingSession(Session):
         async def reset(self, reset_type="Soft"):
             raise OSError("connection lost")
-    response = await dispatch_control(Registry(FailingSession()), {"command": "reboot", "charger": "charger-a", "timing": "now"})
+    response = await dispatch_control(Registry(FailingSession()), {"command": "reset", "charger": "charger-a", "timing": "now"})
     assert response == {"error": "command_failed", "detail": "connection lost"}
 
 
@@ -254,10 +254,10 @@ async def test_unix_socket_reports_invalid_json(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_now_blocks_start_and_reboot_when_transaction_is_active():
+async def test_now_blocks_start_and_reset_when_transaction_is_active():
     for request in (
         {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "now"},
-        {"command": "reboot", "charger": "charger-a", "timing": "now"},
+        {"command": "reset", "charger": "charger-a", "timing": "now"},
     ):
         session = Session()
         response = await dispatch_control(
@@ -286,7 +286,7 @@ async def test_after_waits_before_checking_active_transaction(monkeypatch):
 
     response = await dispatch_control(
         registry,
-        {"command": "reboot", "charger": "charger-a", "timing": "after", "seconds": 5},
+        {"command": "reset", "charger": "charger-a", "timing": "after", "seconds": 5},
     )
 
     assert sleeps == [5]
@@ -309,12 +309,12 @@ async def test_within_waits_for_active_transaction_to_finish(monkeypatch):
 
     response = await dispatch_control(
         registry,
-        {"command": "reboot", "charger": "charger-a", "timing": "within", "seconds": 5},
+        {"command": "reset", "charger": "charger-a", "timing": "within", "seconds": 5},
     )
 
     assert response["ok"] is True
     assert sleeps == [1, 1]
-    assert session.calls == [("reboot", "Soft")]
+    assert session.calls == [("reset", "Soft")]
 
 
 @pytest.mark.asyncio
@@ -371,10 +371,10 @@ async def test_control_timing_is_required_and_validated():
 
     assert (await dispatch_control(
         registry,
-        {"command": "reboot", "charger": "charger-a"},
+        {"command": "reset", "charger": "charger-a"},
     ))["error"] == "invalid_timing"
 
     assert (await dispatch_control(
         registry,
-        {"command": "reboot", "charger": "charger-a", "timing": "after", "seconds": 0},
+        {"command": "reset", "charger": "charger-a", "timing": "after", "seconds": 0},
     ))["error"] == "invalid_timing_seconds"

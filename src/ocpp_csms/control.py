@@ -186,7 +186,7 @@ def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, di
 
 
 def _requires_idle(command: str) -> bool:
-    return command in {"start", "reboot"}
+    return command in {"start", "reset"}
 
 
 async def _wait_for_control_window(
@@ -238,7 +238,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         return {"error": "charger_not_connected", "charger": charger}
 
     timing, seconds, timing_error = _control_timing(request)
-    if command in {"start", "stop", "reboot"}:
+    if command in {"start", "stop", "reset"}:
         if timing_error is not None:
             return timing_error
         assert timing is not None
@@ -269,7 +269,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             if not _non_negative_int(transaction):
                 return {"error": "invalid_transaction"}
             response = await session.remote_stop(transaction)
-        elif command == "reboot":
+        elif command == "reset":
             reset_type = request.get("type", "Soft")
             if reset_type not in {"Soft", "Hard"}:
                 return {"error": "invalid_reset_type"}

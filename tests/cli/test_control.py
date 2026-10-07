@@ -40,11 +40,11 @@ def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
     assert control_request(parse_cli("stop", "--charger", "charger-a", "--txn", "42", "--now")) == expected
 
 
-def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
-    assert control_request(parse_cli("reboot", "--now")) == {"command": "reboot", "timing": "now", "type": "Soft"}
-    assert control_request(parse_cli("reboot", "--hard", "--now")) == {"command": "reboot", "timing": "now", "type": "Hard"}
-    assert control_request(parse_cli("reboot", "--charger", "charger-a", "--now")) == {
-        "command": "reboot",
+def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
+    assert control_request(parse_cli("reset", "--now")) == {"command": "reset", "timing": "now", "type": "Soft"}
+    assert control_request(parse_cli("reset", "--hard", "--now")) == {"command": "reset", "timing": "now", "type": "Hard"}
+    assert control_request(parse_cli("reset", "--charger", "charger-a", "--now")) == {
+        "command": "reset",
         "timing": "now",
         "charger": "charger-a",
         "type": "Soft",
@@ -53,7 +53,7 @@ def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
 
 def test_control_rejects_two_charger_selectors(parse_cli):
     with pytest.raises(ValueError):
-        control_request(parse_cli("reboot", "charger-a", "--charger", "charger-b", "--now"))
+        control_request(parse_cli("reset", "charger-a", "--charger", "charger-b", "--now"))
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -69,17 +69,17 @@ def install_control_response(monkeypatch, response=None, exc=None):
 @pytest.mark.parametrize(("status", "expected_code"), [("Accepted", 0), ("Rejected", 1)])
 def test_command_status_controls_exit_code(monkeypatch, parse_cli, status, expected_code):
     install_control_response(monkeypatch, {"ok": True, "response": {"status": status}})
-    assert run_control(parse_cli("reboot", "--now")) == expected_code
+    assert run_control(parse_cli("reset", "--now")) == expected_code
 
 
 def test_control_error_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"error": "charger_required", "chargers": ["charger-a", "charger-b"]})
-    assert run_control(parse_cli("reboot", "--now")) == 1
+    assert run_control(parse_cli("reset", "--now")) == 1
 
 
 def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
-    assert run_control(parse_cli("reboot", "--now")) == 1
+    assert run_control(parse_cli("reset", "--now")) == 1
 
 
 @pytest.mark.parametrize(
@@ -100,21 +100,21 @@ def test_control_commands_require_exactly_one_timing_mode(cli_parser):
     for args in (
         ["start", "--id-tag", "REMOTE"],
         ["stop", "--transaction", "42"],
-        ["reboot"],
+        ["reset"],
     ):
         with pytest.raises(SystemExit):
             cli_parser.parse_args(args)
 
     with pytest.raises(SystemExit):
-        cli_parser.parse_args(["reboot", "--now", "--after", "5"])
+        cli_parser.parse_args(["reset", "--now", "--after", "5"])
 
 
 @pytest.mark.parametrize(
     ("args", "timing"),
     [
-        (("reboot", "--now"), {"timing": "now"}),
-        (("reboot", "--after", "5"), {"timing": "after", "seconds": 5}),
-        (("reboot", "--within", "30"), {"timing": "within", "seconds": 30}),
+        (("reset", "--now"), {"timing": "now"}),
+        (("reset", "--after", "5"), {"timing": "after", "seconds": 5}),
+        (("reset", "--within", "30"), {"timing": "within", "seconds": 30}),
     ],
 )
 def test_timing_mode_is_sent_to_control_server(parse_cli, args, timing):
@@ -125,10 +125,10 @@ def test_timing_mode_is_sent_to_control_server(parse_cli, args, timing):
 @pytest.mark.parametrize(
     "args",
     [
-        ("reboot", "--after", "0"),
-        ("reboot", "--within", "0"),
-        ("reboot", "--after", "-1"),
-        ("reboot", "--within", "-1"),
+        ("reset", "--after", "0"),
+        ("reset", "--within", "0"),
+        ("reset", "--after", "-1"),
+        ("reset", "--within", "-1"),
     ],
 )
 def test_delayed_timing_requires_positive_seconds(parse_cli, args):
