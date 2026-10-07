@@ -62,16 +62,24 @@ jobs:
         run: echo "Only documentation files changed; full CI is not required."
 
   test:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.platform }} / ${{ matrix.suite }}
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04-arm
     strategy:
+      fail-fast: false
       matrix:
+        platform:
+          - Debian 12 / Python 3.11
+          - Debian 13 / Python 3.13
+        suite:
+          - CSMS tests
+          - Discover tests
+          - Ansible tests
         include:
-          - name: Debian 12 / Python 3.11
+          - platform: Debian 12 / Python 3.11
             image: python:3.11-bookworm
-          - name: Debian 13 / Python 3.13
+          - platform: Debian 13 / Python 3.13
             image: python:3.13-trixie
     container:
       image: ${{ matrix.image }}
@@ -83,28 +91,75 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
-      - name: Install Ansible validation tools
-        run: python -m pip install ansible-core ansible-lint
-
-      - name: Appliance script syntax
-        run: sh -n deploy.sh
-
       - name: Installed command smoke
+        if: matrix.suite == 'CSMS tests'
         run: |
           ocpp-csms --help >/dev/null
           ocpp-discover --help >/dev/null
 
+      - name: Appliance script syntax
+        if: matrix.suite == 'Ansible tests'
+        run: sh -n deploy.sh
+
+      - name: Install Ansible validation tools
+        if: matrix.suite == 'Ansible tests'
+        run: python -m pip install ansible-core ansible-lint
+
       - name: Ansible syntax check
+        if: matrix.suite == 'Ansible tests'
         run: ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
 
       - name: Ansible lint
+        if: matrix.suite == 'Ansible tests'
         run: ansible-lint --profile basic ansible/
 
       - name: Ansible contract tests
+        if: matrix.suite == 'Ansible tests'
         run: python -m pytest tests/ansible
 
       - name: CSMS tests
-        run: python -m pytest tests --ignore=tests/ocpp_discover --ignore=tests/ansible
+        if: matrix.suite == 'CSMS tests'
+        run: python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
 
       - name: Discover tests
+        if: matrix.suite == 'Discover tests'
         run: python -m pytest tests/ocpp_discover
+
+
+  ci:
+    name: CI
+    needs:
+      - changes
+      - docs
+      - test
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require successful CI
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Change-scope validation did not succeed: $CHANGES_RESULT"
+            exit 1
+          fi
+
+          if [[ "$DOCS_ONLY" == "true" ]]; then
+            if [[ "$DOCS_RESULT" != "success" ]]; then
+              echo "Documentation validation did not succeed: $DOCS_RESULT"
+              exit 1
+            fi
+            exit 0
+          fi
+
+          if [[ "$TEST_RESULT" != "success" ]]; then
+            echo "Test matrix did not succeed: $TEST_RESULT"
+            exit 1
+          fi
