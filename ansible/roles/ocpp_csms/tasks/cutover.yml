@@ -22,7 +22,7 @@
   ansible.builtin.set_fact:
     ocpp_csms_activation_required: >-
       {{
-        (ocpp_csms_legacy_arthexis_service | length > 0)
+        (ocpp_csms_incumbent_service | length > 0)
         or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
         or (not (ocpp_csms_live_service_state.stat.exists | default(false)))
@@ -72,13 +72,13 @@
     - ocpp_csms_activation_required | bool
     - not (ocpp_csms_live_service_state.stat.exists | default(false))
 
-# Downtime starts here. A legacy Arthexis listener is stopped only after the
-# candidate, systemd unit, final safety gate and schema decision are ready.
+# Downtime starts here. An observed incumbent OCPP listener is stopped only after
+# the candidate, systemd unit, final safety gate and schema decision are ready.
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
-    - name: Stop legacy Arthexis listener at cutover
-      ansible.builtin.include_tasks: legacy_arthexis_stop.yml
+    - name: Stop incumbent OCPP service listener at cutover
+      ansible.builtin.include_tasks: incumbent_stop.yml
 
     - name: Stop existing OCPP CSMS service
       become: true
@@ -185,22 +185,22 @@
         state: link
         force: true
 
-    # A successful takeover must not allow the legacy listener to return on the
+    # A successful takeover must not allow the incumbent listener to return on the
     # next boot and race the new CSMS for the production port.
-    - name: Disable legacy Arthexis OCPP service after verified takeover
+    - name: Disable incumbent OCPP service after verified takeover
       become: true
       ansible.builtin.systemd_service:
-        name: "{{ ocpp_csms_legacy_arthexis_service }}"
+        name: "{{ ocpp_csms_incumbent_service }}"
         enabled: false
-      when: ocpp_csms_legacy_arthexis_service | length > 0
+      when: ocpp_csms_incumbent_service | length > 0
 
   rescue:
-    # Legacy takeover is independent of the new CSMS database. If it was the
+    # Incumbent takeover is independent of the new CSMS database. If it was the
     # production owner before cutover, restore it first even when this was the
     # first managed ocpp-csms release.
-    - name: Restore legacy Arthexis after failed takeover
-      ansible.builtin.include_tasks: legacy_arthexis_restore.yml
-      when: ocpp_csms_legacy_arthexis_service | length > 0
+    - name: Restore incumbent OCPP service after failed takeover
+      ansible.builtin.include_tasks: incumbent_restore.yml
+      when: ocpp_csms_incumbent_service | length > 0
 
     - name: Stop failed replacement before rollback
       become: true
@@ -209,7 +209,7 @@
         state: stopped
       failed_when: false
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
 
@@ -222,7 +222,7 @@
         mode: "0644"
       notify: Reload systemd daemon
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
@@ -230,7 +230,7 @@
     - name: Apply rollback systemd daemon reload
       ansible.builtin.meta: flush_handlers
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
 
@@ -241,7 +241,7 @@
         enabled: true
         state: started
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
@@ -253,17 +253,17 @@
         timeout: "{{ ocpp_csms_listener_timeout }}"
         state: started
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Report failed legacy Arthexis takeover after restoration
+    - name: Report failed incumbent OCPP service takeover after restoration
       ansible.builtin.fail:
         msg: >-
-          OCPP CSMS takeover failed and legacy Arthexis was restored:
+          OCPP CSMS takeover failed and incumbent OCPP service was restored:
           {{ ansible_failed_result.msg | default('verification failure') }}
-      when: ocpp_csms_legacy_arthexis_service | length > 0
+      when: ocpp_csms_incumbent_service | length > 0
 
     - name: Report handoff failure after safe rollback
       ansible.builtin.fail:
@@ -271,7 +271,7 @@
           OCPP CSMS handoff verification failed and the previous release was restored:
           {{ ansible_failed_result.msg | default('verification failure') }}
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
@@ -282,7 +282,7 @@
           OCPP CSMS handoff verification failed without a restorable previous managed release:
           {{ ansible_failed_result.msg | default('verification failure') }}
       when:
-        - ocpp_csms_legacy_arthexis_service | length == 0
+        - ocpp_csms_incumbent_service | length == 0
         - >-
           (ocpp_csms_schema_action == 'upgrade')
           or not (ocpp_csms_current_state.stat.islnk | default(false))
