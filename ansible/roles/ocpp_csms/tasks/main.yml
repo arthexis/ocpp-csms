@@ -177,19 +177,39 @@
     mode: "0755"
   when: not ocpp_csms_release_ready.stat.exists
 
-- name: Build immutable release wheels
+- name: Download immutable release dependency wheels
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - pip
+      - download
+      - --only-binary=:all:
+      - --dest
+      - "{{ ocpp_csms_release_wheelhouse }}"
+      - "hatchling"
+      - "ocpp>=0.26,<1"
+      - "websockets>=12,<14"
+  environment:
+    PIP_DEFAULT_TIMEOUT: "15"
+    PIP_RETRIES: "1"
+  changed_when: true
+  when: not ocpp_csms_release_ready.stat.exists
+
+- name: Build OCPP CSMS application wheel
   ansible.builtin.command:
     argv:
       - "{{ ocpp_csms_release_venv }}/bin/python"
       - -m
       - pip
       - wheel
+      - --no-deps
       - --wheel-dir
       - "{{ ocpp_csms_release_wheelhouse }}"
       - "{{ ocpp_csms_install_source }}"
   environment:
-    PIP_DEFAULT_TIMEOUT: "60"
-    PIP_RETRIES: "2"
+    PIP_NO_INDEX: "1"
+    PIP_FIND_LINKS: "{{ ocpp_csms_release_wheelhouse }}"
   changed_when: true
   when: not ocpp_csms_release_ready.stat.exists
 
