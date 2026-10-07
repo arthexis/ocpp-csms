@@ -104,6 +104,7 @@
     name: "{{ ocpp_discover_packages }}"
     state: present
     update_cache: true
+  when: (ocpp_csms_install_mode | default('online')) == 'online'
 
 - name: Ensure OCPP Discover persistent state directory exists
   become: true
