@@ -134,3 +134,8 @@ def test_timing_mode_is_sent_to_control_server(parse_cli, args, timing):
 def test_delayed_timing_requires_positive_seconds(parse_cli, args):
     with pytest.raises(ValueError, match="greater than zero"):
         run_control(parse_cli(*args))
+
+
+def test_remote_start_rejects_cp_as_connector_alias(cli_parser):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["start", "--cp", "2", "--id-tag", "REMOTE", "--now"])
