@@ -1,0 +1,113 @@
+---
+- name: Prepare offline OCPP CSMS release bundle
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    ocpp_csms_bundle_output_dir: "{{ playbook_dir }}/../../dist"
+
+  tasks:
+    - name: Require ARM64 bundle preparation host
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.os_family == 'Debian'
+          - ansible_facts.architecture in ['aarch64', 'arm64']
+        fail_msg: >-
+          Prepare appliance bundles on a Debian ARM64 host so binary wheels
+          match the target satellites.
+
+    - name: Resolve bundle release revision
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ playbook_dir }}/../.."
+          - rev-parse
+          - --short=12
+          - HEAD
+      register: ocpp_csms_bundle_revision
+      changed_when: false
+
+    - name: Capture bundle paths
+      ansible.builtin.set_fact:
+        ocpp_csms_bundle_dir: >-
+          {{ ocpp_csms_bundle_output_dir }}/ocpp-csms-{{ ocpp_csms_bundle_revision.stdout }}
+        ocpp_csms_bundle_wheels_dir: >-
+          {{ ocpp_csms_bundle_output_dir }}/ocpp-csms-{{ ocpp_csms_bundle_revision.stdout }}/wheels
+        ocpp_csms_bundle_source_dir: >-
+          {{ ocpp_csms_bundle_output_dir }}/ocpp-csms-{{ ocpp_csms_bundle_revision.stdout }}/source
+
+    - name: Reset bundle output directory
+      ansible.builtin.file:
+        path: "{{ ocpp_csms_bundle_dir }}"
+        state: absent
+
+    - name: Create bundle directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ ocpp_csms_bundle_dir }}"
+        - "{{ ocpp_csms_bundle_wheels_dir }}"
+        - "{{ ocpp_csms_bundle_source_dir }}"
+
+    - name: Copy bundle package metadata
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "{{ ocpp_csms_bundle_source_dir }}/{{ item }}"
+        mode: "0644"
+      loop:
+        - pyproject.toml
+        - README.md
+
+    - name: Copy bundle Python source
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../src/"
+        dest: "{{ ocpp_csms_bundle_source_dir }}/src/"
+        mode: preserve
+
+    - name: Download bundle runtime dependency wheels
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - pip
+          - download
+          - "--only-binary=:all:"
+          - --dest
+          - "{{ ocpp_csms_bundle_wheels_dir }}"
+          - "ocpp>=0.26,<1"
+          - "websockets>=12,<14"
+      changed_when: true
+
+    - name: Build bundle OCPP CSMS application wheel
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - pip
+          - wheel
+          - --no-deps
+          - --wheel-dir
+          - "{{ ocpp_csms_bundle_wheels_dir }}"
+          - "{{ playbook_dir }}/../.."
+      changed_when: true
+
+    - name: Write bundle manifest
+      ansible.builtin.copy:
+        dest: "{{ ocpp_csms_bundle_dir }}/manifest.yml"
+        mode: "0644"
+        content: |
+          release: "{{ ocpp_csms_bundle_revision.stdout }}"
+          architecture: "{{ ansible_facts.architecture }}"
+          python: "{{ ansible_facts.python.version.major }}.{{ ansible_facts.python.version.minor }}"
+          os_family: "{{ ansible_facts.os_family }}"
+
+    - name: Report prepared offline bundle
+      ansible.builtin.debug:
+        msg:
+          bundle: "{{ ocpp_csms_bundle_dir }}"
+          release: "{{ ocpp_csms_bundle_revision.stdout }}"
+          architecture: "{{ ansible_facts.architecture }}"
+          python: "{{ ansible_facts.python.version.major }}.{{ ansible_facts.python.version.minor }}"
