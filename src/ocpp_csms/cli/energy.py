@@ -11,7 +11,7 @@ from ocpp_csms.output import emit_json
 def add_energy_command(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
     energy = subcommands.add_parser("energy", help="Show normalized charger energy telemetry")
     energy.add_argument("--charger", help="Filter by charge point ID")
-    energy.add_argument("--connector", "--cp", dest="connector", type=int, help="Filter by connector ID")
+    energy.add_argument("--connector", "--c", dest="connector", type=int, help="Filter by connector ID")
     energy.add_argument("--since", help="ISO-8601 lower sample timestamp bound")
     energy.add_argument("--until", help="ISO-8601 upper sample timestamp bound")
     energy.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable energy contract")
@@ -20,7 +20,7 @@ def add_energy_command(subcommands: argparse._SubParsersAction[argparse.Argument
 
 def run_energy(args: argparse.Namespace) -> int:
     if args.connector is not None and args.connector < 0:
-        raise ValueError("--connector/--cp must be zero or greater")
+        raise ValueError("--connector/--c must be zero or greater")
     query = EnergyQuery(args.data_dir)
     try:
         samples = query.samples(charger=args.charger, connector=args.connector, since=args.since, until=args.until)
