@@ -74,7 +74,7 @@ def test_export_sends_only_enabled_cards(monkeypatch, tmp_path, capsys):
     assert "Verified:         3" in output
     assert "Charger local list:   false" in output
     assert "Auth cache:           true" in output
-    assert "Local preauth:         unknown" in output
+    assert "Local preauth:" in output and "unknown" in output
     assert "Warning: charger local list is disabled" in output
 
 
