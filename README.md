@@ -202,6 +202,8 @@ Remote start, stop, and reboot commands require one timing mode:
 
 Start and reboot are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
 
+The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored at `2008-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks.
+
 Smart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
 
 ## Data and evidence
