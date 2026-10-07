@@ -9,6 +9,7 @@ from ocpp.v16 import ChargePoint as OcppChargePoint
 from ocpp.v16 import call, call_result
 
 from ocpp_csms.events import EventStore
+from ocpp_csms.rfid_authorization import load_rfid_authorization
 from ocpp_csms.time import utc_now_iso
 from ocpp_csms.transactions import TransactionArchive
 
@@ -210,6 +211,16 @@ class ChargePointSession(OcppChargePoint):
         except Exception:
             LOGGER.exception("frame %s", self.connection.last_frame)
 
+    def _rfid_status(self, id_tag: str) -> str:
+        policy = load_rfid_authorization(self.transactions.data_dir)
+        if not policy.valid:
+            LOGGER.error(
+                "RFID authorization file %s is invalid: %s",
+                policy.source,
+                policy.error,
+            )
+        return policy.status(id_tag)
+
     async def _handle_call(self, msg: Call):
         response = await super()._handle_call(msg)
         if response is None:
@@ -243,7 +254,8 @@ class ChargePointSession(OcppChargePoint):
     @on("Authorize")
     async def on_authorize(self, **payload: Any) -> call_result.AuthorizePayload:
         self._record("Authorize", payload)
-        return call_result.AuthorizePayload(id_tag_info={"status": "Accepted"})
+        status = self._rfid_status(str(payload.get("id_tag", "")))
+        return call_result.AuthorizePayload(id_tag_info={"status": status})
 
     @on("StatusNotification")
     async def on_status_notification(self, **payload: Any) -> call_result.StatusNotificationPayload:
@@ -262,6 +274,14 @@ class ChargePointSession(OcppChargePoint):
 
     @on("StartTransaction")
     async def on_start_transaction(self, **payload: Any) -> call_result.StartTransactionPayload:
+        authorization = self._rfid_status(str(payload.get("id_tag", "")))
+        if authorization != "Accepted":
+            self._record("StartTransaction", payload, transaction_id=0)
+            return call_result.StartTransactionPayload(
+                transaction_id=0,
+                id_tag_info={"status": authorization},
+            )
+
         transaction_id = None
         try:
             transaction_id = self.events.find_recent_start(self.id, payload)
