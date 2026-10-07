@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime
 
 from ocpp_csms.control import send_control
 from ocpp_csms.output import emit_json
@@ -36,6 +37,7 @@ def add_profile_command(
     add(profile_composite, "--connector", "--c", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
     add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
     add(profile_composite, "-j", "--json", action="store_true", help="Print the OCPP response as JSON")
+    add(profile_composite, "-T", "--local-time", action="store_true", help="Display schedule timestamps in the CSMS host local timezone")
     profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
     add(profile_clear, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
@@ -89,12 +91,26 @@ def _schedule_value(mapping: dict[str, object], snake: str, camel: str) -> objec
     return mapping.get(snake, mapping.get(camel))
 
 
-def _format_single_composite_schedule(payload: dict[str, object]) -> str:
+def _local_timestamp(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        return value
+    return parsed.astimezone().isoformat(timespec="seconds")
+
+
+def _format_single_composite_schedule(payload: dict[str, object], *, local_time: bool = False) -> str:
     status = payload.get("status")
     if status != "Accepted":
         return str(status or "Unknown")
     connector = payload.get("connector_id", payload.get("connectorId"))
     start = payload.get("schedule_start", payload.get("scheduleStart"))
+    if local_time:
+        start = _local_timestamp(start)
     schedule = payload.get("charging_schedule", payload.get("chargingSchedule"))
     if not isinstance(schedule, dict):
         raise ValueError("invalid composite schedule response")
@@ -116,9 +132,9 @@ def _format_single_composite_schedule(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _format_composite_schedule(payload: dict[str, object]) -> str:
+def _format_composite_schedule(payload: dict[str, object], *, local_time: bool = False) -> str:
     if payload.get("compatibility_fallback") != "physical_connectors":
-        return _format_single_composite_schedule(payload)
+        return _format_single_composite_schedule(payload, local_time=local_time)
     schedules = payload.get("schedules")
     if not isinstance(schedules, list):
         raise ValueError("invalid composite schedule fallback response")
@@ -130,7 +146,7 @@ def _format_composite_schedule(payload: dict[str, object]) -> str:
         response = item.get("response")
         if not isinstance(response, dict):
             raise ValueError("invalid composite schedule fallback response")
-        lines.extend(["", f"Connector {connector_id}", _format_single_composite_schedule(response)])
+        lines.extend(["", f"Connector {connector_id}", _format_single_composite_schedule(response, local_time=local_time)])
     return "\n".join(lines)
 
 
@@ -191,7 +207,7 @@ def run_profile(args: argparse.Namespace) -> int:
             emit_json(payload)
         else:
             try:
-                print(_format_composite_schedule(payload))
+                print(_format_composite_schedule(payload, local_time=args.local_time))
             except ValueError as exc:
                 print(f"error: {exc}")
                 return 1
