@@ -7,6 +7,7 @@ from collections import defaultdict
 
 from ocpp_csms.control import send_control
 from ocpp_csms.rfid_authorization import load_rfid_authorization
+from ocpp_csms.rfid_cache import RFIDCacheState, resolve_rfid_cache_sync
 from ocpp_csms.transaction_cli import format_transactions, transaction_energy_wh
 from ocpp_csms.transaction_query import TransactionQuery, TransactionView
 
@@ -55,6 +56,20 @@ def _energy_summary(views: list[TransactionView], *, compact: bool = False) -> s
     return total
 
 
+def _entry_value(entry: object | None) -> str:
+    if entry is None:
+        return "missing"
+    return "true" if bool(getattr(entry, "enabled", False)) else "false"
+
+
+def _cache_entries(cache: RFIDCacheState | None) -> dict[str, object] | None:
+    if cache is None or not cache.has_history:
+        return None
+    if not cache.known or cache.snapshot is None:
+        return {}
+    return {entry.rfid: entry for entry in cache.snapshot.entries}
+
+
 def _summary_table(data_dir: str) -> str:
     views = TransactionQuery(data_dir).list()
     grouped: dict[str, list[TransactionView]] = defaultdict(list)
@@ -66,25 +81,56 @@ def _summary_table(data_dir: str) -> str:
         return "No RFID transactions."
 
     policy = load_rfid_authorization(data_dir)
-    show_authorization = policy.source is not None
+    cache = resolve_rfid_cache_sync(data_dir)
+    cache_entries = _cache_entries(cache)
+
+    file_configured = policy.source is not None
+    cache_available = cache_entries is not None
+    show_allow = file_configured or cache_available
+    show_cache = file_configured and cache_available
+    show_name = show_allow
 
     headers = ["RFID", "TXNS", "ENERGY"]
-    if show_authorization:
-        headers.extend(("ALLOW", "NAME"))
+    if show_allow:
+        headers.append("ALLOW")
+    if show_cache:
+        headers.append("CACHE")
+    if show_name:
+        headers.append("NAME")
 
     rows: list[tuple[str, ...]] = []
     for tag in sorted(grouped):
         tag_views = grouped[tag]
         values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True)]
-        if show_authorization:
-            entry = policy.entries.get(tag) if policy.valid else None
-            if not policy.valid:
-                allow = "false"
-            elif entry is None:
-                allow = "missing"
+
+        file_entry = policy.entries.get(tag) if policy.valid else None
+        cache_entry = cache_entries.get(tag) if cache_entries else None
+        cache_unknown = cache_available and cache is not None and not cache.known
+
+        if show_allow:
+            if file_configured:
+                if not policy.valid:
+                    allow = "false"
+                else:
+                    allow = _entry_value(file_entry)
+            elif cache_unknown:
+                allow = "unknown"
             else:
-                allow = "true" if entry.enabled else "false"
-            values.extend((allow, entry.name if entry and entry.name else "-"))
+                allow = _entry_value(cache_entry)
+            values.append(allow)
+
+        if show_cache:
+            values.append("unknown" if cache_unknown else _entry_value(cache_entry))
+
+        if show_name:
+            if file_configured:
+                name = file_entry.name if file_entry and file_entry.name else "-"
+            elif cache_unknown:
+                name = "-"
+            else:
+                name = getattr(cache_entry, "name", None) or "-"
+            values.append(str(name))
+
         rows.append(tuple(values))
 
     widths = [
