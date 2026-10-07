@@ -152,11 +152,56 @@ iproute2
 The CSMS is permissive by default:
 
 - unknown charge-point identities are accepted;
-- RFID authorization is accepted by default;
+- RFID authorization is accepted by default when no `rfid.csv` authorization file is present;
 - a charger is not rejected solely for an unexpected/missing `ocpp1.6` subprotocol negotiation;
 - anomalies are recorded as evidence instead of automatically blocking charging.
 
 The design principle is: **observe aggressively; block reluctantly.**
+
+### RFID authorization file
+
+RFID authorization is optional and file-backed. With no
+`<data-dir>/rfid.csv`, every RFID remains accepted. When the file exists it
+becomes the allow list and is re-read for every authorization decision, so
+editing it does not require restarting the service.
+
+The smallest valid file is one RFID per line:
+
+```text
+CARD-A
+CARD-B
+```
+
+An optional header makes richer CSV files self-describing and allows columns to
+be reordered:
+
+```csv
+rfid,name,enabled
+CARD-A,Alice,true
+CARD-B,Former employee,false
+```
+
+Without a header, extended rows use the fixed order
+`rfid[,name[,enabled]]`. With a header, supported columns are `rfid`,
+`name`, and `enabled`; `rfid` is required. Blank lines and lines beginning
+with `#` are ignored. Duplicate RFIDs or malformed values make the file
+invalid.
+
+When `rfid.csv` is present, an enabled listed RFID is `Accepted`, an
+unlisted RFID is `Invalid`, and a listed disabled RFID is `Blocked`. An
+invalid authorization file fails closed as `Blocked`. The same policy is
+applied to both OCPP `Authorize` and `StartTransaction`.
+
+Human-readable `ocpp-csms status` reports one of:
+
+```text
+RFID authorization: Allow All
+RFID authorization: rfid.csv (27 cards)
+RFID authorization: rfid.csv (invalid)
+```
+
+Machine-readable status uses `null` when no RFID authorization file is
+configured and a structured object when one is present.
 
 The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
 
