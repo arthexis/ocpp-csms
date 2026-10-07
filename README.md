@@ -165,7 +165,7 @@ ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duratio
 ocpp-csms profile clear ...
 ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
-ocpp-csms reboot CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
+ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
@@ -197,14 +197,14 @@ ocpp-csms config download CHARGER --force
 
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
 
-Remote start, stop, and reboot commands require one timing mode:
+Remote start, stop, and reset commands require one timing mode:
 
 - `--now` attempts the command immediately.
 - `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
-- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reboot, it waits up to that many seconds for charging to stop before proceeding.
+- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reset, it waits up to that many seconds for charging to stop before proceeding.
 - Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
 
-Start and reboot are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
+Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
 
 The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored by default at `2000-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks. Use `--start` with an ISO-8601 date-time including timezone to override that anchor; explicit values are normalized to UTC before being sent.
 

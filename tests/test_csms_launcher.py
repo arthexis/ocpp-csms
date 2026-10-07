@@ -29,7 +29,7 @@ class _LauncherSession:
         self.calls: list[tuple[str, str]] = []
 
     async def reset(self, reset_type="Soft"):
-        self.calls.append(("reboot", reset_type))
+        self.calls.append(("reset", reset_type))
         return SimpleNamespace(status="Accepted")
 
 
@@ -85,7 +85,7 @@ async def test_launcher_reaches_connected_charger_control_session(tmp_path):
             str(LAUNCHER),
             "--data-dir",
             str(tmp_path),
-            "reboot",
+            "reset",
             "charger-a",
             "--now",
             cwd=str(tmp_path),
@@ -97,7 +97,7 @@ async def test_launcher_reaches_connected_charger_control_session(tmp_path):
 
     assert process.returncode == 0, stderr.decode()
     assert stdout.decode().strip() == "Accepted"
-    assert session.calls == [("reboot", "Soft")]
+    assert session.calls == [("reset", "Soft")]
 
 
 def test_launcher_preserves_underlying_exit_code(tmp_path):

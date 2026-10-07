@@ -10,7 +10,7 @@ from ocpp_csms.cli import build_parser
         (["serve"], "serve"),
         (["start", "--id-tag", "REMOTE", "--now"], "start"),
         (["stop", "--transaction", "1", "--now"], "stop"),
-        (["reboot", "--now"], "reboot"),
+        (["reset", "--now"], "reset"),
         (["config"], "config"),
         (["profile", "templates"], "profile"),
         (["status"], "status"),

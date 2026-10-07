@@ -6,7 +6,7 @@ import asyncio
 from ocpp_csms.control import send_control
 
 
-CONTROL_COMMANDS = ("start", "stop", "reboot")
+CONTROL_COMMANDS = ("start", "stop", "reset")
 
 
 def add_control_commands(
@@ -28,13 +28,13 @@ def add_control_commands(
     add(stop, "-t", "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
     _add_timing_options(stop)
 
-    reboot = subcommands.add_parser("reboot", help="Request charger reset")
-    add(reboot, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(reboot, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(reboot, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
-    _add_timing_options(reboot)
+    reset = subcommands.add_parser("reset", help="Request charger reset")
+    add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
+    add(reset, "-c", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
+    _add_timing_options(reset)
 
-    return {"start": start, "stop": stop, "reboot": reboot}
+    return {"start": start, "stop": stop, "reset": reset}
 
 
 def _add_timing_options(parser: argparse.ArgumentParser) -> None:
@@ -76,7 +76,7 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
             request["connector"] = args.connector
     elif args.command == "stop":
         request["transaction"] = args.transaction
-    elif args.command == "reboot":
+    elif args.command == "reset":
         request["type"] = "Hard" if args.hard else "Soft"
     return request
 
