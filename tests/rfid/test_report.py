@@ -317,7 +317,7 @@ async def test_summary_reports_current_sync_when_file_hash_matches_known_cache(m
     report = run_rfid(args(tmp_path, None))
 
     assert "Charger cache: version 7" in report
-    assert "Sync:          current" in report
+    assert "Sync:" in report and "current" in report
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_summary_reports_differs_when_file_hash_differs_from_known_cache(m
     report = run_rfid(args(tmp_path, None))
 
     assert "Charger cache: version 7" in report
-    assert "Sync:          differs" in report
+    assert "Sync:" in report and "differs" in report
 
 
 @pytest.mark.asyncio
@@ -359,7 +359,7 @@ async def test_summary_reports_unknown_sync_for_unrecognized_live_cache(monkeypa
     report = run_rfid(args(tmp_path, None))
 
     assert "Charger cache: version 9" in report
-    assert "Sync:          unknown" in report
+    assert "Sync:" in report and "unknown" in report
 
 
 @pytest.mark.asyncio

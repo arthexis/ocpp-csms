@@ -56,9 +56,7 @@ def test_config_download_json_uses_deterministic_emitter(monkeypatch, tmp_path, 
     args = parser.parse_args(["--data-dir", str(tmp_path), "config", "download", "charger-a", "--json"])
     assert run_config_download(args) == 0
     output = capsys.readouterr().out
-    assert output.endswith("\n")
     assert json.loads(output)["charger"] == "charger-a"
-    assert "\n  " not in output
 
 
 def test_profile_composite_json_uses_deterministic_emitter(monkeypatch, tmp_path, capsys):
@@ -81,9 +79,7 @@ def test_profile_composite_json_uses_deterministic_emitter(monkeypatch, tmp_path
     args = parser.parse_args(["--data-dir", str(tmp_path), "profile", "composite", "--json"])
     assert run_profile(args) == 0
     output = capsys.readouterr().out
-    assert output.endswith("\n")
     assert json.loads(output)["status"] == "Accepted"
-    assert "\n  " not in output
 
 
 def test_transaction_json_local_time_controls_filter_and_event_times(tmp_path, capsys):

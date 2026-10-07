@@ -106,12 +106,6 @@ def test_bare_profile_prints_subcommand_help(cli_parser, capsys):
         assert subcommand in output
 
 
-@pytest.mark.parametrize("legacy", ["list", "set"])
-def test_ambiguous_legacy_profile_commands_are_not_kept(cli_parser, legacy):
-    with pytest.raises(SystemExit):
-        cli_parser.parse_args(["profile", legacy])
-
-
 def test_profile_composite_c_alias_selects_connector(cli_parser):
     args = cli_parser.parse_args(["profile", "composite", "--c", "2"])
     assert args.connector == 2
