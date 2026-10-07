@@ -203,6 +203,16 @@ RFID authorization: rfid.csv (invalid)
 Machine-readable status uses `null` when no RFID authorization file is
 configured and a structured object when one is present.
 
+`ocpp-csms rfid report` summarizes every RFID observed in transaction history,
+including transaction count and total energy. If `rfid.csv` exists, the summary
+adds `ALLOW` and `NAME` columns after `ENERGY`; unlisted or disabled cards
+show `false`. Supplying a tag keeps the detailed per-RFID report:
+
+```bash
+ocpp-csms rfid report
+ocpp-csms rfid report CARD-A
+```
+
 The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
 
 The listener uses plain `ws://` and is intended for a trusted charger LAN or equivalent private boundary. Do not expose it directly to an untrusted/public network.
