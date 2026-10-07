@@ -124,3 +124,42 @@ jobs:
       - name: Discover tests
         if: matrix.suite == 'Discover tests'
         run: python -m pytest tests/ocpp_discover
+
+
+  ci:
+    name: CI
+    needs:
+      - changes
+      - docs
+      - test
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require successful CI
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Change-scope validation did not succeed: $CHANGES_RESULT"
+            exit 1
+          fi
+
+          if [[ "$DOCS_ONLY" == "true" ]]; then
+            if [[ "$DOCS_RESULT" != "success" ]]; then
+              echo "Documentation validation did not succeed: $DOCS_RESULT"
+              exit 1
+            fi
+            exit 0
+          fi
+
+          if [[ "$TEST_RESULT" != "success" ]]; then
+            echo "Test matrix did not succeed: $TEST_RESULT"
+            exit 1
+          fi
