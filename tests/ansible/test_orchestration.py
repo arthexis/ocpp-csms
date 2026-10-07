@@ -270,6 +270,7 @@ def test_release_install_phases_use_expected_packages_and_venv():
     }
     assert development["when"] == [
         "not ocpp_csms_release_ready.stat.exists",
+        "ocpp_csms_install_mode == 'online'",
         "ocpp_csms_dev | bool",
     ]
     assert application["ansible.builtin.pip"] == {
