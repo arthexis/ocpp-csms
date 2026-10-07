@@ -13,8 +13,8 @@ def test_transaction_aliases_normalize_to_transactions_command(parse_cli, name):
     assert args.active is True
 
 
-def test_cp_alias_matches_connector_filter(parse_cli):
-    assert parse_cli("txn", "--cp", "2").connector == 2
+def test_c_alias_matches_connector_filter(parse_cli):
+    assert parse_cli("txn", "--c", "2").connector == 2
     assert parse_cli("transactions", "--connector", "2").connector == 2
 
 
@@ -42,7 +42,7 @@ def test_invalid_limit_and_connector_are_rejected(parse_cli, tmp_path):
     with pytest.raises(ValueError):
         run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "--limit", "0"))
     with pytest.raises(ValueError):
-        run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "--cp", "-1"))
+        run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "--c", "-1"))
 
 
 @pytest.mark.parametrize(("value", "expected"), [("30S", 30), ("5m", 300), ("2H", 7200), ("7D", 604800), ("2w", 1209600)])
@@ -97,3 +97,8 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
     assert "EVENT TIME" in default_output
     assert "2020-01-01T00:10:00Z" in default_output
     assert "2026-10-06T12:10:00Z" in local_output
+
+
+def test_cp_is_not_a_connector_alias(cli_parser):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["txn", "--cp", "2"])
