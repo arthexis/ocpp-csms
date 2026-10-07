@@ -106,12 +106,10 @@ jobs:
 
 
   ansible:
-    name: Debian 12 / Python 3.11 / Ansible tests
+    name: Ansible tests
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04-arm
-    container:
-      image: python:3.11-bookworm
 
     steps:
       - name: Check out repository
