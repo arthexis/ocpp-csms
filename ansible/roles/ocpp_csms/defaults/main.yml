@@ -13,6 +13,11 @@ ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
 ocpp_csms_incumbent_observe_seconds: 15
 ocpp_csms_stage_only: false
 ocpp_csms_dev: false
+ocpp_csms_install_mode: online
+ocpp_csms_bundle_path: ""
+ocpp_csms_bundle_source_dir: "{{ ocpp_csms_bundle_path }}/source"
+ocpp_csms_bundle_wheels_dir: "{{ ocpp_csms_bundle_path }}/wheels"
+ocpp_csms_bundle_manifest_path: "{{ ocpp_csms_bundle_path }}/manifest.yml"
 
 # Source location on the Ansible controller. Local bootstrap installs directly
 # from this checkout; remote execution copies package inputs to the target.
