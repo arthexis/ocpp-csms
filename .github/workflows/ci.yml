@@ -130,7 +130,7 @@ jobs:
         run: ansible-lint --profile basic ansible/
 
       - name: Ansible contract tests
-        run: python -m pytest tests/ansible
+        run: PYTHONPATH=src python -m pytest tests/ansible
 
 
   ci:
