@@ -184,7 +184,7 @@
       - -m
       - pip
       - download
-      - --only-binary=:all:
+      - "--only-binary=:all:"
       - --dest
       - "{{ ocpp_csms_release_wheelhouse }}"
       - "hatchling"
