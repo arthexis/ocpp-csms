@@ -65,6 +65,7 @@ def test_profile_send_composite_clear_workflow(monkeypatch, capsys, watts):
     connector_id, profile = session.profile
     assert connector_id == 0
     assert profile["chargingProfilePurpose"] == "ChargePointMaxProfile"
+    assert profile["chargingSchedule"]["startSchedule"] == "2000-01-01T00:00:00Z"
     assert profile["chargingSchedule"]["chargingRateUnit"] == "W"
     assert profile["chargingSchedule"]["chargingSchedulePeriod"] == [{"startPeriod": 0, "limit": watts}]
 
