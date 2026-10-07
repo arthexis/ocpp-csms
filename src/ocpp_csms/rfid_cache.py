@@ -79,4 +79,10 @@ def resolve_rfid_cache_sync(
     *,
     charger: str | None = None,
 ) -> RFIDCacheState | None:
-    return asyncio.run(resolve_rfid_cache(data_dir, charger=charger))
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(resolve_rfid_cache(data_dir, charger=charger))
+    # The CLI is synchronous. Library callers already inside an event loop should
+    # use resolve_rfid_cache() directly instead of nesting asyncio.run().
+    return None
