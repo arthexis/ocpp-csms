@@ -16,7 +16,7 @@ def add_config_command(
 ) -> argparse.ArgumentParser:
     """Register the configuration command while preserving its existing syntax."""
     config = subcommands.add_parser("config", help="Read or change charger configuration")
-    config.add_argument("--cp", "--charger", help="Explicit charge point ID when more than one charger is connected")
+    config.add_argument("--cp", "--charger", dest="charger", help="Explicit charge point ID when more than one charger is connected")
     config.add_argument("items", nargs="*", metavar="KEY", help="Keys to read, or: set KEY VALUE")
     config.add_argument("-f", "--force", action="store_true", help="Operate even with an active transaction")
     add_config_download_arguments(config)
