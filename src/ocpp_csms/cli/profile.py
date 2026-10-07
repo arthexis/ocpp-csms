@@ -21,6 +21,7 @@ def add_profile_command(
 ) -> argparse.ArgumentParser:
     add = argparse.ArgumentParser.add_argument
     profile = subcommands.add_parser("profile", help="Inspect and apply Smart Charging profiles")
+    profile.set_defaults(profile_parser=profile)
     profile_subcommands = profile.add_subparsers(dest="profile_command")
     profile_subcommands.add_parser("list", help="List built-in profile templates")
     profile_help = profile_subcommands.add_parser("help", help="Explain a built-in profile template")
@@ -151,6 +152,9 @@ def _send_profile_request(args: argparse.Namespace, request: dict[str, object]) 
 
 
 def run_profile(args: argparse.Namespace) -> int:
+    if args.profile_command is None:
+        args.profile_parser.print_help()
+        return 0
     if args.profile_command == "list":
         print(format_profile_template_list())
         return 0
