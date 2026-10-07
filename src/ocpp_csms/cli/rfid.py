@@ -35,7 +35,7 @@ def add_rfid_command(
             nargs="?",
             help="Charge point ID (optional when exactly one charger is connected)",
         )
-        command.add_argument("--cp", dest="charger_option", help="Explicit charge point ID")
+        command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
 
     return rfid
 
