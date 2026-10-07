@@ -1,25 +1,6 @@
 from ocpp_csms.events import EventStore
 from ocpp_csms.rfid_list_query import RFIDListQuery
-
-
-def record(
-    store,
-    charger,
-    version,
-    *,
-    name=None,
-    rfid="CARD-A",
-    verified=None,
-    source="rfid.csv",
-):
-    return store.record_rfid_list(
-        charger,
-        list_version=version,
-        entries=[{"rfid": rfid, "name": name, "enabled": True}],
-        source_file=source,
-        list_hash=f"hash-{charger}-{version}-{rfid}",
-        verified_version=version if verified is None else verified,
-    )
+from tests.rfid.helpers import record_list
 
 
 def test_missing_database_has_no_rfid_history(tmp_path):
@@ -34,8 +15,8 @@ def test_missing_database_has_no_rfid_history(tmp_path):
 
 def test_query_lists_accepted_snapshots_with_entries(tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-a", 4, name="Alice")
-    record(store, "charger-b", 2, rfid="CARD-B", name="Bob")
+    record_list(store, "charger-a", 4, name="Alice")
+    record_list(store, "charger-b", 2, rfid="CARD-B", name="Bob")
 
     snapshots = RFIDListQuery(tmp_path).list()
 
@@ -52,9 +33,9 @@ def test_query_lists_accepted_snapshots_with_entries(tmp_path):
 
 def test_query_scopes_history_by_charger_and_version(tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-a", 3, rfid="OLD")
-    record(store, "charger-a", 4, rfid="CURRENT")
-    record(store, "charger-b", 4, rfid="OTHER")
+    record_list(store, "charger-a", 3, rfid="OLD")
+    record_list(store, "charger-a", 4, rfid="CURRENT")
+    record_list(store, "charger-b", 4, rfid="OTHER")
 
     query = RFIDListQuery(tmp_path)
 
@@ -70,8 +51,8 @@ def test_reused_version_returns_most_recent_snapshot(tmp_path, monkeypatch):
     store = EventStore(tmp_path)
     times = iter(("2026-10-07T01:00:00Z", "2026-10-07T02:00:00Z"))
     monkeypatch.setattr("ocpp_csms.events.utc_now_iso", lambda: next(times))
-    record(store, "charger-a", 0, rfid="FIRST", source=None)
-    record(store, "charger-a", 0, rfid="SECOND", source=None)
+    record_list(store, "charger-a", 0, rfid="FIRST", source=None)
+    record_list(store, "charger-a", 0, rfid="SECOND", source=None)
 
     snapshot = RFIDListQuery(tmp_path).version("charger-a", 0)
 
