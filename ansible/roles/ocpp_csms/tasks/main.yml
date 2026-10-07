@@ -50,7 +50,7 @@
   ansible.builtin.assert:
     that:
       - ocpp_csms_bundle_manifest.release | length > 0
-      - ocpp_csms_bundle_manifest.architecture in ['aarch64', 'arm64']
+      - ocpp_csms_bundle_manifest.architecture == ansible_facts.architecture
       - ocpp_csms_bundle_manifest.python == ansible_facts.python.version.major ~ '.' ~ ansible_facts.python.version.minor
     fail_msg: >-
       Offline release bundle metadata does not match this appliance.
@@ -139,6 +139,7 @@
       - tcpdump
     state: present
     update_cache: true
+  when: ocpp_csms_install_mode == 'online'
 
 - name: Create OCPP CSMS base directories
   ansible.builtin.file:
