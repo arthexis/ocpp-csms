@@ -150,23 +150,27 @@ Common operations include:
 ```text
 ocpp-csms status [CHARGER]
 ocpp-csms status --charging
-ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--cp N] [--events]
+ocpp-csms chargers [--charging] [--json]
+ocpp-csms cps ...
+ocpp-csms charger CHARGE_POINT [--json]
+ocpp-csms cp CHARGE_POINT [--json]
+ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
 ocpp-csms txn ...
 ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile list
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile set max-power --watts WATTS [--charger CHARGER]
-ocpp-csms profile composite [--charger CHARGER] [--connector N|--cp N] [--duration SECONDS] [--json]
+ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [--json]
 ocpp-csms profile clear ...
-ocpp-csms start CHARGER [--connector N|--cp N] --id-tag TAG
+ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG
 ocpp-csms stop CHARGER (--transaction ID|--txn ID)
 ocpp-csms reboot CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
-`--cp` aliases `--connector`; `--txn` aliases `--transaction`.
+`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `--c` aliases `--connector`; `--txn` aliases `--transaction`.
 
 ### Configuration snapshots
 

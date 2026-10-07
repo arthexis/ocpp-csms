@@ -14,7 +14,7 @@ def run_transactions_json(args: argparse.Namespace) -> int:
     if args.transaction_id is not None and args.transaction_id < 0:
         raise ValueError("transaction ID must be zero or greater")
     if args.connector is not None and args.connector < 0:
-        raise ValueError("--connector/--cp must be zero or greater")
+        raise ValueError("--connector/--c must be zero or greater")
     if args.limit < 1:
         raise ValueError("--limit must be at least 1")
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until, args.between, args.at, args.today))
