@@ -41,14 +41,14 @@ async def test_inference_follows_live_charger_after_hardware_handoff():
     # The first physical charger is connected, then removed. Its identity can
     # remain in historical evidence without remaining eligible for live control.
     registry.sessions["charger-a"] = charger_a
-    first = await dispatch_control(registry, {"command": "reboot"})
+    first = await dispatch_control(registry, {"command": "reboot", "timing": "now"})
     registry.historical_chargers.add("charger-a")
     del registry.sessions["charger-a"]
 
     # A different physical charger connects to the same CSMS under its own
     # charge-point ID. Omitted selection must now resolve to this live charger.
     registry.sessions["charger-b"] = charger_b
-    second = await dispatch_control(registry, {"command": "reboot"})
+    second = await dispatch_control(registry, {"command": "reboot", "timing": "now"})
 
     assert first["ok"] is True
     assert second["ok"] is True
