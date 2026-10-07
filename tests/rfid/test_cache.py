@@ -3,23 +3,13 @@ import pytest
 import ocpp_csms.rfid_cache as cache_module
 from ocpp_csms.events import EventStore
 from ocpp_csms.rfid_cache import resolve_rfid_cache
-
-
-def record(store, charger, version, rfid="CARD-A"):
-    store.record_rfid_list(
-        charger,
-        list_version=version,
-        entries=[{"rfid": rfid, "name": None, "enabled": True}],
-        source_file="rfid.csv",
-        list_hash=f"hash-{charger}-{version}-{rfid}",
-        verified_version=version,
-    )
+from tests.rfid.helpers import record_list
 
 
 @pytest.mark.asyncio
 async def test_resolve_cache_returns_known_snapshot_for_live_matching_version(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-a", 7, "CARD-A")
+    record_list(store, "charger-a", 7, "CARD-A")
 
     async def fake_send(data_dir, request):
         assert request == {"command": "rfid_version"}
@@ -45,7 +35,7 @@ async def test_resolve_cache_returns_known_snapshot_for_live_matching_version(mo
 @pytest.mark.asyncio
 async def test_resolve_cache_marks_unrecognized_live_version_unknown(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-a", 7)
+    record_list(store, "charger-a", 7)
 
     async def fake_send(data_dir, request):
         return {
@@ -109,7 +99,7 @@ async def test_resolve_cache_returns_none_without_usable_live_state(monkeypatch,
 @pytest.mark.asyncio
 async def test_resolve_cache_does_not_use_stale_history_when_charger_is_disconnected(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-a", 7)
+    record_list(store, "charger-a", 7)
 
     async def fake_send(data_dir, request):
         raise FileNotFoundError("control.sock")
@@ -122,7 +112,7 @@ async def test_resolve_cache_does_not_use_stale_history_when_charger_is_disconne
 @pytest.mark.asyncio
 async def test_resolve_cache_can_target_explicit_charger(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record(store, "charger-b", 4, "CARD-B")
+    record_list(store, "charger-b", 4, "CARD-B")
     requests = []
 
     async def fake_send(data_dir, request):
