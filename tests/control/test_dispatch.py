@@ -52,8 +52,15 @@ class Registry:
     def physical_connector_ids(self, charge_point_id):
         return []
 
+    def active_transactions(self, charge_point_id):
+        values = self.active.get(charge_point_id, [])
+        return [
+            value if isinstance(value, tuple) else (value, None)
+            for value in values
+        ]
+
     def active_transaction_ids(self, charge_point_id):
-        return list(self.active.get(charge_point_id, []))
+        return [transaction_id for transaction_id, _connector_id in self.active_transactions(charge_point_id)]
 
     def record_control_event(self, event, *, charger_id, details=None):
         self.events.append({"event": event, "charger_id": charger_id, "details": details or {}})
