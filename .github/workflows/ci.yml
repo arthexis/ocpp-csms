@@ -31,7 +31,7 @@ jobs:
         run: python -m pip install ansible-core ansible-lint
 
       - name: Appliance script syntax
-        run: sh -n install.sh ansible-deploy.sh
+        run: sh -n deploy.sh
 
       - name: Installed command smoke
         run: |
