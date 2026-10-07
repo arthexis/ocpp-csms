@@ -238,3 +238,25 @@ def test_deploy_wrapper_exposes_field_friendly_options():
     assert "ocpp_csms_stage_only=true" in wrapper
     assert "--diagnose" in wrapper
     assert "ansible/playbooks/diagnose.yml" in wrapper
+
+
+
+def test_immutable_release_installs_only_from_local_wheelhouse():
+    main = read(TASKS / "main.yml")
+    defaults = load_yaml(DEFAULTS)
+    assert defaults["ocpp_csms_release_wheelhouse"].endswith("/wheelhouse")
+    assert_task_order(
+        main,
+        "Create immutable release wheelhouse",
+        "Build immutable release wheels",
+        "Find built OCPP CSMS wheel",
+        "Validate built OCPP CSMS wheel",
+        "Install OCPP CSMS into immutable release",
+        "Verify immutable release command",
+    )
+    install = task_by_name(TASKS / "main.yml", "Install OCPP CSMS into immutable release")
+    assert install["ansible.builtin.pip"]["name"] == "{{ ocpp_csms_built_wheels.files[0].path }}"
+    assert install["ansible.builtin.pip"]["extra_args"] == (
+        "--no-index --find-links {{ ocpp_csms_release_wheelhouse }}"
+    )
+    assert "Ensure current pip in release virtual environment" not in main
