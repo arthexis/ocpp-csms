@@ -16,6 +16,8 @@ class Session(Protocol):
     async def reset(self, reset_type: str = "Soft") -> Any: ...
     async def get_configuration(self, keys: list[str] | None = None) -> Any: ...
     async def change_configuration(self, key: str, value: str) -> Any: ...
+    async def get_local_list_version(self) -> Any: ...
+    async def send_local_list(self, list_version: int, entries: list[dict[str, Any]]) -> Any: ...
     async def set_charging_profile(self, connector_id: int, profile: dict[str, Any]) -> Any: ...
     async def clear_charging_profile(
         self,
@@ -39,6 +41,17 @@ class SessionRegistry(Protocol):
     def physical_connector_ids(self, charge_point_id: str) -> list[int]: ...
     def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
     def record_control_event(self, event: str, *, charger_id: str, details: dict[str, Any] | None = None) -> None: ...
+    def latest_rfid_list_version(self, charger_id: str) -> int | None: ...
+    def record_rfid_list(
+        self,
+        charger_id: str,
+        *,
+        list_version: int,
+        entries: list[dict[str, Any]],
+        source_file: str | None,
+        list_hash: str,
+        verified_version: int | None,
+    ) -> int: ...
 
 
 def control_socket_path(data_dir: str | Path) -> Path:
@@ -171,6 +184,102 @@ async def _composite_schedule_response(
 _INVALID = object()
 
 
+def _rfid_entries(request: dict[str, Any]) -> list[dict[str, Any]] | object:
+    entries = request.get("entries")
+    if not isinstance(entries, list):
+        return _INVALID
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return _INVALID
+        rfid = entry.get("rfid")
+        name = entry.get("name")
+        enabled = entry.get("enabled", True)
+        if not isinstance(rfid, str) or not rfid or rfid in seen:
+            return _INVALID
+        if name is not None and not isinstance(name, str):
+            return _INVALID
+        if enabled is not True:
+            return _INVALID
+        seen.add(rfid)
+        normalized.append({"rfid": rfid, "name": name, "enabled": True})
+    return normalized
+
+
+def _list_version(response: Any) -> int:
+    payload = _response_payload(response)
+    value = payload.get("list_version")
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("charger returned an invalid local-list version")
+    return value
+
+
+async def _send_rfid_list(
+    registry: SessionRegistry,
+    session: Session,
+    charger: str,
+    *,
+    entries: list[dict[str, Any]],
+    source_file: str | None,
+    list_hash: str,
+    clear: bool,
+) -> dict[str, Any]:
+    current_response = await session.get_local_list_version()
+    current_version = _list_version(current_response)
+    recorded_version = registry.latest_rfid_list_version(charger)
+    if clear:
+        list_version = 0
+    else:
+        candidates = [0, current_version]
+        if recorded_version is not None:
+            candidates.append(recorded_version)
+        list_version = max(candidates) + 1
+
+    sent = await session.send_local_list(list_version, entries)
+    sent_payload = _response_payload(sent)
+    status = sent_payload.get("status")
+    result: dict[str, Any] = {
+        "status": status,
+        "charger": charger,
+        "previous_version": current_version,
+        "list_version": list_version,
+        "cards": len(entries),
+    }
+    if status != "Accepted":
+        return result
+
+    verified_version: int | None = None
+    verification_error: str | None = None
+    try:
+        verified_version = _list_version(await session.get_local_list_version())
+    except Exception as exc:
+        verification_error = str(exc)
+
+    try:
+        history_id = registry.record_rfid_list(
+            charger,
+            list_version=list_version,
+            entries=entries,
+            source_file=source_file,
+            list_hash=list_hash,
+            verified_version=verified_version,
+        )
+    except Exception as exc:
+        return {
+            "error": "accepted_not_recorded",
+            "detail": str(exc),
+            **result,
+            "verified_version": verified_version,
+        }
+
+    result["history_id"] = history_id
+    result["verified_version"] = verified_version
+    if verification_error is not None:
+        result["verification_error"] = verification_error
+    return result
+
+
 def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, dict[str, Any] | None]:
     timing = request.get("timing")
     seconds = request.get("seconds")
@@ -301,6 +410,39 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                     "readback": _response_payload(readback),
                 },
             }
+        elif command == "rfid_version":
+            response = await session.get_local_list_version()
+        elif command == "rfid_export":
+            entries = _rfid_entries(request)
+            if entries is _INVALID:
+                return {"error": "invalid_rfid_entries"}
+            source_file = request.get("source_file")
+            list_hash = request.get("list_hash")
+            if source_file is not None and (not isinstance(source_file, str) or not source_file):
+                return {"error": "invalid_source_file"}
+            if not isinstance(list_hash, str) or not list_hash:
+                return {"error": "invalid_list_hash"}
+            result = await _send_rfid_list(
+                registry,
+                session,
+                charger,
+                entries=entries,
+                source_file=source_file,
+                list_hash=list_hash,
+                clear=False,
+            )
+            return {"ok": True, "response": result} if "error" not in result else result
+        elif command == "rfid_clear":
+            result = await _send_rfid_list(
+                registry,
+                session,
+                charger,
+                entries=[],
+                source_file=None,
+                list_hash="empty",
+                clear=True,
+            )
+            return {"ok": True, "response": result} if "error" not in result else result
         elif command == "set_charging_profile":
             connector = request.get("connector")
             profile = request.get("profile")
