@@ -161,7 +161,7 @@ ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--charger CHARGER]
-ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [--json]
+ocpp-csms profile composite [--charger CHARGER] [--connector N|--c N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
 ocpp-csms start CHARGER [--connector N|--c N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
@@ -208,7 +208,7 @@ Start and reboot are rejected while the selected charger has an active transacti
 
 The built-in `max-power` template is an Absolute `ChargePointMaxProfile` anchored by default at `2000-01-01T00:00:00Z`. The deliberately old fixed start avoids making immediate station-wide limits depend on close agreement between charger and CSMS clocks. Use `--start` with an ISO-8601 date-time including timezone to override that anchor; explicit values are normalized to UTC before being sent.
 
-Smart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
+`profile composite -T` converts the returned `scheduleStart` to the CSMS host local timezone for human-readable output. JSON output remains unchanged and preserves the charger/OCPP timestamp exactly as returned.\n\nSmart Charging is intentionally stateless on the CSMS side. The charger owns installed profiles and effective schedules; upper layers own site/business policy.
 
 ## Data and evidence
 
