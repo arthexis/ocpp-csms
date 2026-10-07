@@ -9,7 +9,7 @@ from tests.rfid.helpers import record_list
 @pytest.mark.asyncio
 async def test_resolve_cache_returns_known_snapshot_for_live_matching_version(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record_list(store, "charger-a", 7, "CARD-A")
+    record_list(store, "charger-a", 7, rfid="CARD-A")
 
     async def fake_send(data_dir, request):
         assert request == {"command": "rfid_version"}
@@ -112,7 +112,7 @@ async def test_resolve_cache_does_not_use_stale_history_when_charger_is_disconne
 @pytest.mark.asyncio
 async def test_resolve_cache_can_target_explicit_charger(monkeypatch, tmp_path):
     store = EventStore(tmp_path)
-    record_list(store, "charger-b", 4, "CARD-B")
+    record_list(store, "charger-b", 4, rfid="CARD-B")
     requests = []
 
     async def fake_send(data_dir, request):
