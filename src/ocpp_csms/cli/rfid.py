@@ -60,8 +60,13 @@ def _summary_table(data_dir: str) -> str:
         values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True)]
         if show_authorization:
             entry = policy.entries.get(tag) if policy.valid else None
-            allowed = bool(entry and entry.enabled and policy.valid)
-            values.extend(("true" if allowed else "false", entry.name if entry and entry.name else "-"))
+            if not policy.valid:
+                allow = "false"
+            elif entry is None:
+                allow = "missing"
+            else:
+                allow = "true" if entry.enabled else "false"
+            values.extend((allow, entry.name if entry and entry.name else "-"))
         rows.append(tuple(values))
 
     widths = [
