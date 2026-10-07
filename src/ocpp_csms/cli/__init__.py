@@ -10,7 +10,7 @@ from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_comman
 from ocpp_csms.cli.energy import add_energy_command, run_energy
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.profile import add_profile_command, run_profile
-from ocpp_csms.cli.rfid import add_rfid_command, run_rfid
+from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions import default_data_dir
 
@@ -58,7 +58,9 @@ def main() -> int:
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
         if args.command == "rfid":
-            print(run_rfid(args)); return 0
+            if args.rfid_command == "report":
+                print(run_rfid(args)); return 0
+            return run_rfid_action(args)
         if args.command in DIAGNOSTIC_COMMANDS: return run_diagnostic(args)
         if args.command == "transactions":
             if args.json: return run_transactions_json(args)
@@ -68,4 +70,4 @@ def main() -> int:
     return 2
 
 
-__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_chargers", "run_diagnostic", "run_energy", "run_profile", "run_rfid", "run_transactions"]
+__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_chargers", "run_diagnostic", "run_energy", "run_profile", "run_rfid", "run_rfid_action", "run_transactions"]
