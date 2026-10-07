@@ -18,7 +18,7 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
         "connector": 2,
     }
     assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
-    assert control_request(parse_cli("start", "--charger", "charger-a", "--cp", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "--charger", "charger-a", "--c", "2", "--id-tag", "REMOTE")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
@@ -81,7 +81,7 @@ def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     "args",
     [
         ("start", "--connector", "-1", "--id-tag", "REMOTE"),
-        ("start", "--cp", "-1", "--id-tag", "REMOTE"),
+        ("start", "--c", "-1", "--id-tag", "REMOTE"),
         ("stop", "--transaction", "-1"),
         ("stop", "--txn", "-1"),
     ],
