@@ -144,7 +144,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
     assert "Alice" in rows["card-a"]
     assert "false" in rows["card-b"]
     assert "Former" in rows["card-b"]
-    assert "false" in rows["card-c"]
+    assert "missing" in rows["card-c"]
 
 
 @pytest.mark.asyncio
