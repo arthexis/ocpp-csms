@@ -378,3 +378,4 @@ async def test_control_timing_is_required_and_validated():
         registry,
         {"command": "reset", "charger": "charger-a", "timing": "after", "seconds": 0},
     ))["error"] == "invalid_timing_seconds"
+

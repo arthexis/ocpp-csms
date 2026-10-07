@@ -97,6 +97,41 @@ class ChargePointSession(OcppChargePoint):
         self._record("ChangeConfiguration", dict(response.__dict__), direction="in")
         return response
 
+    async def get_local_list_version(self) -> call_result.GetLocalListVersionPayload:
+        self._record("GetLocalListVersion", {}, direction="out")
+        response = await self.call(call.GetLocalListVersionPayload())
+        self._record("GetLocalListVersion", dict(response.__dict__), direction="in")
+        return response
+
+    async def send_local_list(
+        self,
+        list_version: int,
+        entries: list[dict[str, Any]],
+    ) -> call_result.SendLocalListPayload:
+        local_authorization_list = [
+            {
+                "id_tag": str(entry["rfid"]),
+                "id_tag_info": {"status": "Accepted"},
+            }
+            for entry in entries
+        ]
+        payload: dict[str, Any] = {
+            "list_version": list_version,
+            "update_type": "Full",
+        }
+        if local_authorization_list:
+            payload["local_authorization_list"] = local_authorization_list
+        self._record("SendLocalList", payload, direction="out")
+        response = await self.call(
+            call.SendLocalListPayload(
+                list_version=list_version,
+                update_type="Full",
+                local_authorization_list=local_authorization_list or None,
+            )
+        )
+        self._record("SendLocalList", dict(response.__dict__), direction="in")
+        return response
+
     async def set_charging_profile(
         self,
         connector_id: int,

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 _SCHEMA_1_SQL = """
 CREATE TABLE events (
@@ -79,8 +79,33 @@ SELECT
 FROM transactions;
 """
 
-CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL
-_SUPPORTED_UPGRADES = {1: 2}
+_SCHEMA_3_ADDITIONS_SQL = """
+CREATE TABLE IF NOT EXISTS rfid_lists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    charger_id TEXT NOT NULL,
+    list_version INTEGER NOT NULL,
+    sent_at TEXT NOT NULL,
+    source_file TEXT,
+    list_hash TEXT NOT NULL,
+    verified_version INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_rfid_lists_charger_sent
+    ON rfid_lists (charger_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_rfid_lists_charger_version
+    ON rfid_lists (charger_id, list_version);
+
+CREATE TABLE IF NOT EXISTS rfid_list_entries (
+    list_id INTEGER NOT NULL,
+    rfid TEXT NOT NULL,
+    name TEXT,
+    enabled INTEGER NOT NULL,
+    PRIMARY KEY (list_id, rfid),
+    FOREIGN KEY (list_id) REFERENCES rfid_lists(id) ON DELETE CASCADE
+);
+"""
+
+CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
+_SUPPORTED_UPGRADES = {1: 2, 2: 3}
 
 
 @dataclass(frozen=True)
@@ -134,12 +159,18 @@ def require_supported_schema(info: SchemaInfo) -> int:
 
 
 def can_upgrade_schema(info: SchemaInfo) -> bool:
-    """Return whether this exact historical schema has a defined upgrade path."""
-    return bool(
-        info.exists
-        and info.version is not None
-        and _SUPPORTED_UPGRADES.get(info.version) == CURRENT_SCHEMA_VERSION
-    )
+    """Return whether this historical schema has a complete upgrade path."""
+    if not info.exists or info.version is None:
+        return False
+    version = info.version
+    seen: set[int] = set()
+    while version < CURRENT_SCHEMA_VERSION and version not in seen:
+        seen.add(version)
+        next_version = _SUPPORTED_UPGRADES.get(version)
+        if next_version is None or next_version <= version:
+            return False
+        version = next_version
+    return version == CURRENT_SCHEMA_VERSION
 
 
 def schema_backup_path(info: SchemaInfo) -> Path:
@@ -182,6 +213,11 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
         with sqlite3.connect(info.path) as connection:
             if info.version == 1:
                 connection.executescript(_SCHEMA_2_ADDITIONS_SQL)
+                connection.execute("PRAGMA user_version = 2")
+                connection.commit()
+                info = SchemaInfo(path=info.path, exists=True, version=2)
+            if info.version == 2:
+                connection.executescript(_SCHEMA_3_ADDITIONS_SQL)
             connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.

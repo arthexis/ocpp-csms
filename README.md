@@ -204,15 +204,56 @@ Machine-readable status uses `null` when no RFID authorization file is
 configured and a structured object when one is present.
 
 `ocpp-csms rfid report` summarizes every RFID observed in transaction history,
-including transaction count and total energy. If `rfid.csv` exists, the summary
-adds `ALLOW` and `NAME` columns after `ENERGY`; listed disabled cards show
-`false`, while observed RFIDs missing from the file show `missing`. Supplying a
+including transaction count and total energy. The authorization columns adapt to
+the sources that are actually known at report time:
+
+- with `rfid.csv` only, `ALLOW` and `NAME` describe the current file;
+- with no `rfid.csv` but a connected charger whose current local-list version
+  matches accepted CSMS history, `ALLOW` and `NAME` describe that charger
+  cache;
+- with both a file and a known connected charger cache, `ALLOW` describes the
+  file and `CACHE` describes the charger;
+- an observed RFID absent from a known source shows `missing`; an unrecognized
+  live charger-list version shows `unknown` for `CACHE`;
+- when the charger is disconnected, or when the CSMS has never successfully sent
+  it a list, charger cache columns are omitted rather than inferred from stale
+  history.
+
+When a connected charger has accepted-list history, the report also shows
+`Charger cache: version N`. If `rfid.csv` is present, a `Sync:` line reports
+`current`, `differs`, or `unknown` by comparing the current enabled-card
+set with the stored snapshot for the charger's live list version. Supplying a
 tag keeps the detailed per-RFID report:
 
 ```bash
 ocpp-csms rfid report
 ocpp-csms rfid report CARD-A
 ```
+
+The same `rfid.csv` can be exported to a connected OCPP 1.6 charge point's
+Local Authorization List:
+
+```bash
+ocpp-csms rfid export [CHARGER]
+ocpp-csms rfid version [CHARGER]
+ocpp-csms rfid clear [CHARGER]
+```
+
+`export` sends only entries whose `enabled` value is true, using a Full
+`SendLocalList` update. The CSMS first reads `GetLocalListVersion`, chooses a
+new version that does not reuse any version previously accepted for that
+charger, sends the list, and then reads the charger version again for
+verification. `clear` sends an empty Full list at version 0 and verifies that
+the charger reports version 0. These operations require charger support for the
+optional OCPP 1.6 Local Authorization List Management feature.
+
+Accepted lists are stored in SQLite by charger and list version, together with
+the exact RFID/name snapshot that was sent, its hash, and the version reported
+by the charger after the update. Rejected or failed `SendLocalList` attempts
+are not stored in the RFID-list history; their OCPP request/response evidence
+remains in the normal event log. Standard OCPP 1.6 exposes the current list
+version but does not provide an operation to download the charger's list
+contents, so the CSMS keeps this accepted-list history itself.
 
 The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
 
@@ -235,6 +276,10 @@ ocpp-csms charger CHARGE_POINT [--json]
 ocpp-csms cp CHARGE_POINT [--json]
 ocpp-csms transactions [ID] [--active|--last] [--charger CHARGER] [--connector N|--c N] [--events]
 ocpp-csms txn ...
+ocpp-csms rfid report [RFID]
+ocpp-csms rfid export [CHARGER]
+ocpp-csms rfid version [CHARGER]
+ocpp-csms rfid clear [CHARGER]
 ocpp-csms config [KEY ...] [--charger CHARGER] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates

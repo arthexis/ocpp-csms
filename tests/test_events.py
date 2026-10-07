@@ -48,7 +48,7 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     )
     assert json.loads(event[4])["id_tag"] == "card-a"
     assert runtime == ("charger_connected", "charger-a")
-    assert version == 2
+    assert version == 3
 
 
 def test_event_store_does_not_wait_for_locked_database(tmp_path):
