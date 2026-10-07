@@ -5,8 +5,8 @@ import pytest
 from ocpp_csms.cli.profile import run_profile
 
 
-def test_profile_list_outputs_template_name_and_description(cli_parser, capsys):
-    args = cli_parser.parse_args(["profile", "list"])
+def test_profile_templates_outputs_template_name_and_description(cli_parser, capsys):
+    args = cli_parser.parse_args(["profile", "templates"])
     assert run_profile(args) == 0
     output = capsys.readouterr().out
     assert "max-power" in output
@@ -17,7 +17,7 @@ def test_profile_help_exposes_parameter_and_ocpp_mapping(cli_parser, capsys):
     args = cli_parser.parse_args(["profile", "help", "max-power"])
     assert run_profile(args) == 0
     output = capsys.readouterr().out
-    for fragment in ("max-power", "--watts [watts]", "SetChargingProfile", "connectorId: 0", "ChargePointMaxProfile", "Absolute", "chargingRateUnit: W", "startPeriod: 0", "limit: [watts]"):
+    for fragment in ("max-power", "--watts [watts]", "--start [ISO-8601 datetime]", "SetChargingProfile", "connectorId: 0", "ChargePointMaxProfile", "Absolute", "startSchedule: 2000-01-01T00:00:00Z", "chargingRateUnit: W", "startPeriod: 0", "limit: [watts]"):
         assert fragment in output
 
 
@@ -26,8 +26,8 @@ def test_profile_help_unknown_template_fails(cli_parser, capsys):
     assert "unknown profile template" in capsys.readouterr().out
 
 
-def test_profile_set_sends_built_profile_and_reports_acceptance(cli_parser, profile_control, capsys):
-    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "set", "max-power", "--watts", "60000", "--charger", "charger-a"])
+def test_profile_send_sends_built_profile_and_reports_acceptance(cli_parser, profile_control, capsys):
+    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "send", "max-power", "--watts", "60000", "--charger", "charger-a"])
     assert run_profile(args) == 0
     assert capsys.readouterr().out.strip() == "Accepted"
     data_dir, request = profile_control.calls[0]
@@ -35,23 +35,24 @@ def test_profile_set_sends_built_profile_and_reports_acceptance(cli_parser, prof
     assert request["command"] == "set_charging_profile"
     assert request["charger"] == "charger-a"
     assert request["connector"] == 0
+    assert request["profile"]["chargingSchedule"]["startSchedule"] == "2000-01-01T00:00:00Z"
     assert request["profile"]["chargingSchedule"]["chargingSchedulePeriod"][0]["limit"] == 60000
 
 
-def test_profile_set_relies_on_single_charger_inference_when_unspecified(cli_parser, profile_control):
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "60000"])) == 0
+def test_profile_send_relies_on_single_charger_inference_when_unspecified(cli_parser, profile_control):
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "60000"])) == 0
     assert "charger" not in profile_control.calls[0][1]
 
 
-def test_profile_set_rejects_nonpositive_watts_without_contacting_control(cli_parser, profile_control, capsys):
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "0"])) == 1
+def test_profile_send_rejects_nonpositive_watts_without_contacting_control(cli_parser, profile_control, capsys):
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "0"])) == 1
     assert profile_control.calls == []
     assert "watts" in capsys.readouterr().out
 
 
-def test_profile_set_propagates_rejected_status(cli_parser, profile_control, capsys):
+def test_profile_send_propagates_rejected_status(cli_parser, profile_control, capsys):
     profile_control.response = {"ok": True, "response": {"status": "Rejected"}}
-    assert run_profile(cli_parser.parse_args(["profile", "set", "max-power", "--watts", "60000"])) == 1
+    assert run_profile(cli_parser.parse_args(["profile", "send", "max-power", "--watts", "60000"])) == 1
     assert capsys.readouterr().out.strip() == "Rejected"
 
 
@@ -93,3 +94,47 @@ def test_profile_composite_rejects_invalid_bounds_without_contacting_control(cli
     assert run_profile(cli_parser.parse_args(argv)) == 1
     assert profile_control.calls == []
     assert "error:" in capsys.readouterr().out
+
+
+def test_bare_profile_prints_subcommand_help(cli_parser, capsys):
+    args = cli_parser.parse_args(["profile"])
+    assert run_profile(args) == 0
+
+    output = capsys.readouterr().out
+    for subcommand in ("templates", "help", "send", "composite", "clear"):
+        assert subcommand in output
+
+
+@pytest.mark.parametrize("legacy", ["list", "set"])
+def test_ambiguous_legacy_profile_commands_are_not_kept(cli_parser, legacy):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["profile", legacy])
+
+
+def test_profile_composite_c_alias_selects_connector(cli_parser):
+    args = cli_parser.parse_args(["profile", "composite", "--c", "2"])
+    assert args.connector == 2
+
+
+def test_profile_composite_rejects_cp_as_connector_alias(cli_parser):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["profile", "composite", "--cp", "2"])
+
+
+def test_profile_send_uses_explicit_start(cli_parser, profile_control):
+    args = cli_parser.parse_args([
+        "profile", "send", "max-power", "--watts", "60000",
+        "--start", "2026-10-07T01:30:00-06:00",
+    ])
+    assert run_profile(args) == 0
+    assert profile_control.calls[0][1]["profile"]["chargingSchedule"]["startSchedule"] == "2026-10-07T07:30:00Z"
+
+
+def test_profile_send_rejects_invalid_start_without_contacting_control(cli_parser, profile_control, capsys):
+    args = cli_parser.parse_args([
+        "profile", "send", "max-power", "--watts", "60000",
+        "--start", "2026-10-07",
+    ])
+    assert run_profile(args) == 1
+    assert profile_control.calls == []
+    assert "--start" in capsys.readouterr().out

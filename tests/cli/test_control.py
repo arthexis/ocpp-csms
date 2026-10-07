@@ -5,42 +5,47 @@ from ocpp_csms.cli.control import control_request, run_control
 
 
 def test_start_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("start", "--connector", "2", "--id-tag", "REMOTE")) == {
+    assert control_request(parse_cli("start", "--connector", "2", "--id-tag", "REMOTE", "--now")) == {
         "command": "start",
+        "timing": "now",
         "id_tag": "REMOTE",
         "connector": 2,
     }
 
     expected = {
         "command": "start",
+        "timing": "now",
         "charger": "charger-a",
         "id_tag": "REMOTE",
         "connector": 2,
     }
-    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE")) == expected
-    assert control_request(parse_cli("start", "--charger", "charger-a", "--c", "2", "--id-tag", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "--charger", "charger-a", "--c", "2", "--id-tag", "REMOTE", "--now")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("stop", "--transaction", "42")) == {
+    assert control_request(parse_cli("stop", "--transaction", "42", "--now")) == {
         "command": "stop",
+        "timing": "now",
         "transaction": 42,
     }
 
     expected = {
         "command": "stop",
+        "timing": "now",
         "charger": "charger-a",
         "transaction": 42,
     }
-    assert control_request(parse_cli("stop", "charger-a", "--transaction", "42")) == expected
-    assert control_request(parse_cli("stop", "--charger", "charger-a", "--txn", "42")) == expected
+    assert control_request(parse_cli("stop", "charger-a", "--transaction", "42", "--now")) == expected
+    assert control_request(parse_cli("stop", "--charger", "charger-a", "--txn", "42", "--now")) == expected
 
 
 def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
-    assert control_request(parse_cli("reboot")) == {"command": "reboot", "type": "Soft"}
-    assert control_request(parse_cli("reboot", "--hard")) == {"command": "reboot", "type": "Hard"}
-    assert control_request(parse_cli("reboot", "--charger", "charger-a")) == {
+    assert control_request(parse_cli("reboot", "--now")) == {"command": "reboot", "timing": "now", "type": "Soft"}
+    assert control_request(parse_cli("reboot", "--hard", "--now")) == {"command": "reboot", "timing": "now", "type": "Hard"}
+    assert control_request(parse_cli("reboot", "--charger", "charger-a", "--now")) == {
         "command": "reboot",
+        "timing": "now",
         "charger": "charger-a",
         "type": "Soft",
     }
@@ -48,7 +53,7 @@ def test_reboot_defaults_to_soft_and_supports_explicit_charger(parse_cli):
 
 def test_control_rejects_two_charger_selectors(parse_cli):
     with pytest.raises(ValueError):
-        control_request(parse_cli("reboot", "charger-a", "--charger", "charger-b"))
+        control_request(parse_cli("reboot", "charger-a", "--charger", "charger-b", "--now"))
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -64,28 +69,73 @@ def install_control_response(monkeypatch, response=None, exc=None):
 @pytest.mark.parametrize(("status", "expected_code"), [("Accepted", 0), ("Rejected", 1)])
 def test_command_status_controls_exit_code(monkeypatch, parse_cli, status, expected_code):
     install_control_response(monkeypatch, {"ok": True, "response": {"status": status}})
-    assert run_control(parse_cli("reboot")) == expected_code
+    assert run_control(parse_cli("reboot", "--now")) == expected_code
 
 
 def test_control_error_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"error": "charger_required", "chargers": ["charger-a", "charger-b"]})
-    assert run_control(parse_cli("reboot")) == 1
+    assert run_control(parse_cli("reboot", "--now")) == 1
 
 
 def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
-    assert run_control(parse_cli("reboot")) == 1
+    assert run_control(parse_cli("reboot", "--now")) == 1
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ("start", "--connector", "-1", "--id-tag", "REMOTE"),
-        ("start", "--c", "-1", "--id-tag", "REMOTE"),
-        ("stop", "--transaction", "-1"),
-        ("stop", "--txn", "-1"),
+        ("start", "--connector", "-1", "--id-tag", "REMOTE", "--now"),
+        ("start", "--c", "-1", "--id-tag", "REMOTE", "--now"),
+        ("stop", "--transaction", "-1", "--now"),
+        ("stop", "--txn", "-1", "--now"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
     with pytest.raises(ValueError):
         run_control(parse_cli(*args))
+
+
+def test_control_commands_require_exactly_one_timing_mode(cli_parser):
+    for args in (
+        ["start", "--id-tag", "REMOTE"],
+        ["stop", "--transaction", "42"],
+        ["reboot"],
+    ):
+        with pytest.raises(SystemExit):
+            cli_parser.parse_args(args)
+
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["reboot", "--now", "--after", "5"])
+
+
+@pytest.mark.parametrize(
+    ("args", "timing"),
+    [
+        (("reboot", "--now"), {"timing": "now"}),
+        (("reboot", "--after", "5"), {"timing": "after", "seconds": 5}),
+        (("reboot", "--within", "30"), {"timing": "within", "seconds": 30}),
+    ],
+)
+def test_timing_mode_is_sent_to_control_server(parse_cli, args, timing):
+    request = control_request(parse_cli(*args))
+    assert {key: request[key] for key in timing} == timing
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("reboot", "--after", "0"),
+        ("reboot", "--within", "0"),
+        ("reboot", "--after", "-1"),
+        ("reboot", "--within", "-1"),
+    ],
+)
+def test_delayed_timing_requires_positive_seconds(parse_cli, args):
+    with pytest.raises(ValueError, match="greater than zero"):
+        run_control(parse_cli(*args))
+
+
+def test_remote_start_rejects_cp_as_connector_alias(cli_parser):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["start", "--cp", "2", "--id-tag", "REMOTE", "--now"])

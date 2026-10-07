@@ -171,6 +171,60 @@ async def _composite_schedule_response(
 _INVALID = object()
 
 
+def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, dict[str, Any] | None]:
+    timing = request.get("timing")
+    seconds = request.get("seconds")
+    if timing not in {"now", "after", "within"}:
+        return None, None, {"error": "invalid_timing"}
+    if timing == "now":
+        if seconds is not None:
+            return None, None, {"error": "invalid_timing"}
+        return timing, None, None
+    if not _positive_int(seconds):
+        return None, None, {"error": "invalid_timing_seconds"}
+    return timing, seconds, None
+
+
+def _requires_idle(command: str) -> bool:
+    return command in {"start", "reboot"}
+
+
+async def _wait_for_control_window(
+    registry: SessionRegistry,
+    charger: str,
+    *,
+    command: str,
+    timing: str,
+    seconds: int | None,
+) -> dict[str, Any] | None:
+    if timing == "after":
+        assert seconds is not None
+        await asyncio.sleep(seconds)
+
+    if not _requires_idle(command):
+        return None
+
+    active = registry.active_transaction_ids(charger)
+    if not active:
+        return None
+
+    if timing != "within":
+        return {"error": "active_transaction", "charger": charger, "transactions": active}
+
+    assert seconds is not None
+    for _ in range(seconds):
+        await asyncio.sleep(1)
+        active = registry.active_transaction_ids(charger)
+        if not active:
+            return None
+    return {
+        "error": "active_transaction_timeout",
+        "charger": charger,
+        "transactions": active,
+        "seconds": seconds,
+    }
+
+
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     if not isinstance(command, str) or not command:
@@ -182,6 +236,24 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     session = registry.session(charger)
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
+
+    timing, seconds, timing_error = _control_timing(request)
+    if command in {"start", "stop", "reboot"}:
+        if timing_error is not None:
+            return timing_error
+        assert timing is not None
+        guard = await _wait_for_control_window(
+            registry,
+            charger,
+            command=command,
+            timing=timing,
+            seconds=seconds,
+        )
+        if guard is not None:
+            return guard
+        session = registry.session(charger)
+        if session is None:
+            return {"error": "charger_not_connected", "charger": charger}
 
     try:
         if command == "start":

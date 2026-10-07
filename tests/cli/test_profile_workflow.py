@@ -48,7 +48,7 @@ class Registry:
 
 
 @pytest.mark.parametrize("watts", [60000, 45000])
-def test_profile_set_composite_clear_workflow(monkeypatch, capsys, watts):
+def test_profile_send_composite_clear_workflow(monkeypatch, capsys, watts):
     session = SmartChargingSession()
     registry = Registry(session)
 
@@ -58,13 +58,14 @@ def test_profile_set_composite_clear_workflow(monkeypatch, capsys, watts):
     monkeypatch.setattr(profile_cli, "send_control", in_process_send_control)
     parser, _ = build_parser()
 
-    set_args = parser.parse_args(["profile", "set", "max-power", "--watts", str(watts)])
+    set_args = parser.parse_args(["profile", "send", "max-power", "--watts", str(watts)])
     assert run_profile(set_args) == 0
     assert capsys.readouterr().out.strip() == "Accepted"
 
     connector_id, profile = session.profile
     assert connector_id == 0
     assert profile["chargingProfilePurpose"] == "ChargePointMaxProfile"
+    assert profile["chargingSchedule"]["startSchedule"] == "2000-01-01T00:00:00Z"
     assert profile["chargingSchedule"]["chargingRateUnit"] == "W"
     assert profile["chargingSchedule"]["chargingSchedulePeriod"] == [{"startPeriod": 0, "limit": watts}]
 

@@ -29,3 +29,8 @@ def test_profile_clear_propagates_rejected_status(cli_parser, profile_control, c
     args = cli_parser.parse_args(["profile", "clear", "--purpose", "TxProfile"])
     assert run_profile(args) == 1
     assert capsys.readouterr().out.strip() == "Rejected"
+
+
+def test_profile_clear_c_alias_selects_connector(cli_parser):
+    args = cli_parser.parse_args(["profile", "clear", "--c", "2"])
+    assert args.connector == 2

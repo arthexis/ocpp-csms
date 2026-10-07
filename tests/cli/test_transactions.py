@@ -97,3 +97,8 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
     assert "EVENT TIME" in default_output
     assert "2020-01-01T00:10:00Z" in default_output
     assert "2026-10-06T12:10:00Z" in local_output
+
+
+def test_cp_is_not_a_connector_alias(cli_parser):
+    with pytest.raises(SystemExit):
+        cli_parser.parse_args(["txn", "--cp", "2"])

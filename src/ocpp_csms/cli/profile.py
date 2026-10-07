@@ -21,14 +21,16 @@ def add_profile_command(
 ) -> argparse.ArgumentParser:
     add = argparse.ArgumentParser.add_argument
     profile = subcommands.add_parser("profile", help="Inspect and apply Smart Charging profiles")
+    profile.set_defaults(profile_parser=profile)
     profile_subcommands = profile.add_subparsers(dest="profile_command")
-    profile_subcommands.add_parser("list", help="List built-in profile templates")
+    profile_subcommands.add_parser("templates", help="List built-in profile templates")
     profile_help = profile_subcommands.add_parser("help", help="Explain a built-in profile template")
     add(profile_help, "template", help="Built-in profile template name")
-    profile_set = profile_subcommands.add_parser("set", help="Apply a built-in profile template")
-    add(profile_set, "template", help="Built-in profile template name")
-    add(profile_set, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
-    add(profile_set, "--watts", type=int, required=True, help="Maximum charging power in watts")
+    profile_send = profile_subcommands.add_parser("send", help="Send a built-in profile template to the charger")
+    add(profile_send, "template", help="Built-in profile template name")
+    add(profile_send, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_send, "--watts", type=int, required=True, help="Maximum charging power in watts")
+    add(profile_send, "--start", help="Absolute profile start as ISO-8601 datetime with timezone (default: 2000-01-01T00:00:00Z)")
     profile_composite = profile_subcommands.add_parser("composite", help="Show the charger's effective composite schedule")
     add(profile_composite, "-c", "--charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_composite, "--connector", "--c", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
@@ -43,8 +45,8 @@ def add_profile_command(
     return profile
 
 
-def _profile_set_request(args: argparse.Namespace) -> dict[str, object]:
-    connector, profile = build_profile(args.template, watts=args.watts)
+def _profile_send_request(args: argparse.Namespace) -> dict[str, object]:
+    connector, profile = build_profile(args.template, watts=args.watts, start=args.start)
     request: dict[str, object] = {"command": "set_charging_profile", "connector": connector, "profile": profile}
     if args.charger is not None:
         request["charger"] = args.charger
@@ -151,7 +153,10 @@ def _send_profile_request(args: argparse.Namespace, request: dict[str, object]) 
 
 
 def run_profile(args: argparse.Namespace) -> int:
-    if args.profile_command == "list":
+    if args.profile_command is None:
+        args.profile_parser.print_help()
+        return 0
+    if args.profile_command == "templates":
         print(format_profile_template_list())
         return 0
     if args.profile_command == "help":
@@ -161,9 +166,9 @@ def run_profile(args: argparse.Namespace) -> int:
             return 1
         print(format_profile_template_help(template))
         return 0
-    if args.profile_command == "set":
+    if args.profile_command == "send":
         try:
-            request = _profile_set_request(args)
+            request = _profile_send_request(args)
         except ValueError as exc:
             print(f"error: {exc}")
             return 1

@@ -63,10 +63,10 @@ class Registry:
 @pytest.mark.parametrize(
     ("control_request", "expected_call"),
     [
-        ({"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE"}, ("start", "REMOTE", 2)),
-        ({"command": "stop", "charger": "charger-a", "transaction": 42}, ("stop", 42)),
-        ({"command": "reboot", "charger": "charger-a"}, ("reboot", "Soft")),
-        ({"command": "reboot", "charger": "charger-a", "type": "Hard"}, ("reboot", "Hard")),
+        ({"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE", "timing": "now"}, ("start", "REMOTE", 2)),
+        ({"command": "stop", "charger": "charger-a", "transaction": 42, "timing": "now"}, ("stop", 42)),
+        ({"command": "reboot", "charger": "charger-a", "timing": "now"}, ("reboot", "Soft")),
+        ({"command": "reboot", "charger": "charger-a", "type": "Hard", "timing": "now"}, ("reboot", "Hard")),
     ],
 )
 async def test_dispatches_supported_commands(control_request, expected_call):
@@ -80,9 +80,9 @@ async def test_dispatches_supported_commands(control_request, expected_call):
 @pytest.mark.parametrize(
     ("control_request", "expected_call"),
     [
-        ({"command": "start", "id_tag": "REMOTE", "connector": 2}, ("start", "REMOTE", 2)),
-        ({"command": "stop", "transaction": 42}, ("stop", 42)),
-        ({"command": "reboot"}, ("reboot", "Soft")),
+        ({"command": "start", "id_tag": "REMOTE", "connector": 2, "timing": "now"}, ("start", "REMOTE", 2)),
+        ({"command": "stop", "transaction": 42, "timing": "now"}, ("stop", 42)),
+        ({"command": "reboot", "timing": "now"}, ("reboot", "Soft")),
         ({"command": "config", "keys": ["HeartbeatInterval"]}, ("config", ["HeartbeatInterval"])),
     ],
 )
@@ -136,13 +136,13 @@ async def test_config_set_force_records_override_and_runs():
 
 @pytest.mark.asyncio
 async def test_missing_charger_fails_when_none_are_connected():
-    response = await dispatch_control(Registry(), {"command": "reboot"})
+    response = await dispatch_control(Registry(), {"command": "reboot", "timing": "now"})
     assert response == {"error": "no_charger_connected"}
 
 
 @pytest.mark.asyncio
 async def test_missing_charger_requires_selector_when_multiple_are_connected():
-    response = await dispatch_control(Registry(sessions={"charger-a": Session(), "charger-b": Session()}), {"command": "reboot"})
+    response = await dispatch_control(Registry(sessions={"charger-a": Session(), "charger-b": Session()}), {"command": "reboot", "timing": "now"})
     assert response == {"error": "charger_required", "chargers": ["charger-a", "charger-b"]}
 
 
@@ -186,7 +186,7 @@ async def test_configuration_dispatch_respects_active_transaction_policy(active,
 
 @pytest.mark.asyncio
 async def test_disconnected_explicit_charger_is_not_queued():
-    response = await dispatch_control(Registry(), {"command": "reboot", "charger": "charger-a"})
+    response = await dispatch_control(Registry(), {"command": "reboot", "charger": "charger-a", "timing": "now"})
     assert response == {"error": "charger_not_connected", "charger": "charger-a"}
 
 
@@ -195,12 +195,12 @@ async def test_disconnected_explicit_charger_is_not_queued():
     ("control_request", "error"),
     [
         ({"charger": "charger-a"}, "missing_command"),
-        ({"command": "start"}, "missing_id_tag"),
-        ({"command": "start", "charger": ""}, "invalid_charger"),
-        ({"command": "start", "charger": "charger-a"}, "missing_id_tag"),
-        ({"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": -1}, "invalid_connector"),
-        ({"command": "stop", "charger": "charger-a"}, "invalid_transaction"),
-        ({"command": "reboot", "charger": "charger-a", "type": "Warm"}, "invalid_reset_type"),
+        ({"command": "start", "timing": "now"}, "missing_id_tag"),
+        ({"command": "start", "charger": "", "timing": "now"}, "invalid_charger"),
+        ({"command": "start", "charger": "charger-a", "timing": "now"}, "missing_id_tag"),
+        ({"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": -1, "timing": "now"}, "invalid_connector"),
+        ({"command": "stop", "charger": "charger-a", "timing": "now"}, "invalid_transaction"),
+        ({"command": "reboot", "charger": "charger-a", "type": "Warm", "timing": "now"}, "invalid_reset_type"),
         ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
         ({"command": "config", "charger": "charger-a", "force": "yes"}, "invalid_force"),
         ({"command": "config_set", "charger": "charger-a", "key": "", "value": "60"}, "invalid_key"),
@@ -218,7 +218,7 @@ async def test_command_failure_is_returned_to_caller():
     class FailingSession(Session):
         async def reset(self, reset_type="Soft"):
             raise OSError("connection lost")
-    response = await dispatch_control(Registry(FailingSession()), {"command": "reboot", "charger": "charger-a"})
+    response = await dispatch_control(Registry(FailingSession()), {"command": "reboot", "charger": "charger-a", "timing": "now"})
     assert response == {"error": "command_failed", "detail": "connection lost"}
 
 
@@ -228,7 +228,7 @@ async def test_unix_socket_accepts_one_json_request(tmp_path):
     path = tmp_path / "control.sock"
     async with ControlServer(Registry(session), path):
         reader, writer = await asyncio.open_unix_connection(str(path))
-        writer.write(json.dumps({"command": "stop", "transaction": 9}).encode() + b"\n")
+        writer.write(json.dumps({"command": "stop", "transaction": 9, "timing": "now"}).encode() + b"\n")
         await writer.drain()
         response = json.loads(await reader.readline())
         writer.close()
@@ -251,3 +251,130 @@ async def test_unix_socket_reports_invalid_json(tmp_path):
         writer.close()
         await writer.wait_closed()
     assert response == {"error": "invalid_json"}
+
+
+@pytest.mark.asyncio
+async def test_now_blocks_start_and_reboot_when_transaction_is_active():
+    for request in (
+        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "now"},
+        {"command": "reboot", "charger": "charger-a", "timing": "now"},
+    ):
+        session = Session()
+        response = await dispatch_control(
+            Registry(session, active={"charger-a": [17]}),
+            request,
+        )
+        assert response == {
+            "error": "active_transaction",
+            "charger": "charger-a",
+            "transactions": [17],
+        }
+        assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_after_waits_before_checking_active_transaction(monkeypatch):
+    session = Session()
+    registry = Registry(session)
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        registry.active["charger-a"] = [17]
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "reboot", "charger": "charger-a", "timing": "after", "seconds": 5},
+    )
+
+    assert sleeps == [5]
+    assert response["error"] == "active_transaction"
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_within_waits_for_active_transaction_to_finish(monkeypatch):
+    session = Session()
+    registry = Registry(session, active={"charger-a": [17]})
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            registry.active["charger-a"] = []
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "reboot", "charger": "charger-a", "timing": "within", "seconds": 5},
+    )
+
+    assert response["ok"] is True
+    assert sleeps == [1, 1]
+    assert session.calls == [("reboot", "Soft")]
+
+
+@pytest.mark.asyncio
+async def test_within_times_out_if_transaction_stays_active(monkeypatch):
+    session = Session()
+    registry = Registry(session, active={"charger-a": [17]})
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "within", "seconds": 3},
+    )
+
+    assert response == {
+        "error": "active_transaction_timeout",
+        "charger": "charger-a",
+        "transactions": [17],
+        "seconds": 3,
+    }
+    assert sleeps == [1, 1, 1]
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stop_after_delays_but_is_not_blocked_by_active_transaction(monkeypatch):
+    session = Session()
+    registry = Registry(session, active={"charger-a": [42]})
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
+
+    response = await dispatch_control(
+        registry,
+        {"command": "stop", "charger": "charger-a", "transaction": 42, "timing": "after", "seconds": 4},
+    )
+
+    assert response["ok"] is True
+    assert sleeps == [4]
+    assert session.calls == [("stop", 42)]
+
+
+@pytest.mark.asyncio
+async def test_control_timing_is_required_and_validated():
+    session = Session()
+    registry = Registry(session)
+
+    assert (await dispatch_control(
+        registry,
+        {"command": "reboot", "charger": "charger-a"},
+    ))["error"] == "invalid_timing"
+
+    assert (await dispatch_control(
+        registry,
+        {"command": "reboot", "charger": "charger-a", "timing": "after", "seconds": 0},
+    ))["error"] == "invalid_timing_seconds"
