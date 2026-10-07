@@ -1,34 +1,11 @@
-import argparse
-
 import pytest
 
 from ocpp_csms.cli import build_parser
 import ocpp_csms.cli.rfid as rfid_module
 from ocpp_csms.cli.rfid import run_rfid, run_rfid_action
-from ocpp_csms.rfid_cache import RFIDCacheState
-from ocpp_csms.rfid_list_query import RFIDListEntrySnapshot, RFIDListSnapshot
+from ocpp_csms.rfid_list_query import RFIDListEntrySnapshot
 from ocpp_csms.transactions import TransactionArchive
-
-
-def start_payload(*, id_tag="card-a", meter_start=1000, timestamp="2026-10-06T10:00:00Z"):
-    return {
-        "connector_id": 1,
-        "id_tag": id_tag,
-        "meter_start": meter_start,
-        "timestamp": timestamp,
-    }
-
-
-def stop_payload(transaction_id, *, meter_stop, timestamp="2026-10-06T10:30:00Z"):
-    return {
-        "transaction_id": transaction_id,
-        "meter_stop": meter_stop,
-        "timestamp": timestamp,
-    }
-
-
-def args(tmp_path, tag="card-a"):
-    return argparse.Namespace(data_dir=str(tmp_path), rfid_command="report", tag=tag)
+from tests.rfid.helpers import cache_state, report_args as args, start_payload, stop_payload
 
 
 def test_parser_accepts_rfid_report_with_optional_tag():
@@ -290,27 +267,6 @@ def test_version_and_clear_use_control_socket(monkeypatch, tmp_path, capsys):
     assert "RFID local list version: 7" in capsys.readouterr().out
     assert run_rfid_action(clear) == 0
     assert requests == [{"command": "rfid_version"}, {"command": "rfid_clear"}]
-
-
-def cache_state(*, version=7, entries=(), known=True, has_history=True, list_hash="hash"):
-    snapshot = None
-    if known:
-        snapshot = RFIDListSnapshot(
-            id=1,
-            charger_id="charger-a",
-            list_version=version,
-            sent_at="2026-10-07T04:00:00Z",
-            source_file="rfid.csv",
-            list_hash=list_hash,
-            verified_version=version,
-            entries=tuple(entries),
-        )
-    return RFIDCacheState(
-        charger_id="charger-a",
-        list_version=version,
-        has_history=has_history,
-        snapshot=snapshot,
-    )
 
 
 @pytest.mark.asyncio
