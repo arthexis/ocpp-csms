@@ -410,10 +410,13 @@ commands retain their prior behavior. Use `--data-dir` for a non-default
 control socket. TLS configuration and certificate files must be readable by
 the CSMS service account, not just the operator writing them.
 
-`tls disable` is available while stopped; it refuses to close a live WSS
-listener until the graceful-drain implementation in Chunk 2D. Changing an
-active WSS port is also refused in 2C. These safeguards prevent an accidental
-charging-session interruption.
+`tls disable` stops new WSS connections while established sessions finish.
+The runtime reports retired listener ports under `draining_ports` until their
+connections close. A changed WSS port is applied make-before-break on `tls
+reload`: the new listener must bind successfully before the previous listener
+stops accepting connections. Existing sessions survive both operations.
+Normal CSMS shutdown still closes all connections. A charger using a retired
+port cannot reconnect until its endpoint configuration is updated.
 
 ## Installed layout
 
