@@ -134,8 +134,8 @@ def _packets(raw: bytes):
     if len(raw) < 24:
         return
     magic = raw[:4]
-    endian = "<" if magic in (b"\\xd4\\xc3\\xb2\\xa1", b"\\x4d\\x3c\\xb2\\xa1") else ">"
-    if magic not in (b"\\xd4\\xc3\\xb2\\xa1", b"\\xa1\\xb2\\xc3\\xd4", b"\\x4d\\x3c\\xb2\\xa1", b"\\xa1\\xb2\\x3c\\x4d"):
+    endian = "<" if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1") else ">"
+    if magic not in (b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4", b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d"):
         raise ValueError("unsupported_capture_format")
     link_type = struct.unpack_from(endian + "I", raw, 20)[0]
     if link_type != 1:
@@ -190,7 +190,7 @@ def observe_pcap(raw: bytes) -> list[TLSCandidate]:
         # Assemble in sequence order, stopping at gaps; out-of-order packets are fine.
         ordered = sorted(parts.items())
         for index, (start, payload) in enumerate(ordered):
-            if not payload.startswith(b"\\x16\\x03"):
+            if not payload.startswith(b"\x16\x03"):
                 continue
             stream = bytearray(payload)
             expected = start + len(payload)
