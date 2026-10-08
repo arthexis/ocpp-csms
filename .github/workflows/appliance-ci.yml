@@ -29,14 +29,16 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Install test dependencies
-        run: python -m pip install ".[dev]"
+      - name: Create isolated Python environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install ".[dev]"
 
       - name: Run CSMS and Forwarder tests
-        run: python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
+        run: .venv/bin/python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
 
       - name: Run Discover tests
-        run: python -m pytest tests/ocpp_discover
+        run: .venv/bin/python -m pytest tests/ocpp_discover
 
       - name: Run Ansible contract tests
-        run: PYTHONPATH=src python -m pytest tests/ansible
+        run: PYTHONPATH=src .venv/bin/python -m pytest tests/ansible
