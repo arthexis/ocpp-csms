@@ -557,7 +557,11 @@
     argv:
       - "{{ ocpp_csms_release_venv }}/bin/python"
       - -c
-      - "import json; from pathlib import Path; p=Path('/etc/ocpp-csms/tls.json'); print('enabled' if json.loads(p.read_text()).get('enabled') is True else 'disabled')"
+      - >-
+        import json;
+        from pathlib import Path;
+        config = json.loads(Path('/etc/ocpp-csms/tls.json').read_text());
+        print('enabled' if config.get('enabled') is True else 'disabled')
   register: ocpp_csms_tls_enablement
   changed_when: false
   when: ocpp_csms_tls_config_stat.stat.exists | default(false)
