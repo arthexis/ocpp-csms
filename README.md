@@ -361,6 +361,28 @@ nftables
 iproute2
 ```
 
+## TLS configuration (Chunk 2A)
+
+TLS configuration is optional and remains disabled by default. Registration does not
+start a WSS listener; that is planned for Chunk 2B. No deployment flag or
+CSMS service restart is needed for these read-only/configuration operations.
+
+```sh
+sudo ocpp-csms tls config --cert /etc/ocpp-csms/tls/server.crt --key /etc/ocpp-csms/tls/server.key --hostname csms.example.com --port 9443
+ocpp-csms tls status
+sudo ocpp-csms tls check
+```
+
+The configuration is stored atomically at `/etc/ocpp-csms/tls.json` with
+restrictive permissions. Certificates and private keys remain at operator-supplied
+absolute paths; no keys are copied into immutable releases or printed by status.
+The `check` command checks local certificate/key loadability, expiration,
+DNS Subject Alternative Name matching, and port conflict with the default WS
+port. It requires OpenSSL to inspect certificate extensions. This cannot
+establish whether any particular charger trusts the certificate. Run checks
+under the CSMS service account to verify effective readability. Future chunks
+will supply listener management, enable/disable, and hot reload.
+
 ## Installed layout
 
 Ansible uses immutable releases with stable commands:
