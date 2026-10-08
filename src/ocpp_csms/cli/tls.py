@@ -38,6 +38,12 @@ def run_tls(args: argparse.Namespace) -> int:
         result = tls_config.status(path)
     elif args.tls_command == "status":
         result = tls_config.status(path)
+        try:
+            live = asyncio.run(send_control(args.data_dir, {"command": "tls_status"}))
+            if live.get("ok"):
+                result = live["response"]
+        except (OSError, ConnectionError, ValueError):
+            pass
     elif args.tls_command == "check":
         config = tls_config.read_config(path)
         if config is None:
