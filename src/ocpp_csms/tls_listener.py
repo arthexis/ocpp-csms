@@ -150,8 +150,15 @@ class TLSListener:
             servers = ([self.server] if self.server is not None else []) + [
                 entry.server for entry in self._draining
             ]
+            # An already-draining server's close(False) cannot be undone by
+            # calling close(True) again. Explicitly close its live protocols.
+            connections = [
+                protocol for entry in self._draining
+                for protocol in list(entry.server.websockets)
+            ]
             for server in servers:
                 server.close(close_connections=True)
+            await asyncio.gather(*(protocol.close(code=1001) for protocol in connections))
             await asyncio.gather(*(server.wait_closed() for server in servers))
             if self._draining:
                 await asyncio.gather(*(entry.cleanup for entry in list(self._draining)))
