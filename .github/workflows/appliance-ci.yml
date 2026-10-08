@@ -23,6 +23,14 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Signal appliance job start
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          CODEX_SOUND_HOOK_LOCK_WAIT: "0"
+          CODEX_SOUND_HOOK_TIMEOUT: "2"
+        run: /home/arthe/.local/bin/codex-sound-hook actions-job-start busy
+
       - name: Check out trusted PR head
         uses: actions/checkout@v4
         with:
@@ -42,3 +50,18 @@ jobs:
 
       - name: Run Ansible contract tests
         run: PYTHONPATH=src .venv/bin/python -m pytest tests/ansible
+
+      - name: Signal appliance job result
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          CODEX_SOUND_HOOK_LOCK_WAIT: "0"
+          CODEX_SOUND_HOOK_TIMEOUT: "2"
+        run: |
+          case "${{ job.status }}" in
+            success) sound=ok ;;
+            failure) sound=error ;;
+            cancelled) sound=warning ;;
+            *) sound=notice ;;
+          esac
+          /home/arthe/.local/bin/codex-sound-hook actions-job-finish "$sound"
