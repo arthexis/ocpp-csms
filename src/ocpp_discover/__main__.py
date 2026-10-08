@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ocpp_discover import discover, operator, service
+from ocpp_discover import discover, operator, service, tls_observe
 
 
 def _help_parser() -> argparse.ArgumentParser:
@@ -14,7 +14,7 @@ def _help_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        help="status, diagnostics, service, run, or cleanup",
+        help="status, diagnostics, service, run, cleanup, or tls-observe",
     )
     return parser
 
@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     command = arguments[0]
     if command in {"status", "diagnostics"}:
         return operator.main(arguments)
+    if command == "tls-observe":
+        return tls_observe.main(arguments[1:])
     if command == "service":
         return service.main(arguments[1:])
     if command in {"run", "cleanup"}:
