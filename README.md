@@ -334,6 +334,20 @@ A successful candidate must be proven by fresh CSMS connection and fresh inbound
 
 Temporary state is rolled back on failure. TLS/WSS traffic is opaque and is refused rather than guessed.
 
+### Passive TLS endpoint observation
+
+`sudo ocpp-discover tls-observe --interface eth0 --seconds 15` captures a bounded
+sample of TCP traffic and reports candidate TLS ClientHello endpoints as JSON.
+For offline inspection use `ocpp-discover tls-observe --pcap capture.pcap`
+(classic Ethernet pcap format). The observer extracts source/destination
+IPv4 addresses and ports, plaintext SNI when present, ALPN, and offered TLS
+versions. TCP segments and TLS handshake fragments across records are joined
+before parsing. This is **observation-only**: no address claims, redirects,
+TLS interception, or durable adaptation changes. TLS candidates are **not**
+proof of WSS, OCPP, or a successful charger connection. Missing/encrypted SNI
+cannot be recovered; IPv6, pcapng, and IP-fragment reassembly are not yet
+supported.
+
 ### Reconciliation
 
 Once an adaptation is proven, charger absence never authorizes mutation. Discover waits passively for evidence.
@@ -360,6 +374,84 @@ tcpdump
 nftables
 iproute2
 ```
+
+## TLS configuration (Chunk 2A)
+
+TLS configuration is optional and remains disabled by default. Registration does not
+start a WSS listener; that is planned for Chunk 2B. No deployment flag or
+CSMS service restart is needed for these read-only/configuration operations.
+
+```sh
+sudo ocpp-csms tls config --cert /etc/ocpp-csms/tls/server.crt --key /etc/ocpp-csms/tls/server.key --hostname csms.example.com --port 9443
+ocpp-csms tls status
+sudo ocpp-csms tls check
+```
+
+The configuration is stored atomically at `/etc/ocpp-csms/tls.json` with
+restrictive permissions. Certificates and private keys remain at operator-supplied
+absolute paths; no keys are copied into immutable releases or printed by status.
+The `check` command checks local certificate/key loadability, expiration,
+DNS Subject Alternative Name matching, and port conflict with the default WS
+port. It requires OpenSSL to inspect certificate extensions. This cannot
+establish whether any particular charger trusts the certificate. Run checks
+under the CSMS service account to verify effective readability. Future chunks
+will supply listener management, enable/disable, and hot reload.
+
+### Optional WSS listener (Chunk 2B)
+
+The existing `ocpp-csms.service` starts plaintext WS as before. If the persistent
+`/etc/ocpp-csms/tls.json` configuration has `"enabled": true` and passes
+certificate/key checks, the same process also starts WSS on the configured
+port. Both listeners dispatch to the existing OCPP handler and share session
+and transaction state. TLS readiness and bind failures are logged without
+bringing down WS. `tls config` continues to leave TLS disabled by default;
+`tls enable` and live activation arrive in Chunk 2C. For field use, do not
+manually enable WSS until the service account can read the private key and
+the certificate has been validated. A service restart is required to apply
+changes in this chunk; hot reload arrives in 2C.
+
+### Live TLS management (Chunk 2C)
+
+With the CSMS running, `ocpp-csms tls enable` activates the configured WSS
+listener immediately, while `ocpp-csms tls reload` validates new credentials
+and updates the existing listener TLS context for new connections. Existing
+WS and WSS sessions are not restarted. `ocpp-csms tls status` reports live
+listener state when the local Unix control socket is reachable.
+
+TLS management commands are authorized through Linux Unix-socket peer
+credentials: root or the running CSMS process UID. Existing charger control
+commands retain their prior behavior. Use `--data-dir` for a non-default
+control socket. TLS configuration and certificate files must be readable by
+the CSMS service account, not just the operator writing them.
+
+`tls disable` stops new WSS connections while established sessions finish.
+The runtime reports retired listener ports under `draining_ports` until their
+connections close. A changed WSS port is applied make-before-break on `tls
+reload`: the new listener must bind successfully before the previous listener
+stops accepting connections. Existing sessions survive both operations.
+Normal CSMS shutdown still closes all connections. A charger using a retired
+port cannot reconnect until its endpoint configuration is updated.
+
+### Persistent TLS provisioning (Chunk 2E)
+
+Ansible creates `/etc/ocpp-csms` (0750) and `/etc/ocpp-csms/tls`
+(0700), owned by the existing non-root CSMS service user. On upgrade it
+normalizes a regular `tls.json` to that service user's ownership and mode
+0600 **without editing its contents**. It never creates or overwrites
+certificate files, keys, or enabled/disabled state. The configuration and
+credentials remain independent of immutable releases and survive upgrades.
+
+Run `ocpp-csms tls config` as the service user rather than root (or correct
+the resulting ownership) so the non-root daemon can read `tls.json`. A
+private key deployed outside the managed TLS directory must likewise be
+readable by that user; the role deliberately does not change arbitrary
+certificate/key permissions. A configured and enabled TLS listener must
+pass `tls check` under the service identity before Ansible proceeds with
+service handoff. WS-only installations need no TLS credentials.
+
+TLS check confirms **local readiness**, not that a remote charger trusts
+the certificate or that the WSS port is publicly reachable. A live WSS
+charger handshake and real-device reconnect remain separate field tests.
 
 ## Installed layout
 

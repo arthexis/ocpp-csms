@@ -12,6 +12,7 @@ from ocpp_csms.cli.export import add_export_command, run_export
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
+from ocpp_csms.cli.tls import add_tls_command, run_tls
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions import default_data_dir
 
@@ -29,6 +30,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["energy"] = add_energy_command(subcommands)
     commands["export"] = add_export_command(subcommands)
     commands["rfid"] = add_rfid_command(subcommands)
+    commands["tls"] = add_tls_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
     transactions.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable transaction contract")
@@ -57,6 +59,7 @@ def main() -> int:
         if args.command in CONTROL_COMMANDS: return run_control(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
+        if args.command == "tls": return run_tls(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
