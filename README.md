@@ -334,6 +334,20 @@ A successful candidate must be proven by fresh CSMS connection and fresh inbound
 
 Temporary state is rolled back on failure. TLS/WSS traffic is opaque and is refused rather than guessed.
 
+### Passive TLS endpoint observation
+
+`sudo ocpp-discover tls-observe --interface eth0 --seconds 15` captures a bounded
+sample of TCP traffic and reports candidate TLS ClientHello endpoints as JSON.
+For offline inspection use `ocpp-discover tls-observe --pcap capture.pcap`
+(classic Ethernet pcap format). The observer extracts source/destination
+IPv4 addresses and ports, plaintext SNI when present, ALPN, and offered TLS
+versions. TCP segments and TLS handshake fragments across records are joined
+before parsing. This is **observation-only**: no address claims, redirects,
+TLS interception, or durable adaptation changes. TLS candidates are **not**
+proof of WSS, OCPP, or a successful charger connection. Missing/encrypted SNI
+cannot be recovered; IPv6, pcapng, and IP-fragment reassembly are not yet
+supported.
+
 ### Reconciliation
 
 Once an adaptation is proven, charger absence never authorizes mutation. Discover waits passively for evidence.
