@@ -418,6 +418,27 @@ stops accepting connections. Existing sessions survive both operations.
 Normal CSMS shutdown still closes all connections. A charger using a retired
 port cannot reconnect until its endpoint configuration is updated.
 
+### Persistent TLS provisioning (Chunk 2E)
+
+Ansible creates `/etc/ocpp-csms` (0750) and `/etc/ocpp-csms/tls`
+(0700), owned by the existing non-root CSMS service user. On upgrade it
+normalizes a regular `tls.json` to that service user's ownership and mode
+0600 **without editing its contents**. It never creates or overwrites
+certificate files, keys, or enabled/disabled state. The configuration and
+credentials remain independent of immutable releases and survive upgrades.
+
+Run `ocpp-csms tls config` as the service user rather than root (or correct
+the resulting ownership) so the non-root daemon can read `tls.json`. A
+private key deployed outside the managed TLS directory must likewise be
+readable by that user; the role deliberately does not change arbitrary
+certificate/key permissions. A configured and enabled TLS listener must
+pass `tls check` under the service identity before Ansible proceeds with
+service handoff. WS-only installations need no TLS credentials.
+
+TLS check confirms **local readiness**, not that a remote charger trusts
+the certificate or that the WSS port is publicly reachable. A live WSS
+charger handshake and real-device reconnect remain separate field tests.
+
 ## Installed layout
 
 Ansible uses immutable releases with stable commands:
