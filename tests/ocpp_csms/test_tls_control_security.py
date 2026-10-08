@@ -31,6 +31,8 @@ async def test_tls_commands_use_peer_credentials_without_charger(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tls_commands_reject_non_root_non_service_peer(tmp_path, monkeypatch):
+    if os.getuid() == 0:
+        pytest.skip("root is always an authorized TLS operator")
     registry = Registry()
     path = tmp_path / "control.sock"
     # Simulate a process identity that differs from the actual connected UID.
