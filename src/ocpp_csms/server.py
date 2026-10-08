@@ -46,6 +46,12 @@ class CSMSServer:
     transactions: TransactionArchive
     events: EventStore
     _active_sessions: dict[str, ChargePointSession] = field(default_factory=dict, init=False, repr=False)
+    _tls_listener: TLSListener | None = field(default=None, init=False, repr=False)
+
+    async def tls_control(self, action: str) -> dict[str, object]:
+        if self._tls_listener is None:
+            return {"error": "tls_server_not_running"}
+        return await self._tls_listener.command(action)
 
     def session(self, charge_point_id: str) -> ChargePointSession | None:
         return self._active_sessions.get(charge_point_id)
@@ -123,6 +129,7 @@ class CSMSServer:
                     # TLS startup is independent of the already-bound WS listener.
                     # A bad certificate or occupied WSS port must not stop WS.
                     tls = TLSListener()
+                    object.__setattr__(self, "_tls_listener", tls)
                     try:
                         await tls.start(
                             self.accept,
@@ -134,6 +141,7 @@ class CSMSServer:
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
                         await asyncio.Future()
                     finally:
+                        object.__setattr__(self, "_tls_listener", None)
                         await tls.stop()
         finally:
             self._record_runtime("server_stopped")

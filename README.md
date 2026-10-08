@@ -396,6 +396,25 @@ manually enable WSS until the service account can read the private key and
 the certificate has been validated. A service restart is required to apply
 changes in this chunk; hot reload arrives in 2C.
 
+### Live TLS management (Chunk 2C)
+
+With the CSMS running, `ocpp-csms tls enable` activates the configured WSS
+listener immediately, while `ocpp-csms tls reload` validates new credentials
+and updates the existing listener TLS context for new connections. Existing
+WS and WSS sessions are not restarted. `ocpp-csms tls status` reports live
+listener state when the local Unix control socket is reachable.
+
+TLS management commands are authorized through Linux Unix-socket peer
+credentials: root or the running CSMS process UID. Existing charger control
+commands retain their prior behavior. Use `--data-dir` for a non-default
+control socket. TLS configuration and certificate files must be readable by
+the CSMS service account, not just the operator writing them.
+
+`tls disable` is available while stopped; it refuses to close a live WSS
+listener until the graceful-drain implementation in Chunk 2D. Changing an
+active WSS port is also refused in 2C. These safeguards prevent an accidental
+charging-session interruption.
+
 ## Installed layout
 
 Ansible uses immutable releases with stable commands:

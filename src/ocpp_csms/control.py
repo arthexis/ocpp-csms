@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
+import struct
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -378,6 +380,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     command = request.get("command")
     if not isinstance(command, str) or not command:
         return {"error": "missing_command"}
+    if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
+        return await registry.tls_control(command.removeprefix("tls_"))
     charger, request, resolution_error = _resolve_charger(registry, request)
     if resolution_error is not None:
         return resolution_error
@@ -580,7 +584,18 @@ class ControlServer:
                 if not isinstance(request, dict):
                     response = {"error": "invalid_request"}
                 else:
-                    response = await dispatch_control(self.registry, request)
+                    command = request.get("command")
+                    if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
+                        sock = writer.get_extra_info("socket")
+                        try:
+                            raw = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                            _pid, uid, _gid = struct.unpack("3i", raw)
+                            authorized = uid in (0, os.geteuid())
+                        except (AttributeError, OSError, struct.error):
+                            authorized = False
+                        response = await dispatch_control(self.registry, request) if authorized else {"error": "tls_permission_denied"}
+                    else:
+                        response = await dispatch_control(self.registry, request)
             writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
             await writer.drain()
         finally:
