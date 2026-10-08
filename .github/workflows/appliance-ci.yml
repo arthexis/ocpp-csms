@@ -1,0 +1,42 @@
+name: Trusted appliance CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  appliance:
+    name: Gway-001 appliance tests
+    # Never schedule untrusted fork PRs on a persistent field machine.
+    if: >-
+      github.event.pull_request.user.login == 'arthexis' &&
+      github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' &&
+      github.event.pull_request.head.repo.owner.login == 'arthexis' &&
+      github.event.pull_request.draft == false
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 25
+    concurrency:
+      group: appliance-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Check out trusted PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install test dependencies
+        run: python -m pip install ".[dev]"
+
+      - name: Run CSMS and Forwarder tests
+        run: python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
+
+      - name: Run Discover tests
+        run: python -m pytest tests/ocpp_discover
+
+      - name: Run Ansible contract tests
+        run: PYTHONPATH=src python -m pytest tests/ansible
