@@ -8,6 +8,7 @@ from ocpp_csms.cli.config import add_config_command, configuration_request, is_c
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
 from ocpp_csms.cli.energy import add_energy_command, run_energy
+from ocpp_csms.cli.export import add_export_command, run_export
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
@@ -27,6 +28,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
     commands["energy"] = add_energy_command(subcommands)
+    commands["export"] = add_export_command(subcommands)
     commands["rfid"] = add_rfid_command(subcommands)
     commands["tls"] = add_tls_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
@@ -60,6 +62,7 @@ def main() -> int:
         if args.command == "tls": return run_tls(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
+        if args.command == "export": return run_export(args)
         if args.command == "rfid":
             if args.rfid_command == "report":
                 print(run_rfid(args)); return 0
@@ -73,4 +76,4 @@ def main() -> int:
     return 2
 
 
-__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_chargers", "run_diagnostic", "run_energy", "run_profile", "run_rfid", "run_rfid_action", "run_transactions"]
+__all__ = ["add_transaction_parser", "build_parser", "configuration_request", "control_request", "main", "print_help", "run_appliance", "run_config_download", "run_configuration", "run_control", "run_chargers", "run_diagnostic", "run_energy", "run_export", "run_profile", "run_rfid", "run_rfid_action", "run_transactions"]

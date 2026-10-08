@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 _SCHEMA_1_SQL = """
 CREATE TABLE events (
@@ -104,8 +105,15 @@ CREATE TABLE IF NOT EXISTS rfid_list_entries (
 );
 """
 
-CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
-_SUPPORTED_UPGRADES = {1: 2, 2: 3}
+_SCHEMA_4_ADDITIONS_SQL = """
+CREATE TABLE IF NOT EXISTS appliance_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL + _SCHEMA_4_ADDITIONS_SQL
+_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4}
 
 
 @dataclass(frozen=True)
@@ -140,6 +148,10 @@ def create_current_schema(data_dir: str | Path) -> SchemaInfo:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as connection:
         connection.executescript(CURRENT_SCHEMA_SQL)
+        connection.execute(
+            "INSERT INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
+            (str(uuid.uuid4()),),
+        )
         connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     return SchemaInfo(path=path, exists=True, version=CURRENT_SCHEMA_VERSION)
 
@@ -218,6 +230,15 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
                 info = SchemaInfo(path=info.path, exists=True, version=2)
             if info.version == 2:
                 connection.executescript(_SCHEMA_3_ADDITIONS_SQL)
+                connection.execute("PRAGMA user_version = 3")
+                connection.commit()
+                info = SchemaInfo(path=info.path, exists=True, version=3)
+            if info.version == 3:
+                connection.executescript(_SCHEMA_4_ADDITIONS_SQL)
+                connection.execute(
+                    "INSERT OR IGNORE INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
+                    (str(uuid.uuid4()),),
+                )
             connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.
@@ -226,3 +247,16 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
     upgraded = inspect_schema(data_dir)
     require_supported_schema(upgraded)
     return upgraded
+
+
+def source_id(data_dir: str | Path) -> str:
+    """Return the stable identity of this CSMS data store."""
+    info = inspect_schema(data_dir)
+    require_supported_schema(info)
+    with sqlite3.connect(f"file:{info.path}?mode=ro", uri=True) as connection:
+        row = connection.execute(
+            "SELECT value FROM appliance_metadata WHERE key = 'source_id'"
+        ).fetchone()
+    if row is None or not row[0]:
+        raise RuntimeError("CSMS data store is missing source identity")
+    return str(row[0])
