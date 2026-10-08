@@ -562,3 +562,38 @@ ocpp-forwarder --satellite-id gway-004 status
 Deployment as `ocpp-forwarder.service` is intentionally handled in the next
 implementation chunk so the Forwarder program can be tested independently of
 satellite provisioning.
+
+
+### Deploying OCPP Forwarder
+
+OCPP Forwarder deployment is opt-in. Ordinary satellite deployment does not
+install or enable the Forwarder role:
+
+```bash
+./deploy.sh
+```
+
+Enable it explicitly with `--forwarder` and provide its satellite identity and
+Collector token through Ansible variables (normally from Vault/host vars):
+
+```bash
+./deploy.sh --forwarder \
+  -e ocpp_forwarder_satellite_id=gway-004 \
+  -e @forwarder-secrets.yml
+```
+
+where the secret variable is:
+
+```yaml
+ocpp_forwarder_token: "<collector JWT>"
+```
+
+The deployed service is `ocpp-forwarder.service`. It has no
+`Requires=`, `PartOf=`, or `BindsTo=` relationship with
+`ocpp-csms.service`.
+
+Collector reachability is not an Ansible deployment gate. If DNS, Internet, or
+the Collector is unavailable, the Forwarder remains isolated from the CSMS,
+keeps its cursor unchanged, logs a warning, and retries with exponential
+backoff capped at 60 seconds. Normal charging and OCPP-CSMS operation continue
+unaffected.

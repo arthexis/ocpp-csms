@@ -208,7 +208,7 @@ class Forwarder:
                 if not more:
                     sleeper(poll_seconds)
             except Exception as exc:
-                LOGGER.error("OCPP Forwarder retrying after failure: %s", exc)
+                LOGGER.warning("OCPP Collector unavailable; forwarding paused: %s", exc)
                 current = self.state_store.load()
                 self.state_store.save(replace(current, last_error=str(exc)))
                 sleeper(backoff)

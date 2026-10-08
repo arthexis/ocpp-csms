@@ -1,0 +1,19 @@
+[Unit]
+Description=OCPP Forwarder satellite service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ ocpp_forwarder_service_user }}
+Group={{ ocpp_forwarder_service_group }}
+EnvironmentFile={{ ocpp_forwarder_environment_path }}
+ExecStart={{ ocpp_forwarder_command }} run
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

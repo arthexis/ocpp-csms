@@ -22,6 +22,7 @@ reconnect_seconds=""
 stage_only=0
 diagnose=0
 dev=0
+forwarder=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -62,6 +63,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --dev)
             dev=1
+            shift
+            ;;
+        --forwarder)
+            forwarder=1
             shift
             ;;
         --)
@@ -111,6 +116,10 @@ fi
 
 if [ "$dev" -eq 1 ]; then
     set -- -e ocpp_csms_dev=true "$@"
+fi
+
+if [ "$forwarder" -eq 1 ]; then
+    set -- -e ocpp_forwarder_enabled=true "$@"
 fi
 
 if [ "$diagnose" -eq 1 ]; then

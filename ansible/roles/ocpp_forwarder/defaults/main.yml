@@ -1,0 +1,22 @@
+---
+ocpp_forwarder_enabled: false
+ocpp_forwarder_satellite_id: ""
+ocpp_forwarder_collector_url: "https://ocpp-collector.arthexis.com"
+ocpp_forwarder_token: ""
+ocpp_forwarder_batch_size: 500
+ocpp_forwarder_poll_seconds: 10
+ocpp_forwarder_timeout: 15
+
+ocpp_forwarder_service_name: "ocpp-forwarder.service"
+ocpp_forwarder_config_dir: "/etc/ocpp-forwarder"
+ocpp_forwarder_token_path: "{{ ocpp_forwarder_config_dir }}/token"
+ocpp_forwarder_environment_path: "{{ ocpp_forwarder_config_dir }}/environment"
+ocpp_forwarder_state_dir: "/var/lib/ocpp-forwarder"
+ocpp_forwarder_state_path: "{{ ocpp_forwarder_state_dir }}/state.json"
+
+# Forwarder is shipped in the same immutable release as OCPP CSMS.
+ocpp_forwarder_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-forwarder"
+ocpp_forwarder_csms_command: "{{ ocpp_csms_command_path }}"
+ocpp_forwarder_data_dir: "{{ ocpp_csms_data_dir }}"
+ocpp_forwarder_service_user: "{{ ocpp_csms_service_user }}"
+ocpp_forwarder_service_group: "{{ ocpp_csms_service_group }}"

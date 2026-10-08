@@ -1,0 +1,135 @@
+---
+- name: Validate OCPP Forwarder configuration
+  ansible.builtin.assert:
+    that:
+      - ocpp_forwarder_enabled | bool
+      - ocpp_forwarder_satellite_id is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - ocpp_forwarder_collector_url | length > 0
+      - ocpp_forwarder_collector_url.startswith('https://')
+      - ocpp_forwarder_token | length > 0
+      - ocpp_forwarder_batch_size | int >= 1
+      - ocpp_forwarder_poll_seconds | float >= 0
+      - ocpp_forwarder_timeout | float > 0
+    fail_msg: >-
+      OCPP Forwarder requires an explicit satellite id and token, a HTTPS
+      Collector URL, and valid batch/poll/timeout settings.
+
+- name: Verify active OCPP Forwarder command exists
+  ansible.builtin.stat:
+    path: "{{ ocpp_forwarder_command }}"
+  register: ocpp_forwarder_command_file
+
+- name: Require active OCPP Forwarder command
+  ansible.builtin.assert:
+    that:
+      - ocpp_forwarder_command_file.stat.exists
+      - ocpp_forwarder_command_file.stat.isreg
+      - ocpp_forwarder_command_file.stat.executable
+    fail_msg: >-
+      Active OCPP release does not provide {{ ocpp_forwarder_command }}.
+
+- name: Verify stable OCPP CSMS command exists
+  ansible.builtin.stat:
+    path: "{{ ocpp_forwarder_csms_command }}"
+  register: ocpp_forwarder_csms_command_file
+
+- name: Require stable OCPP CSMS command
+  ansible.builtin.assert:
+    that:
+      - ocpp_forwarder_csms_command_file.stat.exists
+    fail_msg: >-
+      OCPP Forwarder requires the stable OCPP CSMS command at
+      {{ ocpp_forwarder_csms_command }}.
+
+- name: Create OCPP Forwarder configuration directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ ocpp_forwarder_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ ocpp_forwarder_service_group }}"
+    mode: "0750"
+
+- name: Create OCPP Forwarder state directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ ocpp_forwarder_state_dir }}"
+    state: directory
+    owner: "{{ ocpp_forwarder_service_user }}"
+    group: "{{ ocpp_forwarder_service_group }}"
+    mode: "0750"
+
+- name: Install OCPP Forwarder token
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ ocpp_forwarder_token_path }}"
+    content: "{{ ocpp_forwarder_token | trim }}\n"
+    owner: "{{ ocpp_forwarder_service_user }}"
+    group: "{{ ocpp_forwarder_service_group }}"
+    mode: "0600"
+  no_log: true
+  register: ocpp_forwarder_token_install
+
+- name: Render OCPP Forwarder environment
+  become: true
+  ansible.builtin.template:
+    src: environment.j2
+    dest: "{{ ocpp_forwarder_environment_path }}"
+    owner: root
+    group: "{{ ocpp_forwarder_service_group }}"
+    mode: "0640"
+  register: ocpp_forwarder_environment_install
+
+- name: Render OCPP Forwarder systemd unit
+  become: true
+  ansible.builtin.template:
+    src: ocpp-forwarder.service.j2
+    dest: "/etc/systemd/system/{{ ocpp_forwarder_service_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ocpp_forwarder_unit_install
+
+- name: Verify OCPP Forwarder systemd unit
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - verify
+      - "/etc/systemd/system/{{ ocpp_forwarder_service_name }}"
+  changed_when: false
+
+- name: Enable OCPP Forwarder at boot
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_forwarder_service_name }}"
+    enabled: true
+    daemon_reload: true
+
+- name: Restart OCPP Forwarder when configuration changes
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_forwarder_service_name }}"
+    state: restarted
+  when: >-
+    ocpp_forwarder_token_install.changed
+    or ocpp_forwarder_environment_install.changed
+    or ocpp_forwarder_unit_install.changed
+
+- name: Ensure unchanged OCPP Forwarder service is running
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ ocpp_forwarder_service_name }}"
+    state: started
+  when: >-
+    not ocpp_forwarder_token_install.changed
+    and not ocpp_forwarder_environment_install.changed
+    and not ocpp_forwarder_unit_install.changed
+
+- name: Confirm OCPP Forwarder service is active
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - --quiet
+      - "{{ ocpp_forwarder_service_name }}"
+  changed_when: false
