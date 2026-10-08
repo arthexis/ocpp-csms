@@ -18,6 +18,7 @@ dev = [
   "pytest>=8,<9",
   "pytest-asyncio>=0.23,<2",
   "pytest-xdist>=3,<4",
+  "pytest-timeout>=2.3,<3",
 ]
 
 [project.scripts]
@@ -32,3 +33,5 @@ where = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--durations=10 --durations-min=0.01"
+timeout = 60
+timeout_method = "signal"
