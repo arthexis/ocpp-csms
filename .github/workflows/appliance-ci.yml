@@ -16,7 +16,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' &&
       github.event.pull_request.head.repo.owner.login == 'arthexis' &&
       github.event.pull_request.draft == false
-    runs-on: [self-hosted, linux, x64, gway-001]
+    runs-on: [self-hosted, Linux, ARM64, gway-001]
     timeout-minutes: 25
     concurrency:
       group: appliance-pr-${{ github.event.pull_request.number }}
