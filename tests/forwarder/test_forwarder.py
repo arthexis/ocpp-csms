@@ -264,3 +264,36 @@ def test_retry_backoff_keeps_cursor_and_resets_after_success(tmp_path):
     assert sleeps == [1.0, 10]
     assert store.load().cursor == 1
     assert store.load().last_error is None
+
+
+def test_collector_outage_is_logged_as_warning_and_backed_off(tmp_path, caplog):
+    store = StateStore(tmp_path / "state.json")
+    attempts = iter([RuntimeError("network down"), KeyboardInterrupt()])
+
+    def reader(command, *, data_dir, after, limit):
+        value = next(attempts)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    forwarder = Forwarder(
+        satellite_id="gway-004",
+        csms_command="ocpp-csms",
+        data_dir="/srv/ocpp",
+        batch_size=500,
+        state_store=store,
+        collector=FakeCollector(),
+        export_reader=reader,
+    )
+    sleeps = []
+
+    def sleeper(seconds):
+        sleeps.append(seconds)
+        raise KeyboardInterrupt
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(KeyboardInterrupt):
+            forwarder.run(poll_seconds=10, sleeper=sleeper)
+
+    assert sleeps == [1.0]
+    assert "Collector unavailable; forwarding paused" in caplog.text

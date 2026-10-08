@@ -241,6 +241,8 @@ def test_deploy_wrapper_exposes_field_friendly_options():
     assert "ansible/playbooks/diagnose.yml" in wrapper
     assert "--dev" in wrapper
     assert "ocpp_csms_dev=true" in wrapper
+    assert "--forwarder" in wrapper
+    assert "ocpp_forwarder_enabled=true" in wrapper
 
 
 

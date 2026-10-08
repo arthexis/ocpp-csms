@@ -5,3 +5,5 @@
   roles:
     - role: ocpp_csms
     - role: ocpp_discover
+    - role: ocpp_forwarder
+      when: ocpp_forwarder_enabled | default(false) | bool
