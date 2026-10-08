@@ -5,7 +5,6 @@ import argparse
 import json
 import asyncio
 from ocpp_csms.control import send_control
-from ocpp_csms.transactions import default_data_dir
 
 from ocpp_csms import tls_config
 
@@ -46,7 +45,7 @@ def run_tls(args: argparse.Namespace) -> int:
         else:
             result = tls_config.check_config(config, ws_port=args.ws_port)
     elif args.tls_command in {"enable", "reload", "disable"}:
-        response = asyncio.run(send_control(default_data_dir(), {"command": "tls_" + args.tls_command}))
+        response = asyncio.run(send_control(args.data_dir, {"command": "tls_" + args.tls_command}))
         print(json.dumps(response, indent=2, sort_keys=True))
         return 0 if response.get("ok") else 1
     else:
