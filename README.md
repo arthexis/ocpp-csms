@@ -383,6 +383,19 @@ establish whether any particular charger trusts the certificate. Run checks
 under the CSMS service account to verify effective readability. Future chunks
 will supply listener management, enable/disable, and hot reload.
 
+### Optional WSS listener (Chunk 2B)
+
+The existing `ocpp-csms.service` starts plaintext WS as before. If the persistent
+`/etc/ocpp-csms/tls.json` configuration has `"enabled": true` and passes
+certificate/key checks, the same process also starts WSS on the configured
+port. Both listeners dispatch to the existing OCPP handler and share session
+and transaction state. TLS readiness and bind failures are logged without
+bringing down WS. `tls config` continues to leave TLS disabled by default;
+`tls enable` and live activation arrive in Chunk 2C. For field use, do not
+manually enable WSS until the service account can read the private key and
+the certificate has been validated. A service restart is required to apply
+changes in this chunk; hot reload arrives in 2C.
+
 ## Installed layout
 
 Ansible uses immutable releases with stable commands:
