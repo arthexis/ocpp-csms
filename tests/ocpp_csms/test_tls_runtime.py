@@ -65,7 +65,12 @@ async def test_enable_and_reload_preserve_live_ws_wss(tmp_path):
                 async with websockets.connect(f"wss://localhost:{wss_port}/new", ssl=second_tls, subprotocols=["ocpp1.6"]) as new:
                     await new.send("new")
                     assert await new.recv() == "new"
-                assert (await listener.command("disable")).get("error") == "tls_operation_failed"
+                assert (await listener.command("disable")).get("ok")
+                assert listener.status()["listener"] == "draining"
+                await ws.send("still charging")
+                await wss.send("still charging")
+                assert await ws.recv() == "still charging"
+                assert await wss.recv() == "still charging"
         await listener.stop()
 
 
