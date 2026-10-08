@@ -63,6 +63,7 @@ jobs:
 
   test:
     name: ${{ matrix.platform }} / ${{ matrix.suite }}
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04-arm
@@ -99,15 +100,16 @@ jobs:
 
       - name: CSMS tests
         if: matrix.suite == 'CSMS tests'
-        run: python -m pytest -n 2 tests --ignore=tests/ocpp_discover --ignore=tests/ansible
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -n 2 -vv tests --ignore=tests/ocpp_discover --ignore=tests/ansible
 
       - name: Discover tests
         if: matrix.suite == 'Discover tests'
-        run: python -m pytest tests/ocpp_discover
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -vv tests/ocpp_discover
 
 
   ansible:
     name: Ansible tests
+    timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04-arm
@@ -120,7 +122,7 @@ jobs:
         run: sh -n deploy.sh
 
       - name: Install Ansible validation tools
-        run: python -m pip install pytest ansible-core ansible-lint
+        run: python -m pip install pytest "pytest-timeout>=2.3,<3" ansible-core ansible-lint
 
       - name: Ansible syntax check
         run: ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
@@ -129,7 +131,7 @@ jobs:
         run: ansible-lint --profile basic ansible/
 
       - name: Ansible contract tests
-        run: PYTHONPATH=src python -m pytest tests/ansible
+        run: PYTHONPATH=src timeout --signal=TERM --kill-after=10s 300s python -m pytest -vv tests/ansible
 
 
   ci:
