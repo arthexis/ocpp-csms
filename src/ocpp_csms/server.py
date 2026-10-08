@@ -15,6 +15,7 @@ from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transaction_query import TransactionQuery
 from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.tls_listener import TLSListener
 
 LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
@@ -119,9 +120,21 @@ class CSMSServer:
                     self.port,
                     subprotocols=[OCPP_16_SUBPROTOCOL],
                 ):
-                    LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
-                    LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
-                    await asyncio.Future()
+                    # TLS startup is independent of the already-bound WS listener.
+                    # A bad certificate or occupied WSS port must not stop WS.
+                    tls = TLSListener()
+                    try:
+                        await tls.start(
+                            self.accept,
+                            host=self.host,
+                            ws_port=self.port,
+                            subprotocol=OCPP_16_SUBPROTOCOL,
+                        )
+                        LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
+                        LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
+                        await asyncio.Future()
+                    finally:
+                        await tls.stop()
         finally:
             self._record_runtime("server_stopped")
             remove_pid(self.events.data_dir)
