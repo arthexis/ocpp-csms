@@ -493,6 +493,87 @@
     ocpp_csms_service_group: "{{ ocpp_csms_service_group_result.stdout }}"
     ocpp_csms_service_home: "{{ ansible_env.HOME }}"
 
+# TLS state belongs to the appliance, never an immutable release. Create only
+# its directories; in particular do not create/overwrite tls.json or keys.
+- name: Prepare persistent OCPP CSMS TLS directories
+  become: true
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ ocpp_csms_service_user }}"
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "/etc/ocpp-csms", mode: "0750" }
+    - { path: "/etc/ocpp-csms/tls", mode: "0700" }
+
+# Repair the common upgrade case where an operator previously ran
+# 'sudo ocpp-csms tls config' and left tls.json root-owned and unreadable.
+# Preserve the file bytes and its enabled state.
+- name: Inspect existing TLS configuration ownership
+  become: true
+  ansible.builtin.stat:
+    path: /etc/ocpp-csms/tls.json
+    follow: false
+  register: ocpp_csms_tls_config_stat
+
+- name: Preserve TLS configuration under the CSMS service identity
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms/tls.json
+    state: file
+    owner: "{{ ocpp_csms_service_user }}"
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0600"
+    follow: false
+  when:
+    - ocpp_csms_tls_config_stat.stat.exists | default(false)
+    - ocpp_csms_tls_config_stat.stat.isreg | default(false)
+
+- name: Reject unsafe non-regular TLS configuration
+  ansible.builtin.assert:
+    that:
+      - not (ocpp_csms_tls_config_stat.stat.exists | default(false)) or
+        (ocpp_csms_tls_config_stat.stat.isreg | default(false))
+    fail_msg: TLS configuration must be a regular file, not a symbolic link or directory.
+
+# TLS readiness must be measured as the same non-root UID as the service.
+# This check intentionally cannot mutate the config or certificates.
+- name: Check deployed TLS readiness as service account
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_command }}"
+      - tls
+      - check
+      - --ws-port
+      - "{{ ocpp_csms_port }}"
+  register: ocpp_csms_tls_readiness
+  changed_when: false
+  failed_when: false
+  when: ocpp_csms_tls_config_stat.stat.exists | default(false)
+
+- name: Read TLS configuration enablement without modifying state
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -c
+      - "import json; from pathlib import Path; p=Path('/etc/ocpp-csms/tls.json'); print('enabled' if json.loads(p.read_text()).get('enabled') is True else 'disabled')"
+  register: ocpp_csms_tls_enablement
+  changed_when: false
+  when: ocpp_csms_tls_config_stat.stat.exists | default(false)
+
+- name: Block deployment with enabled but unusable WSS credentials
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_tls_readiness.rc == 0
+    fail_msg: >-
+      TLS is enabled but the service account cannot validate its certificate,
+      private key, hostname or listener port. Preserve WS service and repair
+      TLS credentials before deploying.
+  when:
+    - ocpp_csms_tls_config_stat.stat.exists | default(false)
+    - ocpp_csms_tls_enablement.stdout == 'enabled'
+
 - name: Render candidate OCPP CSMS systemd unit
   ansible.builtin.template:
     src: ocpp-csms.service.j2
