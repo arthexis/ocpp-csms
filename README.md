@@ -513,3 +513,52 @@ deploy.sh              canonical deployment wrapper
 ```
 
 This README is the canonical project documentation.
+
+
+## OCPP Forwarder
+
+`ocpp-forwarder` is an independent satellite-side process that forwards the
+stable `ocpp-csms/export/v1` contract to an OCPP Collector. It does not read
+the CSMS SQLite database or import the CSMS persistence layer.
+
+Example one-page manual run:
+
+```bash
+ocpp-forwarder \
+  --satellite-id gway-004 \
+  --collector-url https://ocpp-collector.arthexis.com \
+  --token-file /etc/ocpp-forwarder/token \
+  run --once
+```
+
+The default persistent state file is:
+
+```
+/var/lib/ocpp-forwarder/state.json
+```
+
+The cursor is advanced only after events, energy samples, transaction snapshots,
+charger state, and satellite progress have all been accepted by the Collector.
+Failures therefore result in safe at-least-once retries against idempotent
+Collector keys.
+
+If the CSMS `source_id` changes because the local datastore was replaced, the
+Forwarder starts the new source epoch from cursor zero while retaining the old
+epoch centrally.
+
+The long-running mode drains backlog pages immediately and sleeps only once it
+is caught up:
+
+```bash
+ocpp-forwarder --satellite-id gway-004 run
+```
+
+Local forwarding state can be inspected without contacting the Collector:
+
+```bash
+ocpp-forwarder --satellite-id gway-004 status
+```
+
+Deployment as `ocpp-forwarder.service` is intentionally handled in the next
+implementation chunk so the Forwarder program can be tested independently of
+satellite provisioning.

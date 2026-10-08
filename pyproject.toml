@@ -23,6 +23,7 @@ dev = [
 [project.scripts]
 ocpp-csms = "ocpp_csms.cli:main"
 ocpp-discover = "ocpp_discover.__main__:main"
+ocpp-forwarder = "ocpp_forwarder.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
