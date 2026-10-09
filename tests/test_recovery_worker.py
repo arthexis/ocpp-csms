@@ -31,6 +31,7 @@ async def setup(tmp_path, *, disconnect=True, activity_minutes=90):
     record = view.record
     record["created_at"] = earlier
     record["updated_at"] = earlier
+    record["start_received_at"] = earlier
     view.path.write_text(__import__("json").dumps(record))
     server = SimpleNamespace(events=events, transactions=archive,
                              connected_chargers=lambda: [])
