@@ -166,6 +166,34 @@ jobs:
             /home/arthe/.local/bin/lcd-actions-runner-status start "$PR_NUMBER" "$PR_BRANCH"
           fi
 
+      - name: Update sibling LCD Sound repository first
+        shell: bash
+        run: |
+          set -euo pipefail
+          lcd_repo="$HOME/gway-lcd-sound"
+          if [[ ! -d "$lcd_repo/.git" ]]; then
+            if [[ -e "$lcd_repo" ]]; then
+              echo "::error::$lcd_repo exists but is not a Git checkout."
+              exit 1
+            fi
+            # Gway-001 must have read-only SSH access to the private repository.
+            git clone --branch main --single-branch git@github.com:arthexis/gway-lcd-sound.git "$lcd_repo"
+          fi
+          if [[ "$(git -C "$lcd_repo" branch --show-current)" != "main" ]]; then
+            echo "::error::LCD Sound checkout must be on main: $lcd_repo"
+            exit 1
+          fi
+          if [[ -n "$(git -C "$lcd_repo" status --porcelain)" ]]; then
+            echo "::error::LCD Sound checkout has local changes: $lcd_repo"
+            exit 1
+          fi
+          git -C "$lcd_repo" pull --ff-only origin main
+          install -d -m 0755 "$HOME/.local/bin"
+          install -m 0755 "$lcd_repo/scripts/gway/lcd_lockfile_runner.py" "$HOME/.local/bin/lcd-lockfile-runner"
+          install -m 0755 "$lcd_repo/scripts/gway/lcd-actions-runner-status" "$HOME/.local/bin/lcd-actions-runner-status"
+          # The currently-running LCD service can continue until it is restarted.
+          systemctl --user try-restart lcd-lockfile.service
+
       - name: Check out trusted PR head
         uses: actions/checkout@v4
         with:
