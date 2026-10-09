@@ -10,6 +10,7 @@ from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_comman
 from ocpp_csms.cli.energy import add_energy_command, run_energy
 from ocpp_csms.cli.export import add_export_command, run_export
 from ocpp_csms.cli.json_contracts import run_transactions_json
+from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
 from ocpp_csms.cli.tls import add_tls_command, run_tls
@@ -27,6 +28,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_charger_commands(subcommands))
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
+    commands["recover"] = add_recovery_parser(subcommands)
     commands["energy"] = add_energy_command(subcommands)
     commands["export"] = add_export_command(subcommands)
     commands["rfid"] = add_rfid_command(subcommands)
@@ -52,7 +54,13 @@ def print_help(parser, commands, topic=None) -> None:
 
 
 def main() -> int:
-    parser, commands = build_parser(); args = parser.parse_args(sys.argv[1:])
+    argv = list(sys.argv[1:])
+    # Support the natural "transactions recover" syntax without breaking
+    # the existing integer transaction selector.
+    offset = argv.index("transactions") if "transactions" in argv else -1
+    if offset >= 0 and len(argv) > offset + 1 and argv[offset + 1] == "recover":
+        argv[offset:offset + 2] = ["recover"]
+    parser, commands = build_parser(); args = parser.parse_args(argv)
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
         if args.command in APPLIANCE_COMMANDS: return run_appliance(args)
@@ -60,6 +68,7 @@ def main() -> int:
         if args.command in ("charger", "chargers"): return run_chargers(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
+        if args.command == "recover": return run_recovery(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
