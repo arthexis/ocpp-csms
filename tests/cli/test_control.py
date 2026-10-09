@@ -97,17 +97,23 @@ def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_control_commands_require_exactly_one_timing_mode(cli_parser):
+def test_control_commands_default_to_now(cli_parser):
     for args in (
-        ["start", "--id-tag", "REMOTE"],
+        ["start"],
         ["stop", "--transaction", "42"],
         ["reset"],
     ):
-        with pytest.raises(SystemExit):
-            cli_parser.parse_args(args)
+        parsed = cli_parser.parse_args(args)
+        assert control_request(parsed)["timing"] == "now"
 
     with pytest.raises(SystemExit):
         cli_parser.parse_args(["reset", "--now", "--after", "5"])
+
+
+def test_start_optional_tag_and_rfid_alias(parse_cli):
+    assert control_request(parse_cli("start"))["id_tag"] == "AUTO"
+    assert control_request(parse_cli("start", "--rfid", "TEST001"))["id_tag"] == "TEST001"
+    assert control_request(parse_cli("start", "--id-tag", "TEST002"))["id_tag"] == "TEST002"
 
 
 @pytest.mark.parametrize(
