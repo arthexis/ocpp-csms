@@ -125,7 +125,7 @@ def _summary(row: sqlite3.Row) -> str:
     if row["transaction_id"] is not None:
         details.append(f"tx={row['transaction_id']}")
     if row["action"] == "StatusNotification":
-        details.extend(str(value) for value in (payload.get("status"), payload.get("error_code")) if value and value != "NoError")
+        details.extend(str(value) for value in (payload.get("status"), payload.get("error_code"), payload.get("info")) if value and value != "NoError")
     return " ".join([row["action"], *details])
 
 
