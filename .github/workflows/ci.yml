@@ -20,6 +20,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify deploy.sh is executable in Git and checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mode="$(git ls-files --stage -- deploy.sh | awk '{print $1}')"
+          if [[ "$mode" != "100755" ]]; then
+            echo "::error::deploy.sh must be tracked with Git mode 100755 (found: ${mode:-missing})"
+            exit 1
+          fi
+          test -x deploy.sh || { echo "::error::deploy.sh is not executable in checkout"; exit 1; }
+
       - name: Validate documentation-only changes
         id: scope
         shell: bash
