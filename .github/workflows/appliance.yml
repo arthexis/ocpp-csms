@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       full_deploy:
-        description: Perform a full OCPP CSMS deployment instead of stage-only validation
+        description: Deploy OCPP CSMS and its sibling simulator instead of stage-only validation
         required: false
         type: boolean
         default: false
@@ -57,3 +57,39 @@ jobs:
       - name: Deploy OCPP CSMS
         if: ${{ inputs.full_deploy }}
         run: sh ./deploy.sh
+
+      - name: Deploy sibling OCPP simulator
+        if: ${{ inputs.full_deploy }}
+        env:
+          SIMULATOR_REPO_OVERRIDE: ${{ vars.OCPP_SIMULATOR_REPO_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_repo="${SIMULATOR_REPO_OVERRIDE:-$HOME/ocpp-simulator}"
+          if [[ ! -f "$simulator_repo/deploy.sh" || ! -d "$simulator_repo/.git" ]]; then
+            echo "::error::Simulator checkout not found at $simulator_repo"
+            exit 1
+          fi
+          if [[ "$(git -C "$simulator_repo" branch --show-current)" != "main" ]]; then
+            echo "::error::Simulator checkout must be on main before deployment"
+            exit 1
+          fi
+          if [[ -n "$(git -C "$simulator_repo" status --porcelain)" ]]; then
+            echo "::error::Simulator checkout has local changes; refusing to overwrite them"
+            exit 1
+          fi
+          git -C "$simulator_repo" pull --ff-only origin main
+          (cd "$simulator_repo" && sh ./deploy.sh)
+          "$HOME/.local/bin/ocpp-simulator" --help >/dev/null
+
+      - name: Run isolated OCPP simulator charging smoke test
+        if: ${{ inputs.full_deploy }}
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          # The smoke script starts a private loopback CSMS with a temporary
+          # data directory; it never writes to the live appliance archive.
+          csms_python="$HOME/.local/share/ocpp-csms/current/venv/bin/python"
+          [[ -x "$csms_python" ]] || { echo "::error::Deployed CSMS virtualenv missing"; exit 1; }
+          timeout --signal=TERM --kill-after=5s 100s "$csms_python" scripts/pr_simulator_smoke.py
