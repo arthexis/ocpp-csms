@@ -44,7 +44,7 @@ def test_aged_disconnected_transaction_recovered_once(tmp_path):
         assert await recover_once(server, now=NOW) == [txid]
         assert await recover_once(server, now=NOW) == []
         view = TransactionQuery(tmp_path).get(txid)
-        assert view.status == "inferred_stopped"
+        assert view.status == "disconnected"
         assert view.record["stop"] is None
         with sqlite3.connect(database_path(tmp_path)) as db:
             assert db.execute("SELECT state FROM transactions").fetchone()[0] == "inferred_stopped"
@@ -75,7 +75,7 @@ def test_restart_after_partial_sqlite_write_retries(tmp_path):
             raise sqlite3.OperationalError("temporary failure")
         server.events.infer_transaction_stop = fail
         assert await recover_once(server, now=NOW) == []
-        assert TransactionQuery(tmp_path).get(txid).status == "inferred_stopped"
+        assert TransactionQuery(tmp_path).get(txid).status == "disconnected"
         server.events.infer_transaction_stop = original
         assert await recover_once(server, now=NOW) == [txid]
         with sqlite3.connect(database_path(tmp_path)) as db:
