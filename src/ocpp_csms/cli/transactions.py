@@ -20,7 +20,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     add(transactions, "transaction_id", nargs="?", type=int, help="Transaction ID for detailed inspection")
     selection = transactions.add_mutually_exclusive_group()
     selection.add_argument("--active", action="store_true", help="Show only active transactions")
-    selection.add_argument("--last", action="store_true", help="Show the most recent non-active transaction")
+    selection.add_argument("--last", action="store_true", help="Show the most recent transaction, including active")
     add(transactions, "--cp", "--charger", dest="charger", help="Filter by charge point ID")
     add(transactions, "-c", "--connector", dest="connector", type=int, help="Filter by connector ID")
     add(transactions, "--id-tag", help="Filter by OCPP idTag")

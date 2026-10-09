@@ -73,12 +73,62 @@ def transaction_energy_wh(view: TransactionView) -> int | None:
     return _energy_wh(start, stop)
 
 
+def _live_energy_wh(view: TransactionView) -> int | None:
+    """Estimate delivered energy from the newest valid cumulative meter sample.
+
+    A running transaction has no meter_stop yet. Only use the cumulative
+    Energy.Active.Import.Register measurand, not instantaneous power or
+    an unrelated sample. Negative deltas are not trustworthy.
+    """
+    record = view.record
+    start = record.get("start")
+    if not isinstance(start, dict):
+        return None
+    try:
+        meter_start = int(start["meter_start"])
+    except (KeyError, ValueError, TypeError):
+        return None
+    payloads = record.get("meter_values")
+    if not isinstance(payloads, list):
+        return None
+    for payload in reversed(payloads):
+        if not isinstance(payload, dict):
+            continue
+        entries = payload.get("meter_value")
+        if not isinstance(entries, list):
+            continue
+        for entry in reversed(entries):
+            if not isinstance(entry, dict):
+                continue
+            samples = entry.get("sampled_value")
+            if not isinstance(samples, list):
+                continue
+            for sample in reversed(samples):
+                if not isinstance(sample, dict) or sample.get("measurand") != "Energy.Active.Import.Register":
+                    continue
+                try:
+                    value = float(sample["value"])
+                    unit = sample.get("unit", "Wh")
+                    if unit == "kWh":
+                        value *= 1000
+                    elif unit != "Wh":
+                        continue
+                    delta = value - meter_start
+                    if 0 <= delta < float("inf"):
+                        return round(delta)
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    continue
+    return None
+
+
 def _format_energy(energy_wh: int) -> str:
     return f"{energy_wh / 1000:.3f} kWh" if energy_wh >= 1000 else f"{energy_wh} Wh"
 
 
 def _transaction_energy(view: TransactionView) -> str:
     energy_wh = transaction_energy_wh(view)
+    if energy_wh is None:
+        energy_wh = _live_energy_wh(view)
     return _format_energy(energy_wh) if energy_wh is not None else "-"
 
 
@@ -150,6 +200,9 @@ def format_transaction(view: TransactionView, *, local_time: bool = False) -> st
         started, stopped = start.get("timestamp"), stop.get("timestamp")
     duration = _duration(started, stopped)
     energy_wh = transaction_energy_wh(view)
+    estimated = energy_wh is None
+    if estimated:
+        energy_wh = _live_energy_wh(view)
     meter = _meter_summary(record, local_time=local_time)
     lines = [
         f"Transaction {view.transaction_id}", f"Status:       {view.status or 'unknown'}", f"Origin:       {origin}",
@@ -160,7 +213,7 @@ def format_transaction(view: TransactionView, *, local_time: bool = False) -> st
         lines.append(f"Duration:     {duration}")
     lines.extend((f"Event time:   {_age_key(view.event_time(local_time=local_time))}", f"Meter start:  {_text(start.get('meter_start'))}", f"Meter stop:   {_text(stop.get('meter_stop'))}"))
     if energy_wh is not None:
-        lines.append(f"Energy:       {_format_energy(energy_wh)}")
+        lines.append(f"Energy:       {_format_energy(energy_wh)}" + (" (live)" if estimated else ""))
     lines.extend(("", "MeterValues:", f"  messages:   {meter['messages']}", f"  samples:    {meter['samples']}", f"  first:      {_text(meter['first'])}", f"  last:       {_text(meter['last'])}"))
     if meter["latest_energy"] is not None:
         value, unit = meter["latest_energy"]

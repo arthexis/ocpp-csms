@@ -186,7 +186,7 @@ class TransactionQuery:
         return self.list(active=True, **filters)
 
     def last(self, **filters: Any) -> TransactionView | None:
-        matches = self.list(active=False, limit=1, **filters)
+        matches = self.list(limit=1, **filters)
         return matches[0] if matches else None
 
     def _views(self) -> Iterable[TransactionView]:
