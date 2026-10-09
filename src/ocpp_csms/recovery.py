@@ -53,7 +53,7 @@ def write_policy(data_dir: str | Path, policy: RecoveryPolicy) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(vars(policy), handle, sort_keys=True)
-            handle.write("\\n")
+            handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, path)
