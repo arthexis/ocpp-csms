@@ -182,6 +182,32 @@ class TransactionArchive:
             self._write(path, record)
             return decision
 
+    async def infer_stop(
+        self, transaction_id: int, *, reason: str = "disconnected_timeout",
+    ) -> bool:
+        """Record recovery evidence without inventing a charger stop payload."""
+        if reason != "disconnected_timeout":
+            raise ValueError("unsupported recovery reason")
+        async with self._lock:
+            path = self._paths.get(int(transaction_id))
+            if path is None or not path.exists():
+                return False
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record.get("status") not in {"open", "recovered"} or record.get("stop") is not None:
+                return False
+            now = utc_now_iso()
+            record["recovery"] = {
+                "reason": reason,
+                "inferred_at": now,
+                "last_activity_at": record.get("updated_at", record.get("created_at")),
+                "last_meter_wh": None,
+                "reconciled_at": None,
+            }
+            record["status"] = "inferred_stopped"
+            record["updated_at"] = now
+            self._write(path, record)
+            return True
+
     async def stop(self, charge_point_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:
             transaction_id = int(payload["transaction_id"])
@@ -192,6 +218,8 @@ class TransactionArchive:
             received_at = utc_now_iso()
             record["stop"] = payload
             record["stop_received_at"] = received_at
+            if isinstance(record.get("recovery"), dict):
+                record["recovery"]["reconciled_at"] = received_at
             record["status"] = "stopped"
             record["updated_at"] = received_at
             self._write(path, record)
