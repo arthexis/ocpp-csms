@@ -193,6 +193,8 @@ jobs:
           git -C "$lcd_repo" pull --ff-only origin main
           install -d -m 0755 "$HOME/.local/bin"
           install -m 0755 "$lcd_repo/scripts/gway/lcd_lockfile_runner.py" "$HOME/.local/bin/lcd-lockfile-runner"
+          install -d -m 0755 "$HOME/.local/bin/lcd_engine"
+          install -m 0644 "$lcd_repo"/scripts/gway/lcd_engine/*.py "$HOME/.local/bin/lcd_engine/"
           install -m 0755 "$lcd_repo/scripts/gway/lcd-actions-runner-status" "$HOME/.local/bin/lcd-actions-runner-status"
           # The currently-running LCD service can continue until it is restarted.
           systemctl --user try-restart lcd-lockfile.service || true
