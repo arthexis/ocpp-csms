@@ -34,8 +34,8 @@ def run_recovery(args) -> int:
     if args.policy:
         if args.charger or args.dry_run:
             raise ValueError("--policy cannot be combined with recovery selectors")
-        timeout = args.timeout_minutes or policy.timeout_seconds // 60
-        interval = args.interval_minutes or policy.interval_seconds // 60
+        timeout = args.timeout_minutes if args.timeout_minutes is not None else policy.timeout_seconds // 60
+        interval = args.interval_minutes if args.interval_minutes is not None else policy.interval_seconds // 60
         if timeout < 1 or interval < 1:
             raise ValueError("recovery intervals must be positive")
         changed = args.timeout_minutes is not None or args.interval_minutes is not None or args.enable or args.disable
