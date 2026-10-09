@@ -167,6 +167,9 @@ jobs:
           fi
 
       - name: Update sibling LCD Sound repository first
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -192,7 +195,9 @@ jobs:
           install -m 0755 "$lcd_repo/scripts/gway/lcd_lockfile_runner.py" "$HOME/.local/bin/lcd-lockfile-runner"
           install -m 0755 "$lcd_repo/scripts/gway/lcd-actions-runner-status" "$HOME/.local/bin/lcd-actions-runner-status"
           # The currently-running LCD service can continue until it is restarted.
-          systemctl --user try-restart lcd-lockfile.service
+          systemctl --user try-restart lcd-lockfile.service || true
+          # On first bootstrap the publisher was not present at job start.
+          "$HOME/.local/bin/lcd-actions-runner-status" start "$PR_NUMBER" "$PR_BRANCH"
 
       - name: Check out trusted PR head
         uses: actions/checkout@v4
