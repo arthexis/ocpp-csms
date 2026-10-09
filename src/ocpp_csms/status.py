@@ -20,6 +20,8 @@ class ConnectorStatus:
     transaction_id: int | None
     id_tag: str | None
     started_at: str | None
+    info: str | None = None
+    derived_status: str | None = None
 
 
 @dataclass
@@ -35,6 +37,12 @@ class ChargerStatus:
     id_tag: str | None
     started_at: str | None
     connectors: list[ConnectorStatus]
+    info: str | None = None
+    derived_status: str | None = None
+
+
+def derive_status(status: str | None, error_code: str | None, info: str | None) -> str | None:
+    return 'EmergencyStop' if (status == 'Faulted' and error_code == 'InternalError' and info == 'EmergencyStop') else status
 
 
 def _connect(database: Path) -> sqlite3.Connection:
@@ -177,7 +185,7 @@ def _charger_status(
     ).fetchone()
     status_rows = connection.execute(
         """
-        SELECT connector_id, status, error_code, received_at
+        SELECT connector_id, status, error_code, info, received_at
         FROM connector_status
         WHERE charger_id = ?
         ORDER BY connector_id
@@ -210,6 +218,8 @@ def _charger_status(
                 connector_id=connector_id,
                 status=status["status"] if status else None,
                 error_code=status["error_code"] if status else None,
+                info=status['info'] if status else None,
+                derived_status=derive_status(status['status'], status['error_code'], status['info']) if status else None,
                 transaction_id=int(transaction["transaction_id"]) if transaction else None,
                 id_tag=transaction["id_tag"] if transaction else None,
                 started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
@@ -219,17 +229,27 @@ def _charger_status(
     transaction = transaction_rows[0] if transaction_rows else None
     summary_status = None
     summary_error = None
+    summary_info = None
     if transaction and transaction["connector_id"] is not None:
         active_connector = statuses.get(int(transaction["connector_id"]))
         if active_connector:
             summary_status = active_connector["status"]
             summary_error = active_connector["error_code"]
+            summary_info = active_connector['info']
         else:
             summary_status = "Charging"
     elif status_rows:
         latest_status = max(status_rows, key=lambda row: row["received_at"])
         summary_status = latest_status["status"]
         summary_error = latest_status["error_code"]
+        summary_info = latest_status['info']
+
+    # An emergency fault on any physical connector must be visible at charger level,
+    # even when connector 0 reports Available or no transaction ever existed.
+    emergencies = [row for row in status_rows if int(row['connector_id']) != 0 and derive_status(row['status'], row['error_code'], row['info']) == 'EmergencyStop']
+    if emergencies:
+        fault = max(emergencies, key=lambda row: row['received_at'])
+        summary_status, summary_error, summary_info = fault['status'], fault['error_code'], fault['info']
 
     return ChargerStatus(
         charger_id=charger_id,
@@ -239,6 +259,8 @@ def _charger_status(
         last_seen=latest["received_at"] if latest else None,
         status=summary_status,
         error_code=summary_error,
+        info=summary_info,
+        derived_status=derive_status(summary_status, summary_error, summary_info),
         transaction_id=int(transaction["transaction_id"]) if transaction else None,
         id_tag=transaction["id_tag"] if transaction else None,
         started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
@@ -264,16 +286,21 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             f"Connected since: {item.connected_at or '-'}",
             f"Protocol: {item.subprotocol or 'not negotiated'}",
             f"Last seen: {item.last_seen or '-'}",
-            f"Status: {item.status or 'Unknown'}",
+            f"Status: {item.derived_status or item.status or 'Unknown'}",
+            *( [f"OCPP status: {item.status}"] if item.derived_status != item.status else [] ),
         ]
         if item.error_code and item.error_code != "NoError":
             lines.append(f"Error: {item.error_code}")
+        if item.info:
+            lines.append(f"Info: {item.info}")
         if item.connectors:
             lines.append("Connectors:")
             for connector in item.connectors:
-                lines.append(f"Connector {connector.connector_id}: {connector.status or 'Unknown'}")
+                lines.append(f"Connector {connector.connector_id}: {connector.derived_status or connector.status or 'Unknown'}")
                 if connector.error_code and connector.error_code != "NoError":
                     lines.append(f"  Error: {connector.error_code}")
+                if connector.info:
+                    lines.append(f"  Info: {connector.info}")
                 lines.extend(
                     [
                         f"  Charging: {'yes' if connector.transaction_id is not None else 'no'}",
@@ -321,6 +348,6 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     lines.append("ID                 Connected  Status       Charging  Last seen")
     for item in chargers:
         lines.append(
-            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.status or 'Unknown'):<12} {'yes' if item.charger_id in active_chargers else 'no':<9} {item.last_seen or '-'}"
+            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.derived_status or item.status or 'Unknown'):<12} {'yes' if item.charger_id in active_chargers else 'no':<9} {item.last_seen or '-'}"
         )
     return "\n".join(lines)
