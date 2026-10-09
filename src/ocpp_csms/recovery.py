@@ -64,9 +64,14 @@ async def recover_once(server, *, timeout_seconds: int = TIMEOUT_SECONDS,
             continue
         if view.status not in {"open", "recovered", "inferred_stopped"} or view.record.get("stop") is not None:
             continue
+        if state == "inferred_stopped" and view.status == "inferred_stopped":
+            continue
         # A disconnected charger can keep charging; this is an administrative
         # inference only. Use receive-side evidence, not untrusted device time.
-        last_seen = max(_time(str(activity_at)), view.received_activity_at,
+        archive_activity = (view.record.get("recovery", {}).get("last_activity_at")
+                            if view.status == "inferred_stopped" else None)
+        last_seen = max(_time(str(activity_at)),
+                        _time(archive_activity) if archive_activity else view.received_activity_at,
                         disconnected[charger])
         if now - last_seen < timedelta(seconds=timeout_seconds):
             continue
