@@ -23,7 +23,7 @@ def test_recover_refuses_running_process_before_mutation(tmp_path):
     with patch("ocpp_csms.install_recovery.process_is_running", return_value=True):
         with pytest.raises(RuntimeError, match="stop it"):
             bootstrap_recovery(tmp_path)
-    assert inspect_schema(tmp_path).version == 5
+    assert inspect_schema(tmp_path).version == 6
 
 
 def test_recover_refuses_preflight_disagreement(tmp_path):
