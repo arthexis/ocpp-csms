@@ -1,0 +1,77 @@
+name: Remote simulator migration validation
+# Opt-in until gway-remote runner registration and callbacks have been verified.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Trusted PR number carrying the simulator label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  remote-simulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Validate trusted PR
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/arthexis/ocpp-csms/pulls/$PR" > pr.json
+          jq -e '
+            .state == "open" and .draft == false and
+            .user.login == "arthexis" and
+            .head.repo.full_name == "arthexis/ocpp-csms" and
+            ([.labels[].name] | index("simulator") != null)
+          ' pr.json >/dev/null
+          echo "sha=$(jq -r .head.sha pr.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Mark expected callback pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.request.outputs.sha }}
+        run: |
+          gh api -X POST "repos/arthexis/ocpp-csms/statuses/$SHA" \
+            -f state=pending -f context=gway-remote/simulator \
+            -f description="Awaiting central remote worker"
+
+      - name: Dispatch remote job
+        env:
+          GH_TOKEN: ${{ secrets.GWAY_REMOTE_DISPATCH_TOKEN }}
+          SHA: ${{ steps.request.outputs.sha }}
+          PR: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo "::error::Missing GWAY_REMOTE_DISPATCH_TOKEN"; exit 1; }
+          gh api -X POST repos/arthexis/gway-remote/dispatches \
+            -f event_type=ocpp-simulator \
+            -f client_payload[repository]=arthexis/ocpp-csms \
+            -f client_payload[sha]="$SHA" \
+            -f client_payload[pr]="$PR"
+
+      - name: Await terminal callback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.request.outputs.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 100); do
+            state="$(gh api "repos/arthexis/ocpp-csms/commits/$SHA/status" \
+              --jq '.statuses[] | select(.context == "gway-remote/simulator") | .state' | head -n 1)"
+            case "$state" in
+              success) exit 0 ;;
+              failure|error) echo "::error::Remote simulator: $state"; exit 1 ;;
+            esac
+            sleep 12
+          done
+          echo "::error::Remote simulator timed out waiting for callback"
+          exit 1
