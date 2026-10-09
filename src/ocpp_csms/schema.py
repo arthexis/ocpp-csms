@@ -129,7 +129,9 @@ ALTER TABLE connector_status ADD COLUMN info TEXT;
 """
 
 CURRENT_SCHEMA_SQL = (_SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
-                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_5_ADDITIONS_SQL).replace(\n    'CREATE TABLE IF NOT EXISTS connector_status (',\n    'CREATE TABLE IF NOT EXISTS connector_status (\\n    info TEXT,', 1)
+                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_5_ADDITIONS_SQL).replace(
+    'CREATE TABLE IF NOT EXISTS connector_status (',
+    'CREATE TABLE IF NOT EXISTS connector_status (\\n    info TEXT,', 1)
 _SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6}
 
 
