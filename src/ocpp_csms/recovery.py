@@ -108,9 +108,9 @@ async def recover_once(server, *, timeout_seconds: int = TIMEOUT_SECONDS,
         if view is None or view.charge_point_id != charger:
             LOGGER.error("Recovery skipped transaction %s: archive mismatch", transaction_id)
             continue
-        if view.status not in {"open", "recovered", "inferred_stopped"} or view.record.get("stop") is not None:
+        if view.record.get("status") not in {"open", "recovered", "inferred_stopped"} or view.record.get("stop") is not None:
             continue
-        if state == "inferred_stopped" and view.status == "inferred_stopped":
+        if state == "inferred_stopped" and view.record.get("status") == "inferred_stopped":
             continue
         # A disconnected charger can keep charging; this is an administrative
         # inference only. Use receive-side evidence, not untrusted device time.
@@ -126,7 +126,7 @@ async def recover_once(server, *, timeout_seconds: int = TIMEOUT_SECONDS,
             continue
         try:
             # Archive first. If SQLite fails, a later scan repairs that state.
-            if view.status in {"open", "recovered"}:
+            if view.record.get("status") in {"open", "recovered"}:
                 await server.transactions.infer_stop(int(transaction_id))
             if state in {"open", "recovered"}:
                 server.events.infer_transaction_stop(int(transaction_id))
