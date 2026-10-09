@@ -28,7 +28,7 @@ def record(transaction_id, *, stopped=False, samples=None):
         ],
     }
     if stopped:
-        result["stop"] = {"timestamp": "2026-10-09T00:59:00Z", "meter_stop": 250}
+        result["stop"] = {"timestamp": "2026-10-09T00:01:30Z", "meter_stop": 250}
     return result
 
 
