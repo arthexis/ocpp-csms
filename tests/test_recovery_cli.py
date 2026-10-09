@@ -62,7 +62,7 @@ def test_recover_preview_and_explicit_offline_write(tmp_path, capsys):
     assert run_recovery(args(tmp_path, charger="OTHER")) == 0
     assert TransactionQuery(tmp_path).get(txid).status == "open"
     assert run_recovery(args(tmp_path, charger="SIM001")) == 0
-    assert TransactionQuery(tmp_path).get(txid).status == "inferred_stopped"
+    assert TransactionQuery(tmp_path).get(txid).status == "disconnected"
     assert run_recovery(args(tmp_path, charger="SIM001", dry_run=True)) == 0
     assert "Eligible: 0" in capsys.readouterr().out
 
