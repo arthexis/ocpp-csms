@@ -65,7 +65,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          simulator_repo="${SIMULATOR_REPO_OVERRIDE:-$HOME/ocpp-simulator}"
+          # Gway-001 repositories are siblings under ~/Repos.
+          # GitHub Actions checks out CSMS elsewhere, not in ~/Repos.
+          simulator_repo="${SIMULATOR_REPO_OVERRIDE:-$HOME/Repos/ocpp-simulator}"
           if [[ ! -f "$simulator_repo/deploy.sh" || ! -d "$simulator_repo/.git" ]]; then
             echo "::error::Simulator checkout not found at $simulator_repo"
             exit 1
