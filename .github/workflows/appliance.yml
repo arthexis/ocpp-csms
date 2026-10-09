@@ -90,4 +90,6 @@ jobs:
           set -euo pipefail
           # The smoke script starts a private loopback CSMS with a temporary
           # data directory; it never writes to the live appliance archive.
-          python3 scripts/pr_simulator_smoke.py
+          csms_python="$HOME/.local/share/ocpp-csms/current/venv/bin/python"
+          [[ -x "$csms_python" ]] || { echo "::error::Deployed CSMS virtualenv missing"; exit 1; }
+          timeout --signal=TERM --kill-after=5s 100s "$csms_python" scripts/pr_simulator_smoke.py
