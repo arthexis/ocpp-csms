@@ -22,7 +22,8 @@
   ansible.builtin.set_fact:
     ocpp_csms_activation_required: >-
       {{
-        (ocpp_csms_incumbent_service | length > 0)
+        (ocpp_csms_schema_action == 'upgrade')
+        or (ocpp_csms_incumbent_service | length > 0)
         or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
         or (not (ocpp_csms_live_service_state.stat.exists | default(false)))
@@ -97,6 +98,18 @@
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
       when: ocpp_csms_schema_action == 'upgrade'
+
+    - name: Verify database schema and SQLite integrity before activation
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - schema-verify
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+      changed_when: false
+      when: ocpp_csms_schema_action != 'create'
 
     - name: Install live OCPP CSMS systemd unit
       become: true
