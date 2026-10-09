@@ -44,7 +44,7 @@ def main() -> None:
         data = Path(tmp) / "data"
         port = free_loopback_port()
         csms_command = [
-            sys.executable, "-m", "ocpp_csms", "--data-dir", str(data),
+            str(Path(sys.executable).with_name("ocpp-csms")), "--data-dir", str(data),
             "serve", "--host", "127.0.0.1", "--port", str(port),
         ]
         # Temporary output files prevent subprocesses blocking on full pipes.
