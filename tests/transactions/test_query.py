@@ -44,7 +44,7 @@ async def test_lists_newest_first_and_gets_one_transaction(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_active_and_last_never_return_same_transaction(tmp_path):
+async def test_last_includes_newest_active_transaction(tmp_path):
     archive = TransactionArchive(tmp_path)
     finished = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
     await archive.stop(CHARGER_A, stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
@@ -53,23 +53,23 @@ async def test_active_and_last_never_return_same_transaction(tmp_path):
     query = TransactionQuery(tmp_path)
 
     assert [view.transaction_id for view in query.active()] == [active]
-    assert query.last().transaction_id == finished
-    assert query.last().transaction_id not in {view.transaction_id for view in query.active()}
+    assert query.last().transaction_id == active
+    assert query.last().transaction_id in {view.transaction_id for view in query.active()}
 
 
 @pytest.mark.asyncio
-async def test_last_returns_none_when_only_active_transaction_exists(tmp_path):
+async def test_last_returns_active_when_only_active_transaction_exists(tmp_path):
     archive = TransactionArchive(tmp_path)
     active = await archive.start(CHARGER_A, start_payload())
 
     query = TransactionQuery(tmp_path)
 
     assert [view.transaction_id for view in query.active()] == [active]
-    assert query.last() is None
+    assert query.last().transaction_id == active
 
 
 @pytest.mark.asyncio
-async def test_recovered_unstopped_transaction_is_active_not_last(tmp_path):
+async def test_recovered_unstopped_transaction_can_be_last(tmp_path):
     archive = TransactionArchive(tmp_path)
     finished = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
     await archive.stop(CHARGER_A, stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
@@ -86,7 +86,7 @@ async def test_recovered_unstopped_transaction_is_active_not_last(tmp_path):
 
     assert [view.transaction_id for view in query.active()] == [225]
     assert query.get(225).status == "recovered"
-    assert query.last().transaction_id == finished
+    assert query.last().transaction_id == 225
 
 
 @pytest.mark.asyncio
