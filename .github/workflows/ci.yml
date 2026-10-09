@@ -182,15 +182,19 @@ jobs:
             # Gway-001 must have read-only SSH access to the private repository.
             git clone --branch main --single-branch git@github.com:arthexis/gway-lcd-sound.git "$lcd_repo"
           fi
-          if [[ "$(git -C "$lcd_repo" branch --show-current)" != "main" ]]; then
-            echo "::error::LCD Sound checkout must be on main: $lcd_repo"
-            exit 1
-          fi
           if [[ -n "$(git -C "$lcd_repo" status --porcelain)" ]]; then
             echo "::error::LCD Sound checkout has local changes: $lcd_repo"
             exit 1
           fi
-          git -C "$lcd_repo" pull --ff-only origin main
+          git -C "$lcd_repo" fetch origin main
+          # An existing appliance checkout may be on a prior development branch.
+          # Only switch after verifying it has no local modifications.
+          if git -C "$lcd_repo" show-ref --verify --quiet refs/heads/main; then
+            git -C "$lcd_repo" switch main
+            git -C "$lcd_repo" merge --ff-only origin/main
+          else
+            git -C "$lcd_repo" switch --create main --track origin/main
+          fi
           # Use the same versioned deployment and import checks as LCD Sound CI.
           bash "$lcd_repo/scripts/deploy/install.sh" install --no-restart
           bash "$lcd_repo/scripts/deploy/install.sh" verify --no-restart
