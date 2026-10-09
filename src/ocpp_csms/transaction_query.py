@@ -127,7 +127,10 @@ class TransactionView:
 
     @property
     def status(self) -> str:
-        return str(self.record.get("status", ""))
+        state = str(self.record.get("status", ""))
+        # Preserve the durable recovery state and audit trail; expose a clear
+        # operational label in CLI and machine-readable transaction reports.
+        return "disconnected" if state == "inferred_stopped" else state
 
     @property
     def connector_id(self) -> int | None:
