@@ -26,7 +26,7 @@ def test_emergency_without_transaction_and_connector_isolation(tmp_path):
     assert charger.derived_status == "EmergencyStop"
     assert charger.transaction_id is None
     assert charger.connectors[1].derived_status == "EmergencyStop"
-    report = status_contract(appliance_status(tmp_path))["chargers"][0]
+    report = status_contract(appliance_status(tmp_path))["data"]["chargers"][0]
     assert report["status"] == "Faulted"
     assert report["derived_status"] == "EmergencyStop"
     assert report["connectors"][1]["info"] == "EmergencyStop"
@@ -59,7 +59,7 @@ def test_event_history_shows_emergency_without_transaction(tmp_path):
     store = EventStore(tmp_path)
     store.record_ocpp(CP, "StatusNotification", FAULT)
     rows = events_between(tmp_path, charger_id=CP)
-    event = events_contract(rows)["events"][0]
+    event = events_contract(rows)["data"]["events"][0]
     assert event["derived_status"] == "EmergencyStop"
     assert event["status"] == "Faulted"
     assert event["info"] == "EmergencyStop"
