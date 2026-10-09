@@ -75,6 +75,68 @@
         else ocpp_csms_controller_source_dir
       }}
 
+# Recovery is an operator-requested maintenance action, not part of normal
+# deployment. It must complete before the regular read-only preflight.
+- name: Recover stale disconnected transactions before initial preflight
+  when: ocpp_csms_recover | bool
+  block:
+    - name: Refuse recovery on a live managed CSMS service
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ ocpp_csms_service_name }}"]
+      register: ocpp_csms_recover_service
+      changed_when: false
+      failed_when: false
+
+    - name: Require offline recovery
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_recover_service.rc != 0
+        fail_msg: >-
+          Stop the CSMS service before using --recover. This explicitly
+          prevents any recovery writes while the listener is active.
+
+    - name: Recover local appliance using candidate source
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - ocpp_csms.install_recovery
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+      environment:
+        PYTHONPATH: "{{ ocpp_csms_preflight_source_dir }}/src"
+      when: (ansible_connection | default('ssh')) == 'local'
+
+    - name: Recover remote appliance using temporary source
+      when: (ansible_connection | default('ssh')) != 'local'
+      block:
+        - name: Create temporary remote recovery source directory
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: -ocpp-csms-recovery
+          register: ocpp_csms_remote_recovery_dir
+        - name: Copy candidate recovery Python source
+          ansible.builtin.copy:
+            src: "{{ ocpp_csms_preflight_source_dir }}/src/"
+            dest: "{{ ocpp_csms_remote_recovery_dir.path }}/src/"
+            mode: preserve
+        - name: Run guarded remote recovery
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -m
+              - ocpp_csms.install_recovery
+              - --data-dir
+              - "{{ ocpp_csms_data_dir }}"
+          environment:
+            PYTHONPATH: "{{ ocpp_csms_remote_recovery_dir.path }}/src"
+      always:
+        - name: Remove temporary remote recovery source
+          ansible.builtin.file:
+            path: "{{ ocpp_csms_remote_recovery_dir.path }}"
+            state: absent
+          when: ocpp_csms_remote_recovery_dir.path is defined
+
 # The first safety gate must run before appliance mutation. Idle connected
 # chargers are expected; only active charging or unsafe persistence state blocks.
 - name: Run local initial install safety preflight
