@@ -225,6 +225,7 @@ class EventStore:
                 ON CONFLICT(charger_id, connector_id) DO UPDATE SET
                     status = excluded.status,
                     error_code = excluded.error_code,
+                    info = excluded.info,
                     event_timestamp = excluded.event_timestamp,
                     received_at = excluded.received_at
                 """,
@@ -235,6 +236,7 @@ class EventStore:
                     str(payload["error_code"]) if payload.get("error_code") is not None else None,
                     event_timestamp,
                     received_at,
+                    str(payload['info']) if payload.get('info') is not None else None,
                 ),
             )
             if status in {"Finishing", "Available"}:
