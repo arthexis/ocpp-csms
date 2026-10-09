@@ -19,7 +19,7 @@ def add_control_commands(
     add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
     add(start, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
     add(start, "-c", "--connector", dest="connector", type=int, help="Connector ID")
-    add(start, "--id-tag", required=True, help="OCPP idTag for the remote start")
+    add(start, "--id-tag", "--rfid", dest="id_tag", help="OCPP idTag (defaults to AUTO when omitted)")
     _add_timing_options(start)
 
     stop = subcommands.add_parser("stop", help="Request remote transaction stop")
@@ -38,7 +38,7 @@ def add_control_commands(
 
 
 def _add_timing_options(parser: argparse.ArgumentParser) -> None:
-    timing = parser.add_mutually_exclusive_group(required=True)
+    timing = parser.add_mutually_exclusive_group(required=False)
     timing.add_argument("--now", action="store_true", help="Execute as soon as the command is accepted")
     timing.add_argument("--after", type=int, metavar="SECONDS", help="Wait SECONDS, then attempt the command")
     timing.add_argument(
@@ -62,7 +62,9 @@ def _timing_request(args: argparse.Namespace) -> dict[str, object]:
         return {"timing": "now"}
     if args.after is not None:
         return {"timing": "after", "seconds": args.after}
-    return {"timing": "within", "seconds": args.within}
+    if args.within is not None:
+        return {"timing": "within", "seconds": args.within}
+    return {"timing": "now"}
 
 
 def control_request(args: argparse.Namespace) -> dict[str, object]:
@@ -71,7 +73,8 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
     if charger is not None:
         request["charger"] = charger
     if args.command == "start":
-        request["id_tag"] = args.id_tag
+        # RemoteStartTransaction requires idTag in OCPP 1.6 even in Allow All mode.
+        request["id_tag"] = args.id_tag if args.id_tag is not None else "AUTO"
         if args.connector is not None:
             request["connector"] = args.connector
     elif args.command == "stop":
