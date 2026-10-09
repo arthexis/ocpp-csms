@@ -152,6 +152,11 @@ class EventStore:
                 """,
                 (int(payload["meter_stop"]), str(payload["timestamp"]), now, now, transaction_id),
             ).rowcount
+            if updated:
+                connection.execute(
+                    "UPDATE transaction_recoveries SET reconciled_at = COALESCE(reconciled_at, ?) WHERE transaction_id = ?",
+                    (now, transaction_id),
+                )
             if not updated:
                 connection.execute(
                     """
@@ -169,6 +174,33 @@ class EventStore:
                         now,
                     ),
                 )
+
+    def infer_transaction_stop(
+        self, transaction_id: int, *, reason: str = "disconnected_timeout",
+        last_meter_wh: int | None = None,
+    ) -> bool:
+        """Mark an inactive transaction as inferred, never invent a StopTransaction."""
+        if reason != "disconnected_timeout":
+            raise ValueError("unsupported recovery reason")
+        now = utc_now_iso()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT state, last_activity_at FROM transactions WHERE transaction_id = ?",
+                (int(transaction_id),),
+            ).fetchone()
+            if row is None or row[0] not in {"open", "recovered"}:
+                return False
+            connection.execute(
+                "UPDATE transactions SET state = 'inferred_stopped' WHERE transaction_id = ? AND state IN ('open', 'recovered')",
+                (int(transaction_id),),
+            )
+            connection.execute(
+                """INSERT INTO transaction_recoveries (
+                    transaction_id, inferred_at, last_activity_at, last_meter_wh, reason
+                ) VALUES (?, ?, ?, ?, ?)""",
+                (int(transaction_id), now, str(row[1]), last_meter_wh, reason),
+            )
+        return True
 
     def record_connector_status(self, charger_id: str, payload: dict[str, Any]) -> bool:
         connector_id = int(payload["connector_id"])

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 _SCHEMA_1_SQL = """
 CREATE TABLE events (
@@ -112,8 +112,21 @@ CREATE TABLE IF NOT EXISTS appliance_metadata (
 );
 """
 
-CURRENT_SCHEMA_SQL = _SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL + _SCHEMA_4_ADDITIONS_SQL
-_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4}
+_SCHEMA_5_ADDITIONS_SQL = """
+CREATE TABLE IF NOT EXISTS transaction_recoveries (
+    transaction_id INTEGER PRIMARY KEY,
+    inferred_at TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    last_meter_wh INTEGER,
+    reason TEXT NOT NULL,
+    reconciled_at TEXT,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
+);
+"""
+
+CURRENT_SCHEMA_SQL = (_SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
+                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_5_ADDITIONS_SQL)
+_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5}
 
 
 @dataclass(frozen=True)
@@ -239,6 +252,11 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
                     "INSERT OR IGNORE INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
                     (str(uuid.uuid4()),),
                 )
+                connection.execute("PRAGMA user_version = 4")
+                connection.commit()
+                info = SchemaInfo(path=info.path, exists=True, version=4)
+            if info.version == 4:
+                connection.executescript(_SCHEMA_5_ADDITIONS_SQL)
             connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.
