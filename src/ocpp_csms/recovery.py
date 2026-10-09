@@ -115,7 +115,7 @@ async def recover_once(server, *, timeout_seconds: int = TIMEOUT_SECONDS,
         # A disconnected charger can keep charging; this is an administrative
         # inference only. Use receive-side evidence, not untrusted device time.
         archive_activity = (view.record.get("recovery", {}).get("last_activity_at")
-                            if view.status == "inferred_stopped" else None)
+                            if view.record.get("status") == "inferred_stopped" else None)
         last_seen = max(_time(str(activity_at)),
                         _time(archive_activity) if archive_activity else view.received_activity_at,
                         disconnected[charger])
