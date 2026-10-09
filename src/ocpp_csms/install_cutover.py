@@ -43,6 +43,21 @@ def apply_schema_action(data_dir: str | Path) -> str:
     return action
 
 
+def verify_schema_integrity(data_dir: str | Path) -> None:
+    """Refuse activation if the database is not current or is damaged."""
+    info = inspect_schema(data_dir)
+    if info.version != CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(f"schema verification failed: expected {CURRENT_SCHEMA_VERSION}, got {info.version}")
+    with sqlite3.connect(f"file:{info.path}?mode=ro", uri=True) as connection:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()
+        if integrity is None or integrity[0] != "ok":
+            raise RuntimeError(f"database integrity check failed: {integrity}")
+        if connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
+        ).fetchone()[0] != 1:
+            raise RuntimeError("recovery audit table missing after schema migration")
+
+
 def connection_markers(data_dir: str | Path, expected: tuple[str, ...]) -> dict[str, int]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
@@ -137,6 +152,9 @@ def _parser() -> argparse.ArgumentParser:
     upgrade = subcommands.add_parser("schema-upgrade")
     upgrade.add_argument("--data-dir", required=True)
 
+    verify = subcommands.add_parser("schema-verify")
+    verify.add_argument("--data-dir", required=True)
+
     capture = subcommands.add_parser("capture-baseline")
     capture.add_argument("--data-dir", required=True)
     capture.add_argument("--preflight-json", required=True)
@@ -161,6 +179,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "schema-upgrade":
             print(apply_schema_action(args.data_dir))
+            return 0
+        if args.command == "schema-verify":
+            verify_schema_integrity(args.data_dir)
+            print("ok")
             return 0
         if args.command == "capture-baseline":
             payload = json.loads(Path(args.preflight_json).read_text(encoding="utf-8"))
