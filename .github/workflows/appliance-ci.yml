@@ -51,6 +51,10 @@ jobs:
       - name: Run Ansible contract tests
         run: PYTHONPATH=src .venv/bin/python -m pytest tests/ansible
 
+      - name: Real CSMS and simulator charging smoke test
+        timeout-minutes: 2
+        run: timeout --signal=TERM --kill-after=5s 100s .venv/bin/python scripts/pr_simulator_smoke.py
+
       - name: Signal appliance job result
         if: ${{ always() }}
         continue-on-error: true
