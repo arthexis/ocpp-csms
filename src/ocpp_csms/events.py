@@ -220,8 +220,8 @@ class EventStore:
             connection.execute(
                 """
                 INSERT INTO connector_status (
-                    charger_id, connector_id, status, error_code, event_timestamp, received_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    charger_id, connector_id, status, error_code, event_timestamp, received_at, info
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(charger_id, connector_id) DO UPDATE SET
                     status = excluded.status,
                     error_code = excluded.error_code,
