@@ -2,16 +2,17 @@ name: Trusted appliance CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
 
 jobs:
   appliance:
-    name: Gway-001 appliance tests
+    name: Gway-001 simulator execution
     # Never schedule untrusted fork PRs on a persistent field machine.
     if: >-
+      contains(github.event.pull_request.labels.*.name, 'simulator') &&
       github.event.pull_request.user.login == 'arthexis' &&
       github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' &&
       github.event.pull_request.head.repo.owner.login == 'arthexis' &&
@@ -69,3 +70,31 @@ jobs:
             *) sound=notice ;;
           esac
           /home/arthe/.local/bin/codex-sound-hook actions-job-finish "$sound"
+
+  simulator-gate:
+    name: Gway-001 appliance tests
+    needs: appliance
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate opt-in simulator result
+        env:
+          SIMULATOR_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'simulator') }}
+          TRUSTED_AUTHOR: ${{ github.event.pull_request.user.login == 'arthexis' }}
+          TRUSTED_REPO: ${{ github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          APPLIANCE_RESULT: ${{ needs.appliance.result }}
+        run: |
+          if [ "$SIMULATOR_LABEL" != "true" ]; then
+            echo "Simulator label absent: appliance runner not required."
+            exit 0
+          fi
+          if [ "$TRUSTED_AUTHOR" != "true" ] || [ "$TRUSTED_REPO" != "true" ] || [ "$IS_DRAFT" = "true" ]; then
+            echo "::error::Simulator checks require a trusted, non-draft, same-repository PR."
+            exit 1
+          fi
+          if [ "$APPLIANCE_RESULT" != "success" ]; then
+            echo "::error::Simulator label requires successful appliance execution; got: $APPLIANCE_RESULT"
+            exit 1
+          fi
+          echo "Simulator tests passed."
