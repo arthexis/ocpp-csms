@@ -162,57 +162,6 @@ jobs:
       group: simulator-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Signal appliance job start and show PR on LCD
-        if: ${{ always() }}
-        continue-on-error: true
-        env:
-          CODEX_SOUND_HOOK_LOCK_WAIT: "0"
-          CODEX_SOUND_HOOK_TIMEOUT: "2"
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-        shell: bash
-        run: |
-          /home/arthe/.local/bin/codex-sound-hook actions-job-start busy
-          if [[ -x /home/arthe/.local/bin/lcd-actions-runner-status ]]; then
-            /home/arthe/.local/bin/lcd-actions-runner-status start "$PR_NUMBER" "$PR_BRANCH"
-          fi
-
-      - name: Update sibling LCD Sound repository first
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          lcd_repo="$HOME/gway-lcd-sound"
-          if [[ ! -d "$lcd_repo/.git" ]]; then
-            if [[ -e "$lcd_repo" ]]; then
-              echo "::error::$lcd_repo exists but is not a Git checkout."
-              exit 1
-            fi
-            # Gway-001 must have read-only SSH access to the private repository.
-            git clone --branch main --single-branch git@github.com:arthexis/gway-lcd-sound.git "$lcd_repo"
-          fi
-          # Never change the appliance's working branch: main may be checked
-          # out in another Git worktree used for development.
-          git -C "$lcd_repo" fetch origin main
-          git -C "$lcd_repo" worktree prune
-          lcd_source="$RUNNER_TEMP/gway-lcd-sound-source"
-          git -C "$lcd_repo" worktree add --detach "$lcd_source" origin/main
-          # Install the selected main revision from an isolated worktree.
-          bash "$lcd_source/scripts/deploy/install.sh" install --no-restart
-          bash "$lcd_source/scripts/deploy/install.sh" verify --no-restart
-          # Validate the installed commands, not the source checkout.
-          "$HOME/.local/bin/lcd-lockfile-runner" --once --dry-run --no-hardware \
-            --lock-dir "$RUNNER_TEMP/lcd-sound-acceptance"
-          "$HOME/.local/bin/lcd-system-info-publisher" --dry-run >/dev/null
-          "$HOME/.local/bin/gway-event-sound-monitor" --once --json > "$RUNNER_TEMP/lcd-sound-observations.json"
-          python3 -m json.tool "$RUNNER_TEMP/lcd-sound-observations.json" >/dev/null
-          # The event monitor and LCD should never block charging CI.
-          systemctl --user try-restart lcd-lockfile.service || true
-          "$HOME/.local/bin/lcd-actions-runner-status" start "$PR_NUMBER" "$PR_BRANCH"
-          echo "LCD Sound install and runtime import acceptance passed"
-
       - name: Check out trusted PR head
         uses: actions/checkout@v4
         with:
@@ -227,26 +176,6 @@ jobs:
       - name: Real CSMS and simulator charging smoke test
         timeout-minutes: 2
         run: timeout --signal=TERM --kill-after=5s 100s .venv/bin/python scripts/pr_simulator_smoke.py
-
-      - name: Clear runner LCD and signal job result
-        if: ${{ always() }}
-        continue-on-error: true
-        env:
-          CODEX_SOUND_HOOK_LOCK_WAIT: "0"
-          CODEX_SOUND_HOOK_TIMEOUT: "2"
-          JOB_STATUS: ${{ job.status }}
-        shell: bash
-        run: |
-          if [[ -x /home/arthe/.local/bin/lcd-actions-runner-status ]]; then
-            /home/arthe/.local/bin/lcd-actions-runner-status stop
-          fi
-          case "$JOB_STATUS" in
-            success) sound=ok ;;
-            failure) sound=error ;;
-            cancelled) sound=warning ;;
-            *) sound=notice ;;
-          esac
-          /home/arthe/.local/bin/codex-sound-hook actions-job-finish "$sound"
 
   ci:
     name: CI

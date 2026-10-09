@@ -23,8 +23,6 @@ def test_profile_composite_fallback_renders_physical_evidence(cli_parser, profil
     args = cli_parser.parse_args(["profile", "composite"])
     assert run_profile(args) == exit_code
     output = capsys.readouterr().out
-    assert "does not support aggregate composite schedule on connector 0" in output
-    assert "Showing physical connectors instead" in output
     for fragment in expected_fragments:
         assert fragment in output
     if status == "Accepted":

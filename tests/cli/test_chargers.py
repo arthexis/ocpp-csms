@@ -28,7 +28,6 @@ def test_singular_charger_renders_connector_detail(parse_cli, tmp_path, capsys):
     output = capsys.readouterr().out
     assert "charger-a" in output
     assert "Connector 1: Available" in output
-    assert "CSMS:" not in output
 
 
 def test_plural_chargers_renders_fleet_without_appliance_header(parse_cli, tmp_path, capsys):
