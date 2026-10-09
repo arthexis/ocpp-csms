@@ -44,6 +44,6 @@ def test_inferred_stop_archive_and_database_then_reconcile(tmp_path):
     asyncio.run(exercise())
 
 
-def test_schema_v5_initialization(tmp_path):
+def test_schema_v6_initialization(tmp_path):
     EventStore(tmp_path)
-    assert inspect_schema(tmp_path).version == 5
+    assert inspect_schema(tmp_path).version == 6
