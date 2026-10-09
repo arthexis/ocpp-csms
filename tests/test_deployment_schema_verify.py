@@ -16,7 +16,8 @@ def test_schema_verification_current_database(tmp_path):
 def test_schema_verification_rejects_older_database(tmp_path):
     create_current_schema(tmp_path)
     with sqlite3.connect(database_path(tmp_path)) as db:
-        db.execute("PRAGMA user_version=4")
+        db.execute("ALTER TABLE connector_status DROP COLUMN info")
+        db.execute("PRAGMA user_version=5")
     assert schema_action(tmp_path) == "upgrade"
     with pytest.raises(RuntimeError, match="schema verification failed"):
         verify_schema_integrity(tmp_path)

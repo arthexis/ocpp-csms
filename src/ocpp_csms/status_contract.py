@@ -20,6 +20,8 @@ def connector_status_data(connector: ConnectorStatus) -> dict[str, Any]:
         "id": connector.connector_id,
         "status": connector.status,
         "error_code": connector.error_code,
+        "info": connector.info,
+        "derived_status": connector.derived_status,
         "transaction": transaction,
     }
 
@@ -33,6 +35,8 @@ def charger_status_data(charger: ChargerStatus) -> dict[str, Any]:
         "last_seen": charger.last_seen,
         "status": charger.status,
         "error_code": charger.error_code,
+        "info": charger.info,
+        "derived_status": charger.derived_status,
         "connectors": [connector_status_data(item) for item in charger.connectors],
     }
 

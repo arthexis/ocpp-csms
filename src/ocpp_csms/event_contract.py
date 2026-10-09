@@ -58,6 +58,8 @@ def event_record(row: sqlite3.Row) -> dict[str, object]:
         base["status"] = payload.get("status")
         error = payload.get("error_code")
         base["error_code"] = None if error in {None, "NoError"} else error
+        base["info"] = payload.get("info")
+        base["derived_status"] = ("EmergencyStop" if payload.get("status") == "Faulted" and error == "InternalError" and payload.get("info") == "EmergencyStop" else payload.get("status"))
     elif action == "StartTransaction":
         base["kind"] = "transaction_started"
     elif action == "StopTransaction":
