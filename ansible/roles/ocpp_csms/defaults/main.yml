@@ -12,6 +12,7 @@ ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
 ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
 ocpp_csms_incumbent_observe_seconds: 15
 ocpp_csms_stage_only: false
+ocpp_csms_recover: false
 ocpp_csms_dev: false
 ocpp_csms_install_mode: online
 ocpp_csms_bundle_path: ""
