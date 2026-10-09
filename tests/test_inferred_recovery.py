@@ -24,7 +24,7 @@ def test_inferred_stop_archive_and_database_then_reconcile(tmp_path):
         assert not await archive.infer_stop(txid)
         assert not store.infer_transaction_stop(txid)
         view = TransactionQuery(tmp_path).get(txid)
-        assert view.status == "inferred_stopped"
+        assert view.status == "disconnected"
         assert not view.active
         assert view.record["stop"] is None
         assert view.record["recovery"]["reason"] == "disconnected_timeout"
