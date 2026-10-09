@@ -96,7 +96,7 @@ def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
             False,
             connected,
             active_archive,
-            "active charging detected; service handoff is blocked",
+            "active charging detected; service handoff is blocked; inspect with ocpp-csms transactions recover --dry-run and recover eligible transactions while CSMS is stopped",
         )
 
     return InstallPreflight(True, connected, ())
