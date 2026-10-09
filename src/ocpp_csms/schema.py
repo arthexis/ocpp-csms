@@ -264,7 +264,9 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
             if info.version == 4:
                 connection.executescript(_SCHEMA_5_ADDITIONS_SQL)
                 info = SchemaInfo(path=info.path, exists=True, version=5)
-            if info.version == 5:\n                connection.executescript(_SCHEMA_6_ADDITIONS_SQL)\n            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+            if info.version == 5:
+                connection.executescript(_SCHEMA_6_ADDITIONS_SQL)
+            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.
         raise
