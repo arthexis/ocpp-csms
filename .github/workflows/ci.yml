@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   push:
     branches:
       - main
@@ -134,6 +135,37 @@ jobs:
         run: PYTHONPATH=src timeout --signal=TERM --kill-after=10s 300s python -m pytest -vv tests/ansible
 
 
+  simulator:
+    name: Simulator appliance integration
+    # Never execute untrusted code from forks on the persistent field runner.
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'simulator') &&
+      github.event.pull_request.user.login == 'arthexis' &&
+      github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' &&
+      github.event.pull_request.head.repo.owner.login == 'arthexis' &&
+      github.event.pull_request.draft == false
+    runs-on: [self-hosted, Linux, ARM64, gway-001]
+    timeout-minutes: 25
+    concurrency:
+      group: simulator-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out trusted PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Create isolated Python environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install ".[dev]"
+
+      - name: Real CSMS and simulator charging smoke test
+        timeout-minutes: 2
+        run: timeout --signal=TERM --kill-after=5s 100s .venv/bin/python scripts/pr_simulator_smoke.py
+
   ci:
     name: CI
     needs:
@@ -141,6 +173,7 @@ jobs:
       - docs
       - test
       - ansible
+      - simulator
     if: always()
     runs-on: ubuntu-latest
 
@@ -153,12 +186,24 @@ jobs:
           DOCS_RESULT: ${{ needs.docs.result }}
           TEST_RESULT: ${{ needs.test.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
+          SIMULATOR_RESULT: ${{ needs.simulator.result }}
+          SIMULATOR_LABEL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'simulator') }}
+          TRUSTED_SIMULATOR_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'arthexis' && github.event.pull_request.head.repo.full_name == 'arthexis/ocpp-csms' && github.event.pull_request.head.repo.owner.login == 'arthexis' && github.event.pull_request.draft == false }}
         run: |
           set -euo pipefail
 
           if [[ "$CHANGES_RESULT" != "success" ]]; then
             echo "Change-scope validation did not succeed: $CHANGES_RESULT"
             exit 1
+          fi
+
+          if [[ "$SIMULATOR_LABEL" == "true" ]]; then
+            if [[ "$TRUSTED_SIMULATOR_PR" != "true" || "$SIMULATOR_RESULT" != "success" ]]; then
+              echo "Simulator label requires a successful trusted appliance test: $SIMULATOR_RESULT"
+              exit 1
+            fi
+          else
+            echo "Simulator label absent: no self-hosted runner required."
           fi
 
           if [[ "$DOCS_ONLY" == "true" ]]; then
