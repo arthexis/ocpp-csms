@@ -52,8 +52,8 @@ jobs:
 
       - name: Stage OCPP CSMS deployment
         if: ${{ !inputs.full_deploy }}
-        run: ./deploy.sh --stage-only
+        run: sh ./deploy.sh --stage-only
 
       - name: Deploy OCPP CSMS
         if: ${{ inputs.full_deploy }}
-        run: ./deploy.sh
+        run: sh ./deploy.sh
