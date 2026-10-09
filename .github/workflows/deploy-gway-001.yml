@@ -1,0 +1,23 @@
+name: Deploy CSMS to Gway-001
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.actor == 'arthexis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request persistent deployment of current main
+        env:
+          GH_TOKEN: ${{ secrets.GWAY_REMOTE_DISPATCH_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh api -X POST repos/arthexis/gway-remote/dispatches \
+            -f event_type=ocpp-csms-deploy \
+            -f client_payload[repository]=arthexis/ocpp-csms \
+            -f client_payload[sha]="$SHA"
