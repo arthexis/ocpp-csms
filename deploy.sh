@@ -23,6 +23,7 @@ stage_only=0
 diagnose=0
 dev=0
 forwarder=0
+recover=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -51,6 +52,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --reconnect=*)
             reconnect_seconds=${1#--reconnect=}
+            shift
+            ;;
+        --recover)
+            recover=1
             shift
             ;;
         --stage-only)
@@ -120,6 +125,14 @@ fi
 
 if [ "$forwarder" -eq 1 ]; then
     set -- -e ocpp_forwarder_enabled=true "$@"
+fi
+
+if [ "$recover" -eq 1 ]; then
+    if [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+        printf '%s\\n' '--recover cannot be combined with --diagnose or --stage-only.' >&2
+        exit 2
+    fi
+    set -- -e ocpp_csms_recover=true "$@"
 fi
 
 if [ "$diagnose" -eq 1 ]; then
