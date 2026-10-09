@@ -191,20 +191,19 @@ jobs:
             exit 1
           fi
           git -C "$lcd_repo" pull --ff-only origin main
-          install -d -m 0755 "$HOME/.local/bin"
-          install -m 0755 "$lcd_repo/scripts/gway/lcd_lockfile_runner.py" "$HOME/.local/bin/lcd-lockfile-runner"
-          install -d -m 0755 "$HOME/.local/bin/lcd_engine"
-          install -m 0644 "$lcd_repo"/scripts/gway/lcd_engine/*.py "$HOME/.local/bin/lcd_engine/"
-          install -d -m 0755 "$HOME/.local/bin/lcd_engine/hardware"
-          install -m 0644 "$lcd_repo"/scripts/gway/lcd_engine/hardware/*.py "$HOME/.local/bin/lcd_engine/hardware/"
-          install -d -m 0755 "$HOME/.local/bin/lcd_engine/system_info"
-          install -m 0644 "$lcd_repo"/scripts/gway/lcd_engine/system_info/*.py "$HOME/.local/bin/lcd_engine/system_info/"
-          install -m 0755 "$lcd_repo/scripts/gway/lcd_system_info_publisher.py" "$HOME/.local/bin/lcd-system-info-publisher"
-          install -m 0755 "$lcd_repo/scripts/gway/lcd-actions-runner-status" "$HOME/.local/bin/lcd-actions-runner-status"
-          # The currently-running LCD service can continue until it is restarted.
+          # Use the same versioned deployment and import checks as LCD Sound CI.
+          bash "$lcd_repo/scripts/deploy/install.sh" install --no-restart
+          bash "$lcd_repo/scripts/deploy/install.sh" verify --no-restart
+          # Validate the installed commands, not the source checkout.
+          "$HOME/.local/bin/lcd-lockfile-runner" --once --dry-run --no-hardware \
+            --lock-dir "$RUNNER_TEMP/lcd-sound-acceptance"
+          "$HOME/.local/bin/lcd-system-info-publisher" --dry-run >/dev/null
+          "$HOME/.local/bin/gway-event-sound-monitor" --once --json > "$RUNNER_TEMP/lcd-sound-observations.json"
+          python3 -m json.tool "$RUNNER_TEMP/lcd-sound-observations.json" >/dev/null
+          # The event monitor and LCD should never block charging CI.
           systemctl --user try-restart lcd-lockfile.service || true
-          # On first bootstrap the publisher was not present at job start.
           "$HOME/.local/bin/lcd-actions-runner-status" start "$PR_NUMBER" "$PR_BRANCH"
+          echo "LCD Sound install and runtime import acceptance passed"
 
       - name: Check out trusted PR head
         uses: actions/checkout@v4
