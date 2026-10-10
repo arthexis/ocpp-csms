@@ -4,7 +4,7 @@ from ocpp_csms.transactions.archive import default_data_dir
 
 import ocpp_csms.cli.rfid as rfid_module
 from ocpp_csms.cli import build_parser
-from ocpp_csms.cli.rfid import run_rfid
+from ocpp_csms.cli.rfid import run_rfid, run_rfid_edit
 from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot
 from ocpp_csms.transactions.archive import TransactionArchive
 from tests.rfid.helpers import cache_state, report_args as args, start_payload, stop_payload
@@ -31,6 +31,39 @@ def test_rfid_help_shows_authorization_file_location_and_fields():
     assert "rfid,name,enabled" in help_text
     assert "all RFID tags are accepted" in help_text
     assert parser.parse_args(["rfid"]).rfid_command is None
+
+
+def test_rfid_edit_respects_editor_and_data_dir(monkeypatch, tmp_path):
+    commands = []
+
+    def fake_run(argv, *, check):
+        commands.append((argv, check))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setenv("VISUAL", "code --wait")
+    monkeypatch.setenv("EDITOR", "vim")
+    monkeypatch.setattr(rfid_module.subprocess, "run", fake_run)
+    parsed = build_parser()[0].parse_args(["--data-dir", str(tmp_path), "rfid", "edit"])
+
+    assert run_rfid_edit(parsed) == 0
+    assert commands == [(["code", "--wait", str(tmp_path / "rfid.csv")], False)]
+    assert not (tmp_path / "rfid.csv").exists()
+
+
+def test_rfid_edit_falls_back_to_nano_and_propagates_failure(monkeypatch, tmp_path):
+    monkeypatch.delenv("VISUAL", raising=False)
+    monkeypatch.delenv("EDITOR", raising=False)
+    captured = []
+
+    def fake_run(argv, *, check):
+        captured.append(argv)
+        return type("Result", (), {"returncode": 3})()
+
+    monkeypatch.setattr(rfid_module.subprocess, "run", fake_run)
+    parsed = build_parser()[0].parse_args(["--data-dir", str(tmp_path), "rfid", "edit"])
+
+    assert run_rfid_edit(parsed) == 3
+    assert captured == [["nano", str(tmp_path / "rfid.csv")]]
 
 
 @pytest.mark.asyncio
