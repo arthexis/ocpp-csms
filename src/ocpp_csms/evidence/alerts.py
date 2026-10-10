@@ -62,6 +62,16 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
             severity, category, message = "error", "charger_fault", "Charger reported a fault"
         else:
             return None
+    elif kind == "ocpp" and row.get("direction") == "in" and action in {
+        "DiagnosticsStatusNotification", "FirmwareStatusNotification"
+    }:
+        status = payload.get("status")
+        if action == "DiagnosticsStatusNotification" and status == "UploadFailed":
+            severity, category, message = "error", "diagnostics", "Diagnostics upload failed"
+        elif action == "FirmwareStatusNotification" and status in {"DownloadFailed", "InstallationFailed"}:
+            severity, category, message = "error", "firmware", f"Firmware {status}"
+        else:
+            return None
     elif kind == "ocpp" and action in {"Authorize", "StartTransaction"} and row.get("direction") == "out":
         tag_info = payload.get("idTagInfo")
         status = tag_info.get("status") if isinstance(tag_info, dict) else payload.get("status")
