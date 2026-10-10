@@ -8,11 +8,12 @@ from ocpp_csms.cli.transactions import resolve_time
 
 from ocpp_csms.evidence.diagnostics import events_between, explain, format_events
 from ocpp_csms.evidence.contracts import events_contract, raw_events_contract
+from ocpp_csms.evidence.alerts import classify_events, alerts_contract, format_alerts
 from ocpp_csms.output import emit_json
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
 
-DIAGNOSTIC_COMMANDS = ("status", "events", "explain")
+DIAGNOSTIC_COMMANDS = ("status", "events", "alerts", "explain")
 
 
 def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> dict[str, argparse.ArgumentParser]:
@@ -34,13 +35,26 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
+    alerts = subcommands.add_parser("alerts", help="Show exceptional events without grouping")
+    add(alerts, "charger", nargs="?", help="Optional charge point ID")
+    add(alerts, "--cp", "--charger", dest="cp", help="Filter by charge point ID")
+    add(alerts, "--transaction", "--txn", dest="transaction", type=int)
+    add(alerts, "--since", help="Lower timestamp bound")
+    add(alerts, "--until", help="Upper timestamp bound")
+    alert_limit_group = alerts.add_mutually_exclusive_group()
+    alert_limit_group.add_argument("-n", "--limit", default="100", help="Alert count or duration")
+    alert_limit_group.add_argument("-N", "--no-limit", action="store_true")
+    add(alerts, "-j", "--json", action="store_true")
+    add(alerts, "--raw", action="store_true", help="Include diagnostic details (requires --json)")
+    add(alerts, "--verbose", action="store_true", help="Include diagnostic details")
+    
     explain_parser = subcommands.add_parser("explain", help="Show charger evidence for a time window")
     add(explain_parser, "charger", help="Charge point ID")
     add(explain_parser, "--at", help="ISO-8601 center timestamp")
     add(explain_parser, "--since", help="ISO-8601 lower timestamp bound")
     add(explain_parser, "--until", help="ISO-8601 upper timestamp bound")
     add(explain_parser, "--minutes", type=int, default=10, help="Minutes around --at")
-    return {"status": status, "events": events, "explain": explain_parser}
+    return {"status": status, "events": events, "alerts": alerts, "explain": explain_parser}
 
 
 def run_status(args: argparse.Namespace) -> int:
@@ -96,6 +110,43 @@ def run_events(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def run_alerts(args: argparse.Namespace) -> int:
+    """Use the same time/count semantics as events, limiting after classification."""
+    count, duration = (None, None) if args.no_limit else _parse_event_limit(args.limit)
+    if args.transaction is not None and args.transaction < 0:
+        raise ValueError("--transaction/--txn must be zero or greater")
+    if args.raw and not args.json:
+        raise ValueError("--raw requires --json")
+    if args.verbose and args.json:
+        raise ValueError("--verbose cannot be combined with --json")
+    if args.charger and args.cp and args.charger != args.cp:
+        raise ValueError("conflicting charge point filters")
+    now = datetime.now(timezone.utc)
+    since = resolve_time(args.since, now=now) if args.since else None
+    until = resolve_time(args.until, now=now) if args.until else None
+    if duration is not None:
+        end = until or now
+        window_start = resolve_time(duration, now=end)
+        since = max(since, window_start) if since is not None else window_start
+    if since is not None and until is not None and since > until:
+        raise ValueError("--since must be earlier than or equal to --until")
+    rows = events_between(
+        args.data_dir, charger_id=args.cp or args.charger,
+        transaction_id=args.transaction,
+        since=since.isoformat() if since else None,
+        until=until.isoformat() if until else None, limit=None,
+    )
+    alerts = classify_events(rows)
+    if count is not None:
+        alerts = alerts[-count:]
+    if args.json:
+        emit_json(alerts_contract(alerts))
+    else:
+        print(format_alerts(alerts))
+    return 0
+
+
 def run_explain(args: argparse.Namespace) -> int:
     print(explain(args.data_dir, args.charger, at=args.at, since=args.since, until=args.until, minutes=args.minutes))
     return 0
@@ -104,5 +155,6 @@ def run_explain(args: argparse.Namespace) -> int:
 def run_diagnostic(args: argparse.Namespace) -> int:
     if args.command == "status": return run_status(args)
     if args.command == "events": return run_events(args)
+    if args.command == "alerts": return run_alerts(args)
     if args.command == "explain": return run_explain(args)
     raise ValueError(f"unknown diagnostic command: {args.command}")
