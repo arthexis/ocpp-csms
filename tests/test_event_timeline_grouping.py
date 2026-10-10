@@ -114,8 +114,9 @@ def test_missing_reply_breaks_observed_exchange_run():
             row(3, "Heartbeat"), row(4, "Heartbeat"),
             row(5, "Heartbeat", {"currentTime": "now"}, direction="out")]
     output = format_events(rows)
-    assert output.count("Heartbeat ↔") == 2
-    assert "responses not established" in output
+    assert output.count("Heartbeat ↔") == 1
+    assert "Heartbeat requests (responses not established) ×2" in output
+    assert "→ Heartbeat responses" in output
 
 
 def test_anomalous_response_interrupts_pairs():
