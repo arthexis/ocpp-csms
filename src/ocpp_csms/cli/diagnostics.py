@@ -58,7 +58,7 @@ def _parse_event_limit(value: str | int) -> tuple[int | None, str | None]:
         if count < 1:
             raise ValueError("--limit must be at least 1")
         return count, None
-    match = re.fullmatch(r"([0-9]+(?:\\.[0-9]+)?)([smhdw])", value, re.IGNORECASE)
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([smhdw])", value, re.IGNORECASE)
     if match and float(match.group(1)) > 0:
         return None, value
     raise ValueError("--limit must be a positive event count or duration (e.g. 1d)")
