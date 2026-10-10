@@ -223,7 +223,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
         first, last = group[0], group[-1]
         charger = f" {first['charger_id']}" if first["charger_id"] else ""
         summary = _summary(first)
-        if first["kind"] == "ocpp" and first["action"] == "Heartbeat":
+        if _group_key(first) is not None and first["action"] == "Heartbeat":
             summary = ("Heartbeat requests (responses not established)"
                        if first["direction"] == "in" else "→ Heartbeat responses")
         if len(group) == 1:
