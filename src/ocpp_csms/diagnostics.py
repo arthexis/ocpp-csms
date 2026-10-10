@@ -255,7 +255,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 span = (f"{first['occurred_at']}–{end_at}" if count > 1
                         else first["occurred_at"])
-                lines.append(f"{span}{charger}  Heartbeat ↔ ×{count} (adjacent observed exchanges)")
+                lines.append(f"{span}{charger}  Heartbeat ↔ ×{count}")
                 continue
         key = _group_key(first)
         group = [first]
