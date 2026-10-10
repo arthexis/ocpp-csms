@@ -3,7 +3,7 @@ import json
 import pytest
 import websockets
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.server import CSMSServer, OCPP_16_SUBPROTOCOL, charge_point_id_from_path
 from ocpp_csms.transactions import TransactionArchive
 

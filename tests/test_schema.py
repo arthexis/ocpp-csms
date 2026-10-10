@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,

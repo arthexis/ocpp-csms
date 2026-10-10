@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.export_contract import export_contract
 
 

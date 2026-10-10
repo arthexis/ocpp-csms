@@ -1,7 +1,7 @@
 """Regression checks for the conservative human-readable event grouping."""
 import json
 
-from ocpp_csms.diagnostics import format_events
+from ocpp_csms.evidence.diagnostics import format_events
 
 
 def row(n, action, payload=None, *, direction="in", charger="CP1", kind="ocpp"):
