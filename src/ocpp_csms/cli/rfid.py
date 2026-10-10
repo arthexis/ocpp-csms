@@ -86,52 +86,31 @@ def _summary_table(data_dir: str) -> str:
 
     file_configured = policy.source is not None
     cache_available = cache_entries is not None
-    show_allow = file_configured or cache_available
     show_cache = file_configured and cache_available
-    show_name = show_allow
 
-    headers = ["RFID", "TXNS", "ENERGY", "LAST SEEN"]
-    if show_allow:
-        headers.append("ALLOW")
+    headers = ["RFID", "TXNS", "ENERGY", "LAST SEEN", "CURRENT AUTH", "LABEL"]
     if show_cache:
         headers.append("CACHE")
-    if show_name:
-        headers.append("NAME")
 
     rows: list[tuple[str, ...]] = []
     for tag in sorted(grouped):
         tag_views = grouped[tag]
         last_seen = max(view.activity_at for view in tag_views).strftime("%Y-%m-%d %H:%M")
-        values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True), last_seen]
-
         file_entry = policy.entries.get(tag) if policy.valid else None
         cache_entry = cache_entries.get(tag) if cache_entries else None
         cache_unknown = cache_available and cache is not None and not cache.known
 
-        if show_allow:
-            if file_configured:
-                if not policy.valid:
-                    allow = "false"
-                else:
-                    allow = _entry_value(file_entry)
-            elif cache_unknown:
-                allow = "unknown"
-            else:
-                allow = _entry_value(cache_entry)
-            values.append(allow)
-
+        label = file_entry.name if file_entry and file_entry.name else "--"
+        values = [
+            tag,
+            str(len(tag_views)),
+            _energy_summary(tag_views, compact=True),
+            last_seen,
+            policy.status(tag),
+            label,
+        ]
         if show_cache:
             values.append("unknown" if cache_unknown else _entry_value(cache_entry))
-
-        if show_name:
-            if file_configured:
-                name = file_entry.name if file_entry and file_entry.name else "-"
-            elif cache_unknown:
-                name = "-"
-            else:
-                name = getattr(cache_entry, "name", None) or "-"
-            values.append(str(name))
-
         rows.append(tuple(values))
 
     widths = [
