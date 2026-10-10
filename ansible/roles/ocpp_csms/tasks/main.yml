@@ -756,7 +756,7 @@
   ansible.builtin.file:
     path: /etc/ocpp-csms
     state: directory
-    owner: root
+    owner: "{{ ocpp_csms_service_user }}"
     group: "{{ ocpp_csms_service_group }}"
     mode: "0750"
 
@@ -765,10 +765,19 @@
   ansible.builtin.template:
     src: mail.toml.j2
     dest: /etc/ocpp-csms/mail.toml
-    owner: root
+    owner: "{{ ocpp_csms_service_user }}"
     group: "{{ ocpp_csms_service_group }}"
     mode: "0640"
     force: false
+
+- name: Preserve existing mail configuration with deploy-user ownership
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms/mail.toml
+    state: file
+    owner: "{{ ocpp_csms_service_user }}"
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0640"
 
 - name: Validate existing mail configuration as service user
   become: true
