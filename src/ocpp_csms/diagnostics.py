@@ -140,10 +140,16 @@ def _summary(row: sqlite3.Row) -> str:
             details.append(str(status))
         if payload.get("transaction_id") is not None and row["transaction_id"] is None:
             details.append(f"tx={payload['transaction_id']}")
-        if payload.get("current_time") is not None and action == "Heartbeat":
-            details.append("ack")
+        if action == "Heartbeat" and payload.get("current_time") is not None:
+            details.append("response")
         if not details:
             details.append("response")
+        # Keep unexpected response details visible rather than presenting an
+        # unfamiliar payload as a routine acknowledgement.
+        known = {"status", "idTagInfo", "transaction_id", "current_time"}
+        extras = {k: v for k, v in payload.items() if k not in known}
+        if extras:
+            details.append(f"extra={json.dumps(extras, sort_keys=True, ensure_ascii=False)}")
         return "→ " + " ".join([action, *details])
     elif action in {"StartTransaction", "StopTransaction"}:
         for key in ("reason", "meter_start", "meter_stop"):
@@ -206,6 +212,9 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None) -> str:
         first, last = group[0], group[-1]
         charger = f" {first['charger_id']}" if first["charger_id"] else ""
         summary = _summary(first)
+        if first["kind"] == "ocpp" and first["action"] == "Heartbeat":
+            summary = ("Heartbeat requests (responses not established)"
+                       if first["direction"] == "in" else "→ Heartbeat responses")
         if len(group) == 1:
             lines.append(f"{first['occurred_at']}{charger}  {summary}")
         else:
