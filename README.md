@@ -835,3 +835,16 @@ ocpp-csms inspect --all
 ```
 
 `status` reports existing CSMS observations without interrogating chargers. `inspect` compares stored connector/transaction observations and, by default, queries the selected connected charger for its advertised feature profiles. `--deep` additionally requests local RFID list version and a composite schedule. `--offline` performs **no** OCPP requests. Each live query has a bounded timeout (`--timeout SECONDS`) and errors are reported as unknown instead of aborting other checks. Neither command changes configuration, clears RFID caches, resets chargers, starts/stops charging, or attempts repair. Conflicts are reported as warnings; missing evidence and unsupported functionality are not automatic failures.
+
+### Follow live OCPP events
+
+Use `ocpp-csms events --follow` (or `events -f`) to print the initial filtered history and then stream newly persisted OCPP and runtime records until Ctrl+C. This observes the existing SQLite evidence store; it does not contact chargers, restart commands, or run a service.
+
+```bash
+ocpp-csms events -f
+ocpp-csms events -f CP001 --since 10m
+ocpp-csms events -f --txn 42
+ocpp-csms events -f --json
+```
+
+Follow mode honors existing time-window, transaction, charger and history-limit filters. With `--json`, it outputs **one JSON event per line (JSONL)** instead of the one-shot events envelope, for straightforward streaming pipelines. It tracks OCPP and runtime event IDs separately to avoid relying on globally unique IDs. Routine events are displayed using the existing human-readable formatter, with no synthetic OCPP message correlation.
