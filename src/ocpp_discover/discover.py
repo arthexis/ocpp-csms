@@ -9,11 +9,11 @@ import shutil
 import subprocess
 import time
 from collections import Counter
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"
@@ -46,43 +46,6 @@ _UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
 _CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
 _INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _MAC = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class DiscoveryCandidate:
-    interface: str
-    source_mac: str
-    source_ip: str
-    target_ip: str
-    requests: int
-
-    def to_json(self) -> dict[str, object]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class AddressClaim:
-    interface: str
-    address: str
-
-    def to_json(self) -> dict[str, str]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class DiscoveryResult:
-    status: str
-    charger_id: str | None
-    candidate: DiscoveryCandidate | None = None
-    redirect: RedirectReceipt | None = None
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "status": self.status,
-            "charger_id": self.charger_id,
-            "candidate": self.candidate.to_json() if self.candidate else None,
-            "redirect": self.redirect.to_json() if self.redirect else None,
-        }
 
 
 def _bounded_tcpdump(command: list[str], seconds: float) -> str:
