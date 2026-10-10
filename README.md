@@ -1,3 +1,14 @@
+### Inspect (read-only charger investigation)
+
+```bash
+ocpp-csms inspect --cp CP001
+ocpp-csms inspect --cp CP001 --deep
+ocpp-csms inspect --cp CP001 --offline --json
+ocpp-csms inspect --all
+```
+
+`status` reports existing CSMS observations without interrogating chargers. `inspect` compares stored connector/transaction observations and, by default, queries the selected connected charger for its advertised feature profiles. `--deep` additionally requests local RFID list version and a composite schedule. `--offline` performs **no** OCPP requests. Each live query has a bounded timeout (`--timeout SECONDS`) and errors are reported as unknown instead of aborting other checks. Neither command changes configuration, clears RFID caches, resets chargers, starts/stops charging, or attempts repair. Conflicts are reported as warnings; missing evidence and unsupported functionality are not automatic failures.
+
 # OCPP CSMS
 
 A deliberately small Python OCPP 1.6J CSMS intended to run as an appliance-style service.
