@@ -203,10 +203,21 @@ def _group_key(row: sqlite3.Row) -> tuple[object, ...] | None:
     return None
 
 
-def format_events(rows: list[sqlite3.Row], heading: str | None = None) -> str:
+def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False) -> str:
     if not rows:
         return "No matching events."
     lines = [heading, ""] if heading else []
+    if verbose:
+        for row in rows:
+            charger = f" {row['charger_id']}" if row["charger_id"] else ""
+            direction = f" {row['direction']}" if row["direction"] else ""
+            tx = f" tx={row['transaction_id']}" if row["transaction_id"] is not None else ""
+            rfid = f" RFID={row['id_tag']}" if row["id_tag"] else ""
+            lines.append(
+                f"{row['occurred_at']}{charger} [{row['kind']}{direction}] "
+                f"{row['action']}{tx}{rfid} payload={row['payload']}"
+            )
+        return "\n".join(lines)
 
     def append_group(group: list[sqlite3.Row]) -> None:
         first, last = group[0], group[-1]
