@@ -8,12 +8,12 @@ import re
 import shutil
 import subprocess
 import time
-from collections import Counter
 from pathlib import Path
 
 from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
+from ocpp_discover.arp import discover_candidate
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"
@@ -23,17 +23,6 @@ _ADDRESS_STATE = "address.json"
 _DISCOVERY_STATE = "discovery.json"
 _REDIRECT_STATE = "redirect.json"
 
-_ARP_REQUEST = re.compile(
-    r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+"
-    r"(?P<src_mac>[0-9a-f:]{17})\s+>\s+(?P<dst_mac>[0-9a-f:]{17}),.*?"
-    r"ARP.*?Request who-has (?P<target_ip>\d+\.\d+\.\d+\.\d+) "
-    r"tell (?P<source_ip>\d+\.\d+\.\d+\.\d+)",
-    re.IGNORECASE,
-)
-_ARP_REPLY = re.compile(
-    r"ARP.*?Reply (?P<ip>\d+\.\d+\.\d+\.\d+) is-at (?P<mac>[0-9a-f:]{17})",
-    re.IGNORECASE,
-)
 _TCP_PACKET = re.compile(
     r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+IP\s+"
     r"(?P<src>\d+\.\d+\.\d+\.\d+)\.(?P<src_port>\d+)\s+>\s+"
@@ -73,38 +62,6 @@ def capture_arp(interface: str, seconds: float) -> str:
     if not _INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
     return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"], seconds)
-
-
-def discover_candidate(text: str, *, interface: str = _DEFAULT_INTERFACE, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
-    if min_requests < 1:
-        raise ValueError("min_requests_must_be_positive")
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    answered: set[str] = set()
-    counts: Counter[tuple[str, str, str]] = Counter()
-    for line in text.splitlines():
-        reply = _ARP_REPLY.search(line)
-        if reply:
-            answered.add(reply.group("ip"))
-            continue
-        request = _ARP_REQUEST.search(line)
-        if not request:
-            continue
-        source_ip = request.group("source_ip")
-        target_ip = request.group("target_ip")
-        if source_ip == target_ip:
-            continue
-        counts[(request.group("src_mac").lower(), source_ip, target_ip)] += 1
-    candidates = [
-        DiscoveryCandidate(interface, source_mac, source_ip, target_ip, count)
-        for (source_mac, source_ip, target_ip), count in counts.items()
-        if count >= min_requests and target_ip not in answered
-    ]
-    if not candidates:
-        raise ValueError("no_unresolved_arp_candidate")
-    if len(candidates) != 1:
-        raise ValueError("ambiguous_arp_candidates")
-    return candidates[0]
 
 
 def discover(*, interface: str = _DEFAULT_INTERFACE, seconds: float = _DEFAULT_SECONDS, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
