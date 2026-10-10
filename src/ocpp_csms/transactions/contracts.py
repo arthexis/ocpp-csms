@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from ocpp_csms.output import json_command_result
-from ocpp_csms.transaction_query import TransactionView
+from ocpp_csms.transactions.query import TransactionView
 
 TRANSACTIONS_SCHEMA = "ocpp-csms/transactions/v1"
 

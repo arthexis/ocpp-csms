@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.query import TransactionQuery
 
 
 def free_loopback_port() -> int:

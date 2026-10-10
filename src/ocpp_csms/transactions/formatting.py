@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from ocpp_csms.transaction_query import TransactionView
+from ocpp_csms.transactions.query import TransactionView
 
 
 def _text(value: object | None, default: str = "-") -> str:

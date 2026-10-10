@@ -5,8 +5,8 @@ import sqlite3
 
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.schema import database_path, inspect_schema
-from ocpp_csms.transactions import TransactionArchive
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.archive import TransactionArchive
+from ocpp_csms.transactions.query import TransactionQuery
 
 
 def test_inferred_stop_archive_and_database_then_reconcile(tmp_path):

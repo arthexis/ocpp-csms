@@ -15,7 +15,7 @@ from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
 from ocpp_csms.cli.tls import add_tls_command, run_tls
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
-from ocpp_csms.transactions import default_data_dir
+from ocpp_csms.transactions.archive import default_data_dir
 
 
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:

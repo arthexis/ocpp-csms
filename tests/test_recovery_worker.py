@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.recovery import recover_once
 from ocpp_csms.schema import database_path
-from ocpp_csms.transaction_query import TransactionQuery
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.transactions.archive import TransactionArchive
 
 NOW = datetime(2026, 10, 8, 23, tzinfo=timezone.utc)
 

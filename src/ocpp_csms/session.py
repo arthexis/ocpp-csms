@@ -11,7 +11,7 @@ from ocpp.v16 import call, call_result
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.rfid.authorization import load_rfid_authorization
 from ocpp_csms.time import utc_now_iso
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 LOGGER = logging.getLogger(__name__)
 

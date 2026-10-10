@@ -9,7 +9,7 @@ from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.rfid.cache import RFIDCacheState
 from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot, RFIDListSnapshot
 from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 def start_payload(

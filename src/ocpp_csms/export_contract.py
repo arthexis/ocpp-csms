@@ -11,8 +11,8 @@ from ocpp_csms.output import json_command_result
 from ocpp_csms.schema import DATABASE_FILENAME, source_id
 from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
-from ocpp_csms.transaction_contract import transaction_item
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.contracts import transaction_item
+from ocpp_csms.transactions.query import TransactionQuery
 
 SCHEMA = "ocpp-csms/export/v1"
 

@@ -3,8 +3,8 @@ from pathlib import Path
 
 from ocpp_csms.evidence.diagnostics import transaction_events
 from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.transaction_cli import _duration, _energy_wh, _meter_summary, format_transactions
-from ocpp_csms.transaction_query import TransactionView
+from ocpp_csms.transactions.formatting import _duration, _energy_wh, _meter_summary, format_transactions
+from ocpp_csms.transactions.query import TransactionView
 
 
 def test_duration_and_energy_are_derived_from_transaction_evidence():

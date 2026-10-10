@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from ocpp_csms.transactions import default_data_dir
+from ocpp_csms.transactions.archive import default_data_dir
 
 _ACTIVE_STATUSES = {"open", "recovered"}
 

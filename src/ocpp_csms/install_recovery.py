@@ -15,7 +15,7 @@ from ocpp_csms.install_preflight import evaluate_preflight
 from ocpp_csms.recovery import recover_once, read_policy
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.schema import inspect_schema
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 def bootstrap_recovery(data_dir: str | Path) -> list[int]:

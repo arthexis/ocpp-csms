@@ -4,8 +4,8 @@ import argparse
 
 from ocpp_csms.cli.transactions import _time_filters
 from ocpp_csms.output import emit_json
-from ocpp_csms.transaction_contract import transactions_contract
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.contracts import transactions_contract
+from ocpp_csms.transactions.query import TransactionQuery
 
 
 def run_transactions_json(args: argparse.Namespace) -> int:
