@@ -3,11 +3,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import os
+import shlex
+import subprocess
+from pathlib import Path
 from collections import defaultdict
 
 from ocpp_csms.control import send_control
-from ocpp_csms.rfid.authorization import load_rfid_authorization
+from ocpp_csms.rfid.authorization import RFID_AUTH_FILENAME, load_rfid_authorization
 from ocpp_csms.rfid.cache import RFIDCacheState, resolve_rfid_cache_sync
+from ocpp_csms.transactions.archive import default_data_dir
 from ocpp_csms.transactions.formatting import format_transactions, transaction_energy_wh
 from ocpp_csms.transactions.query import TransactionQuery, TransactionView
 
@@ -15,8 +20,18 @@ from ocpp_csms.transactions.query import TransactionQuery, TransactionView
 def add_rfid_command(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
-    rfid = subcommands.add_parser("rfid", help="Inspect and manage RFID authorization")
-    rfid_subcommands = rfid.add_subparsers(dest="rfid_command", required=True)
+    rfid = subcommands.add_parser(
+        "rfid",
+        help="Inspect and manage RFID authorization (use rfid edit to open rfid.csv)",
+        epilog=(
+            f"Use ocpp-csms rfid edit to open {default_data_dir() / 'rfid.csv'} "
+            "(default location). If --data-dir is set, edit <data-dir>/rfid.csv instead. "
+            "Columns: rfid,name,enabled. Without the file, all RFID tags are accepted."
+        ),
+    )
+    rfid_subcommands = rfid.add_subparsers(dest="rfid_command")
+
+    rfid_subcommands.add_parser("edit", help="Open rfid.csv in $VISUAL, $EDITOR, or nano")
 
     report = rfid_subcommands.add_parser(
         "report",
@@ -38,6 +53,21 @@ def add_rfid_command(
         command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
 
     return rfid
+
+
+def run_rfid_edit(args: argparse.Namespace) -> int:
+    path = Path(args.data_dir).expanduser() / RFID_AUTH_FILENAME
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
+    try:
+        command = shlex.split(editor)
+        if not command:
+            raise ValueError("Editor command is empty")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run([*command, str(path)], check=False)
+    except (OSError, ValueError) as exc:
+        print(f"RFID edit failed: {exc}")
+        return 1
+    return result.returncode
 
 
 def _format_energy(total_wh: int) -> str:
@@ -86,51 +116,31 @@ def _summary_table(data_dir: str) -> str:
 
     file_configured = policy.source is not None
     cache_available = cache_entries is not None
-    show_allow = file_configured or cache_available
     show_cache = file_configured and cache_available
-    show_name = show_allow
 
-    headers = ["RFID", "TXNS", "ENERGY"]
-    if show_allow:
-        headers.append("ALLOW")
+    headers = ["RFID", "TXNS", "ENERGY", "LAST SEEN", "CURRENT AUTH", "LABEL"]
     if show_cache:
         headers.append("CACHE")
-    if show_name:
-        headers.append("NAME")
 
     rows: list[tuple[str, ...]] = []
     for tag in sorted(grouped):
         tag_views = grouped[tag]
-        values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True)]
-
+        last_seen = max(view.activity_at for view in tag_views).strftime("%Y-%m-%d %H:%M")
         file_entry = policy.entries.get(tag) if policy.valid else None
         cache_entry = cache_entries.get(tag) if cache_entries else None
         cache_unknown = cache_available and cache is not None and not cache.known
 
-        if show_allow:
-            if file_configured:
-                if not policy.valid:
-                    allow = "false"
-                else:
-                    allow = _entry_value(file_entry)
-            elif cache_unknown:
-                allow = "unknown"
-            else:
-                allow = _entry_value(cache_entry)
-            values.append(allow)
-
+        label = file_entry.name if file_entry and file_entry.name else "--"
+        values = [
+            tag,
+            str(len(tag_views)),
+            _energy_summary(tag_views, compact=True),
+            last_seen,
+            "Unregistered" if file_configured and policy.valid and file_entry is None else policy.status(tag),
+            label,
+        ]
         if show_cache:
             values.append("unknown" if cache_unknown else _entry_value(cache_entry))
-
-        if show_name:
-            if file_configured:
-                name = file_entry.name if file_entry and file_entry.name else "-"
-            elif cache_unknown:
-                name = "-"
-            else:
-                name = getattr(cache_entry, "name", None) or "-"
-            values.append(str(name))
-
         rows.append(tuple(values))
 
     widths = [

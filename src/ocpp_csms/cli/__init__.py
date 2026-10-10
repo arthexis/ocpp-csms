@@ -14,7 +14,7 @@ from ocpp_csms.cli.mail import add_mail_command, run_mail
 from ocpp_csms.cli.report import add_report_command, run_report
 from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
-from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action
+from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions.archive import default_data_dir
@@ -79,6 +79,9 @@ def main() -> int:
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
         if args.command == "rfid":
+            if args.rfid_command is None:
+                commands["rfid"].print_help(); return 0
+            if args.rfid_command == "edit": return run_rfid_edit(args)
             if args.rfid_command == "report":
                 print(run_rfid(args)); return 0
             return run_rfid_action(args)
