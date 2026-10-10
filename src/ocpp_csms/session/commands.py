@@ -203,3 +203,25 @@ class SessionCommands:
         response = await self.call(call.ClearCachePayload())
         self._record("ClearCache", dict(response.__dict__), direction="in")
         return response
+
+    async def get_diagnostics(
+        self, location: str, *, retries: int | None = None,
+        retry_interval: int | None = None, start_time: str | None = None,
+        stop_time: str | None = None,
+    ) -> call_result.GetDiagnosticsPayload:
+        # Upload URLs may contain credentials or signed tokens. Never persist them.
+        from urllib.parse import urlsplit, urlunsplit
+        parts = urlsplit(location)
+        safe_location = urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
+        payload: dict[str, Any] = {"location": safe_location}
+        if retries is not None: payload["retries"] = retries
+        if retry_interval is not None: payload["retry_interval"] = retry_interval
+        if start_time is not None: payload["start_time"] = start_time
+        if stop_time is not None: payload["stop_time"] = stop_time
+        self._record("GetDiagnostics", payload, direction="out")
+        response = await self.call(call.GetDiagnosticsPayload(
+            location=location, retries=retries, retry_interval=retry_interval,
+            start_time=start_time, stop_time=stop_time,
+        ))
+        self._record("GetDiagnostics", dict(response.__dict__), direction="in")
+        return response
