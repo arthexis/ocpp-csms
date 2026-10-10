@@ -95,3 +95,33 @@ def test_connector_and_transaction_boundaries():
     output = format_events(rows)
     assert "×" not in output
     assert "StartTransaction" in output
+
+
+def test_real_charger_alternating_camelcase_heartbeat_exchanges():
+    rows = []
+    for n in range(1, 18):
+        rows.append(row(n * 2 - 1, "Heartbeat"))
+        rows.append(row(n * 2, "Heartbeat", {"currentTime": "2026-10-10T00:07:31Z"}, direction="out"))
+    output = format_events(rows)
+    assert output.count("Heartbeat ↔") == 1
+    assert "×17" in output
+    assert "extra=" not in output
+    assert format_events(rows, verbose=True).count("payload=") == 34
+
+
+def test_missing_reply_breaks_observed_exchange_run():
+    rows = [row(1, "Heartbeat"), row(2, "Heartbeat", {"currentTime": "now"}, direction="out"),
+            row(3, "Heartbeat"), row(4, "Heartbeat"),
+            row(5, "Heartbeat", {"currentTime": "now"}, direction="out")]
+    output = format_events(rows)
+    assert output.count("Heartbeat ↔") == 2
+    assert "responses not established" in output
+
+
+def test_anomalous_response_interrupts_pairs():
+    rows = [row(1, "Heartbeat"),
+            row(2, "Heartbeat", {"currentTime": "now", "error": "unexpected"}, direction="out"),
+            row(3, "Heartbeat"), row(4, "Heartbeat", {"currentTime": "now"}, direction="out")]
+    output = format_events(rows)
+    assert "extra=" in output
+    assert output.count("Heartbeat ↔") == 1
