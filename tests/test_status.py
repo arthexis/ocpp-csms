@@ -5,7 +5,7 @@ from pathlib import Path
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import PID_FILENAME, write_pid
 from ocpp_csms.status import appliance_status, format_status
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 def start_payload(*, connector=1, id_tag="card-a", timestamp="2026-10-01T15:00:00Z"):

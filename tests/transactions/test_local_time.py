@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import pytest
 
 import ocpp_csms.transactions as transactions_module
-from ocpp_csms.transaction_query import TransactionQuery
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 @pytest.mark.asyncio

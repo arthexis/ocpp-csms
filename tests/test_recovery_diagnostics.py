@@ -7,7 +7,7 @@ import pytest
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
 from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 def make_session(tmp_path, charger_id="charger-a"):

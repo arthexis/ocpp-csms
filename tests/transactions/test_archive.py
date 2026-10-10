@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 START = {
