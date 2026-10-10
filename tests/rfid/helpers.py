@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from ocpp_csms.events import EventStore
-from ocpp_csms.rfid_cache import RFIDCacheState
-from ocpp_csms.rfid_list_query import RFIDListEntrySnapshot, RFIDListSnapshot
+from ocpp_csms.rfid.cache import RFIDCacheState
+from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot, RFIDListSnapshot
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 

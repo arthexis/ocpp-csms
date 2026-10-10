@@ -6,8 +6,8 @@ import hashlib
 from collections import defaultdict
 
 from ocpp_csms.control import send_control
-from ocpp_csms.rfid_authorization import load_rfid_authorization
-from ocpp_csms.rfid_cache import RFIDCacheState, resolve_rfid_cache_sync
+from ocpp_csms.rfid.authorization import load_rfid_authorization
+from ocpp_csms.rfid.cache import RFIDCacheState, resolve_rfid_cache_sync
 from ocpp_csms.transaction_cli import format_transactions, transaction_energy_wh
 from ocpp_csms.transaction_query import TransactionQuery, TransactionView
 
