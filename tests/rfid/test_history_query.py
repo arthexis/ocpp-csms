@@ -1,5 +1,5 @@
 from ocpp_csms.events import EventStore
-from ocpp_csms.rfid_list_query import RFIDListQuery
+from ocpp_csms.rfid.list_query import RFIDListQuery
 from tests.rfid.helpers import record_list
 
 

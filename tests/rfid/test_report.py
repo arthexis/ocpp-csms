@@ -3,7 +3,7 @@ import pytest
 import ocpp_csms.cli.rfid as rfid_module
 from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.rfid import run_rfid
-from ocpp_csms.rfid_list_query import RFIDListEntrySnapshot
+from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot
 from ocpp_csms.transactions import TransactionArchive
 from tests.rfid.helpers import cache_state, report_args as args, start_payload, stop_payload
 

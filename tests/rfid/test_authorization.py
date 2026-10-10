@@ -1,4 +1,4 @@
-from ocpp_csms.rfid_authorization import authorize_rfid, load_rfid_authorization
+from ocpp_csms.rfid.authorization import authorize_rfid, load_rfid_authorization
 
 
 def test_missing_file_allows_all(tmp_path):

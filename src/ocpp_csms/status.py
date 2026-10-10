@@ -8,7 +8,7 @@ from typing import Any
 
 from ocpp_csms.events import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
-from ocpp_csms.rfid_authorization import load_rfid_authorization
+from ocpp_csms.rfid.authorization import load_rfid_authorization
 from ocpp_csms.transaction_query import TransactionQuery
 
 
