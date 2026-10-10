@@ -63,10 +63,6 @@ def run_rfid_edit(args: argparse.Namespace) -> int:
         if not command:
             raise ValueError("Editor command is empty")
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Let the editor create a new file rather than enabling restrictions
-        # through an implicit empty authorization list.
-        if not path.exists():
-            path.write_text("rfid,name,enabled\\n", encoding="utf-8")
         result = subprocess.run([*command, str(path)], check=False)
     except (OSError, ValueError) as exc:
         print(f"RFID edit failed: {exc}")
