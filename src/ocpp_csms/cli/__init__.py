@@ -12,6 +12,7 @@ from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_comman
 from ocpp_csms.cli.energy import add_energy_command, run_energy
 from ocpp_csms.cli.firmware import add_firmware_command, run_firmware
 from ocpp_csms.cli.export import add_export_command, run_export
+from ocpp_csms.cli.inspect import add_inspect_command, run_inspect
 from ocpp_csms.cli.inspection import add_inspection_commands, run_inspection
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.maintenance import COMMANDS as MAINTENANCE_COMMANDS, add_maintenance_commands, run_maintenance
@@ -35,6 +36,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_control_commands(subcommands))
     commands.update(add_maintenance_commands(subcommands))
     commands.update(add_inspection_commands(subcommands))
+    commands['inspect'] = add_inspect_command(subcommands)
     commands.update(add_charger_commands(subcommands))
     commands.update(add_reservation_commands(subcommands))
     commands["data-transfer"] = add_data_transfer_command(subcommands)
@@ -91,6 +93,7 @@ def main() -> int:
         if args.command in APPLIANCE_COMMANDS: return run_appliance(args)
         if args.command in CONTROL_COMMANDS: return run_control(args)
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
+        if args.command == 'inspect': return run_inspect(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
         if args.command in ("reserve", "reservation"): return run_reservation(args)
