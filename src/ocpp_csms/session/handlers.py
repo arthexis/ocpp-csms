@@ -128,3 +128,9 @@ class SessionHandlers:
         """Preserve charger-reported firmware progress, including unsolicited updates."""
         self._record("FirmwareStatusNotification", payload)
         return call_result.FirmwareStatusNotificationPayload()
+
+    @on("DataTransfer")
+    async def on_data_transfer(self, **payload: Any) -> call_result.DataTransferPayload:
+        """Preserve vendor evidence without executing vendor-defined operations."""
+        self._record("DataTransfer", payload)
+        return call_result.DataTransferPayload(status="UnknownVendorId")
