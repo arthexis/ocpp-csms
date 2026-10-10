@@ -33,6 +33,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     limit_group.add_argument("-N", "--no-limit", action="store_true", help="Return all matching events, without the default 100-event cap")
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
+    add(events, "-f", "--follow", action="store_true", help="Follow newly recorded events until Ctrl+C (JSON uses JSONL)")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
     alerts = subcommands.add_parser("alerts", help="Show exceptional events without grouping")
@@ -98,11 +99,18 @@ def run_events(args: argparse.Namespace) -> int:
         since = max(since, window_start) if since is not None else window_start
     if since is not None and until is not None and since > until:
         raise ValueError("--since must be earlier than or equal to --until")
+    if getattr(args, "follow", False):
+        from ocpp_csms.cli.event_follow import _cursor
+        cursor = _cursor(args.data_dir)
     rows = events_between(
         args.data_dir, charger_id=args.charger, transaction_id=args.transaction,
         since=since.isoformat() if since else None,
         until=until.isoformat() if until else None, limit=count,
     )
+    if getattr(args, "follow", False):
+        from ocpp_csms.cli.event_follow import follow_events
+        return follow_events(args, rows, cursor=cursor, since=since.isoformat() if since else None,
+                             until=until.isoformat() if until else None)
     if args.json:
         emit_json(raw_events_contract(rows) if args.raw else events_contract(rows))
     else:
