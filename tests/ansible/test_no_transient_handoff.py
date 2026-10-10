@@ -32,3 +32,15 @@ def test_no_transient_services_or_discover_lifecycle_inside_csms_ansible():
     assert "systemctl" not in reconnect
     assert "ocpp_discover" not in reconnect
     assert "service" not in reconnect.lower().replace("verification", "")
+
+
+def test_systemd_units_are_explicitly_allowlisted():
+    templates = TASKS.parent / "templates"
+    units = {p.name for p in templates.glob("*.service.j2")} | {
+        p.name for p in templates.glob("*.timer.j2")
+    }
+    assert units == {
+        "ocpp-csms.service.j2",
+        "ocpp-csms-mail-report.service.j2",
+        "ocpp-csms-mail-report.timer.j2",
+    }, "New services or timers require deliberate architecture review"
