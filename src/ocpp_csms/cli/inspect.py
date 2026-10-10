@@ -59,9 +59,9 @@ async def _inspect(data_dir, cp, snapshot, *, offline, deep, timeout):
     reconciliation = _reconciliation(data_dir, cp, None)
     findings = []
     for item in reconciliation:
-        if item["assessment"] == "Conflict":
+        if item["assessment"].startswith("Conflict"):
             findings.append({"severity": "warning", "check": "transactions", "message":
-                             f"C{item['connector']} reports {item['observed_status']} with open transactions {item['active_transactions']}"})
+                             f"C{item['connector']}: {item['assessment']}; observed {item['observed_status']}; open TX {item['active_transactions']}"})
         elif item["assessment"] in {"Offline/uncertain", "No connector observation"}:
             findings.append({"severity": "unknown", "check": "transactions", "message": item["assessment"]})
     report = {"cp": cp, "connected": connected, "mode": "offline" if offline else "deep" if deep else "default",
