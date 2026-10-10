@@ -174,3 +174,32 @@ class SessionCommands:
         self._record("GetCompositeSchedule", dict(response.__dict__), direction="in")
         return response
 
+
+    async def trigger_message(self, requested_message: str, connector_id: int | None = None) -> call_result.TriggerMessagePayload:
+        payload: dict[str, Any] = {"requested_message": requested_message}
+        if connector_id is not None:
+            payload["connector_id"] = connector_id
+        self._record("TriggerMessage", payload, direction="out")
+        response = await self.call(call.TriggerMessagePayload(requested_message=requested_message, connector_id=connector_id))
+        self._record("TriggerMessage", dict(response.__dict__), direction="in")
+        return response
+
+    async def change_availability(self, connector_id: int, availability_type: str) -> call_result.ChangeAvailabilityPayload:
+        payload = {"connector_id": connector_id, "type": availability_type}
+        self._record("ChangeAvailability", payload, direction="out")
+        response = await self.call(call.ChangeAvailabilityPayload(connector_id=connector_id, type=availability_type))
+        self._record("ChangeAvailability", dict(response.__dict__), direction="in")
+        return response
+
+    async def unlock_connector(self, connector_id: int) -> call_result.UnlockConnectorPayload:
+        payload = {"connector_id": connector_id}
+        self._record("UnlockConnector", payload, direction="out")
+        response = await self.call(call.UnlockConnectorPayload(connector_id=connector_id))
+        self._record("UnlockConnector", dict(response.__dict__), direction="in")
+        return response
+
+    async def clear_cache(self) -> call_result.ClearCachePayload:
+        self._record("ClearCache", {}, direction="out")
+        response = await self.call(call.ClearCachePayload())
+        self._record("ClearCache", dict(response.__dict__), direction="in")
+        return response

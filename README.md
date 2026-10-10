@@ -42,7 +42,9 @@ ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_P
 ocpp-csms profile composite [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
 ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
-ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
+ocpp-csms stop CHARGER (--transaction ID|--txn ID) [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn start [-c N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
@@ -51,11 +53,41 @@ ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
+### Field maintenance (OCPP 1.6J)
+
+Use the existing Unix control socket to send one-shot maintenance requests to a connected charge point.
+Omit `--cp` when only one charge point is connected; otherwise specify `--cp ID` (or `--charger ID`).
+
+```bash
+ocpp-csms trigger heartbeat
+ocpp-csms trigger status -c 1
+ocpp-csms trigger meter -c 1
+ocpp-csms availability disable -c 2
+ocpp-csms availability enable -c 2
+ocpp-csms availability disable  # connector 0: whole charge point
+ocpp-csms unlock -c 1
+```
+
+Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
+
+### Capability inspection and reconciliation
+
+```bash
+ocpp-csms capabilities [--cp CP001] [--json]
+ocpp-csms reconcile [--cp CP001] [-c 1] [--json]
+ocpp-csms rfid cache clear [--cp CP001]
+```
+
+`capabilities` fetches `SupportedFeatureProfiles` from a connected charge point, labeling features **Advertised**, **Not advertised**, or **Unknown**. Advertised features are not necessarily verified as operational. `reconcile` is a **read-only local snapshot** of stored connector notifications and open transaction archives; it does not interrogate the charger, assert physical state, infer missing StopTransaction frames, or modify transactions. Disconnected charge points are marked uncertain. `rfid cache clear` issues OCPP `ClearCache`, and does not change the charger local authorization list managed by `rfid clear`.
+
 ### Status and charger views
 
 `charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
 
 ### Transactions and events
+
+`txn start` and `txn stop` are convenient aliases for the existing remote `start` and `stop` operations, with `--now` assumed unless `--after` or `--within` is supplied. `txn stop ID` accepts the transaction ID directly, and `txn stop --txn ID` also works. Existing `txn ID`, `txn --active`, and other history queries remain unchanged.
+
 
 `transactions`/`txn` expose transaction history and active/last transaction views. `--txn` aliases `--transaction` where a transaction ID is accepted. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger.
 

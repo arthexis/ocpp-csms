@@ -52,6 +52,11 @@ def add_rfid_command(
         )
         command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
 
+    cache = rfid_subcommands.add_parser("cache", help="Manage the charger's authorization cache (not its local RFID list)")
+    cache_sub = cache.add_subparsers(dest="cache_command", required=True)
+    clear_cache = cache_sub.add_parser("clear", help="Request OCPP ClearCache without changing the local list")
+    clear_cache.add_argument("charger", nargs="?", help="Charge point ID")
+    clear_cache.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
     return rfid
 
 
@@ -292,10 +297,14 @@ def _print_failure(command: str, response: dict[str, object]) -> int:
 
 
 def run_rfid_action(args: argparse.Namespace) -> int:
-    if args.rfid_command not in {"export", "version", "clear"}:
+    if args.rfid_command not in {"export", "version", "clear", "cache"}:
         raise ValueError(f"Unknown RFID action: {args.rfid_command}")
 
     request = _control_request(args)
+    if args.rfid_command == "cache":
+        if args.cache_command != "clear":
+            raise ValueError("Unknown RFID cache action")
+        request["command"] = "rfid_cache_clear"
     try:
         result = asyncio.run(send_control(args.data_dir, request))
     except (OSError, ValueError, ConnectionError) as exc:
@@ -309,6 +318,12 @@ def run_rfid_action(args: argparse.Namespace) -> int:
     if not isinstance(response, dict):
         print(f"RFID {args.rfid_command} failed: invalid control response")
         return 1
+
+    if args.rfid_command == "cache":
+        status = response.get("status")
+        print(f"Authorization cache clear: {status or 'Unknown'}")
+        print("Charger local authorization list was not modified.")
+        return 0 if status == "Accepted" else 1
 
     if args.rfid_command == "version":
         version = response.get("list_version")
