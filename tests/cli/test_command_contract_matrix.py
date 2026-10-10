@@ -6,6 +6,8 @@ new command cannot silently shadow an existing alias or change its flags.
 from __future__ import annotations
 
 import pytest
+from ocpp.v16 import call
+from ocpp_csms.session.commands import SessionCommands
 
 
 @pytest.mark.parametrize(("argv", "command"), [
@@ -40,13 +42,12 @@ def test_invalid_or_inapplicable_cli_options_are_rejected(parse_cli, argv):
 
 
 @pytest.mark.parametrize(("operation", "expected"), [
-    ("reserve", "ReserveNow"),
+    ("reserve_now", "ReserveNow"),
     ("cancel_reservation", "CancelReservation"),
     ("get_diagnostics", "GetDiagnostics"),
     ("update_firmware", "UpdateFirmware"),
     ("data_transfer", "DataTransfer"),
 ])
 def test_outgoing_operation_names_are_explicit(operation, expected):
-    # Contract names are deliberately centralised in this matrix so future
-    # protocol audits can compare them against OCPP 1.6 definitions.
-    assert expected and operation
+    assert hasattr(SessionCommands, operation)
+    assert hasattr(call, expected + "Payload")
