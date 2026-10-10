@@ -1,0 +1,10 @@
+[Unit]
+Description=OCPP CSMS scheduled mail reports
+After=network-online.target
+
+[Service]
+Type=oneshot
+User={{ ocpp_csms_service_user }}
+Group={{ ocpp_csms_service_group }}
+ExecStart={{ ocpp_csms_command_path }} --data-dir {{ ocpp_csms_data_dir }} mail schedule run
+NoNewPrivileges=true

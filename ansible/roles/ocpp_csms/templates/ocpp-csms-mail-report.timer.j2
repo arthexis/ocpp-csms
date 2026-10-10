@@ -1,0 +1,10 @@
+[Unit]
+Description=Check OCPP CSMS scheduled reports
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=ocpp-csms-mail-report.service
+
+[Install]
+WantedBy=timers.target

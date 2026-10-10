@@ -45,6 +45,8 @@ ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
+ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
+ocpp-csms mail send report [--since TIME] [--until TIME] [--cp CHARGE_POINT]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
@@ -89,6 +91,44 @@ will allow opting into transaction-start emails independently, disabled by defau
 The current classifier reports explicitly recognized faults, authorization
 rejections, and disconnects; state-derived offline thresholds and recovery
 correlation are future work.
+
+### Operational reports
+
+`ocpp-csms report` summarizes transactions whose start was received in the selected
+period (default: last day), with individual RFID, charge point, connector, state,
+measured kWh, and duration when available. The **SUBTOTAL** row gives the
+period's transaction count, completed/incomplete breakdown, measured energy,
+and meter coverage. Missing measurements are not treated as zero. Alerts are
+counted over the selected period, while charger health is explicitly a **current**
+snapshot, not a historical reconstruction.
+
+```bash
+ocpp-csms report --since 1d
+ocpp-csms report --since 7d --cp CP001 --json
+ocpp-csms mail send report --since 1d
+```
+
+Manual email requires SMTP. Scheduled delivery is configured independently:
+
+```toml
+[mail.reports.daily]
+enabled = true
+time = "08:00"
+timezone = "America/Monterrey"
+
+[mail.reports.weekly]
+enabled = true
+weekday = "monday"
+time = "08:00"
+timezone = "America/Monterrey"
+```
+
+`ocpp-csms mail schedule run` checks for due completed local calendar periods,
+queues each report once per recipient with a stable period identity, and invokes
+the existing retrying mail outbox. Ansible installs a persistent systemd timer
+running this check every 15 minutes. This avoids a heavyweight scheduler and
+does not send anything while mail is disabled. Reports include transaction RFIDs
+and the period subtotal; charger health is a generation-time snapshot.
 
 ### SMTP mail transport
 

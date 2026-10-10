@@ -6,7 +6,12 @@ import smtplib
 import ssl
 from pathlib import Path
 
-from ocpp_csms.mail import load_mail_config, mail_status, send_test
+from ocpp_csms.mail import load_mail_config, mail_status, send_test, send_message
+from ocpp_csms.reports import format_report
+from ocpp_csms.report_schedule import enqueue_scheduled
+from ocpp_csms.notifications import deliver
+from ocpp_csms.cli.report import report_for_args
+from email.message import EmailMessage
 from ocpp_csms.notifications import history, policy, OUTBOX
 from ocpp_csms.output import emit_json
 
@@ -21,6 +26,14 @@ def add_mail_command(subcommands):
     history_parser = children.add_parser("history", help="Inspect automatic message delivery history")
     history_parser.add_argument("--failed", action="store_true")
     history_parser.add_argument("-j", "--json", action="store_true")
+    schedule = children.add_parser("schedule", help="Queue due scheduled reports")
+    schedule.add_argument("schedule_action", choices=("run",))
+    send = children.add_parser("send", help="Send a report manually")
+    send_sub = send.add_subparsers(dest="send_kind", required=True)
+    report = send_sub.add_parser("report", help="Send operational report")
+    report.add_argument("--since", default="1d")
+    report.add_argument("--until")
+    report.add_argument("--cp", "--charger", dest="cp")
     return parser
 
 
@@ -51,6 +64,26 @@ def run_mail(args: argparse.Namespace) -> int:
                 print(f"{item['created_at']} {item['kind']} {item['state']} to={item['recipient']} attempts={item['attempts']}")
             if not records:
                 print("No matching mail deliveries.")
+        return 0
+    if args.mail_command == "schedule":
+        queued = enqueue_scheduled(Path(args.data_dir), Path(args.config))
+        deliver(Path(args.data_dir), Path(args.config))
+        print(f"Scheduled reports queued: {queued}")
+        return 0
+    if args.mail_command == "send":
+        if config is None or not config.enabled:
+            raise ValueError("mail is disabled or not configured")
+        report = report_for_args(args)
+        msg = EmailMessage()
+        msg["From"] = config.sender
+        msg["To"] = ", ".join(config.recipients)
+        msg["Subject"] = "[OCPP-CSMS] Operational report"
+        msg.set_content(format_report(report))
+        try:
+            send_message(config, msg)
+        except (smtplib.SMTPException, OSError, ssl.SSLError) as exc:
+            raise ValueError(f"SMTP send failed ({type(exc).__name__})") from None
+        print("SMTP server accepted the report; recipient delivery is not guaranteed.")
         return 0
     if args.mail_command == "test":
         if config is None:
