@@ -3,14 +3,14 @@
 import json
 from types import SimpleNamespace
 
-from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transactions.archive import TransactionArchive
-
 import pytest
 from ocpp.messages import Call
 from ocpp.routing import on
 from ocpp.v16 import ChargePoint as OcppChargePoint, call_result
+
+from ocpp_csms.evidence.store import EventStore
+from ocpp_csms.session import ChargePointSession
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 class InheritedHandlers:
@@ -20,7 +20,7 @@ class InheritedHandlers:
         return call_result.HeartbeatPayload(current_time="2026-10-10T00:00:00Z")
 
 
-class ExperimentSession(InheritedHandlers, OcppChargePoint):
+class InheritedRouteSession(InheritedHandlers, OcppChargePoint):
     pass
 
 
@@ -35,7 +35,7 @@ class RecordingConnection:
 @pytest.mark.asyncio
 async def test_inherited_decorated_handler_is_registered_and_dispatched():
     connection = RecordingConnection()
-    session = ExperimentSession("test-charger", connection)
+    session = InheritedRouteSession("test-charger", connection)
     assert "Heartbeat" in session.route_map
 
     await session._handle_call(Call("test-1", "Heartbeat", {}))
