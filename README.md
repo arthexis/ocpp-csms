@@ -42,7 +42,9 @@ ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_P
 ocpp-csms profile composite [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
 ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
-ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
+ocpp-csms stop CHARGER (--transaction ID|--txn ID) [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn start [-c N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
@@ -73,6 +75,9 @@ Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `fir
 `charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
 
 ### Transactions and events
+
+`txn start` and `txn stop` are convenient aliases for the existing remote `start` and `stop` operations, with `--now` assumed unless `--after` or `--within` is supplied. `txn stop ID` accepts the transaction ID directly, and `txn stop --txn ID` also works. Existing `txn ID`, `txn --active`, and other history queries remain unchanged.
+
 
 `transactions`/`txn` expose transaction history and active/last transaction views. `--txn` aliases `--transaction` where a transaction ID is accepted. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger.
 
