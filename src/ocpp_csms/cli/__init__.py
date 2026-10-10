@@ -63,11 +63,13 @@ def main() -> int:
     argv = list(sys.argv[1:])
     # Route txn/transactions start and stop through the existing OCPP control CLI.
     # The control parser already defaults omitted timing options to --now.
-    if argv and argv[0] in TRANSACTION_COMMANDS and len(argv) > 1 and argv[1] in {"start", "stop"}:
-        argv = [argv[1], *argv[2:]]
+    txn_offset = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS), -1)
+    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop"}:
+        operation = argv[txn_offset + 1]
+        argv[txn_offset:txn_offset + 2] = [operation]
         # "txn stop 42" is shorthand for "stop --txn 42".
-        if argv[0] == "stop" and len(argv) > 1 and argv[1].isdecimal():
-            argv = ["stop", "--txn", argv[1], *argv[2:]]
+        if operation == "stop" and len(argv) > txn_offset + 1 and argv[txn_offset + 1].isdecimal():
+            argv[txn_offset + 1:txn_offset + 2] = ["--txn", argv[txn_offset + 1]]
     # Support the natural "transactions recover" syntax without breaking
     # the existing integer transaction selector.
     offset = argv.index("transactions") if "transactions" in argv else -1
