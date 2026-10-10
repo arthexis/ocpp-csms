@@ -106,7 +106,7 @@ def _summary_table(data_dir: str) -> str:
             str(len(tag_views)),
             _energy_summary(tag_views, compact=True),
             last_seen,
-            policy.status(tag),
+            "Unregistered" if file_configured and policy.valid and file_entry is None else policy.status(tag),
             label,
         ]
         if show_cache:
