@@ -1,6 +1,7 @@
 """CLI-level regression tests for the compact and verbose event timeline."""
 import argparse
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -125,5 +126,40 @@ def test_filters_are_forwarded_unchanged(monkeypatch, capsys):
                         until="2026-10-09T23:59:59Z", limit=4))
     capsys.readouterr()
     assert captured == [dict(charger_id="CP2", transaction_id=11,
-                             since="2026-10-09T00:00:00Z",
-                             until="2026-10-09T23:59:59Z", limit=4)]
+                             since="2026-10-09T00:00:00+00:00",
+                             until="2026-10-09T23:59:59+00:00", limit=4)]
+
+
+@pytest.mark.parametrize("duration,seconds", [
+    ("3d", 3 * 86400), ("12H", 12 * 3600), ("30m", 1800),
+    ("1w", 7 * 86400), ("1.5h", 5400),
+])
+def test_relative_since_uses_current_utc(monkeypatch, duration, seconds):
+    captured = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: captured.append(kw) or [])
+    before = datetime.now(timezone.utc)
+    cli.run_events(args(since=duration))
+    after = datetime.now(timezone.utc)
+    actual = datetime.fromisoformat(captured[0]["since"])
+    assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
+    assert captured[0]["limit"] == 200
+
+
+def test_relative_bounds_keep_common_reference_time(monkeypatch):
+    captured = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: captured.append(kw) or [])
+    cli.run_events(args(since="3d", until="1d"))
+    since = datetime.fromisoformat(captured[0]["since"])
+    until = datetime.fromisoformat(captured[0]["until"])
+    assert until - since == timedelta(days=2)
+
+
+@pytest.mark.parametrize("bounds", [
+    {"since": "banana"}, {"until": "2months"},
+    {"since": "1d", "until": "3d"},
+    {"since": "2026-10-10T00:00:00Z", "until": "2026-10-09T00:00:00Z"},
+])
+def test_invalid_or_reversed_time_bounds_do_not_query(monkeypatch, bounds):
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
+    with pytest.raises(ValueError):
+        cli.run_events(args(**bounds))
