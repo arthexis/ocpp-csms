@@ -130,8 +130,24 @@ Set the named environment variable in the operator's environment (or securely
 via systemd credentials when integrating a service). Never commit credentials
 to version control. SMTP uses validated TLS and has a bounded timeout.
 `mail test` explicitly sends one test email; SMTP acceptance does not prove
-inbox delivery. The alert/event subscription settings are reserved for
-later automatic-notification chunks; no automatic emails are sent yet.
+inbox delivery. Automatic notifications run independently of charger message handling and use
+a small durable SQLite outbox in the data directory. Enable [mail.alerts]
+to send qualifying exceptional events, and opt into [mail.events.transaction_started]
+or [mail.events.transaction_stopped] for ordinary transactions. Cooldown
+applies only to repeated alerts, never to distinct transactions. The first
+enabled worker cycle starts from the current evidence high-water mark to avoid
+backfilling historical messages. Failed SMTP attempts retry with bounded
+exponential backoff.
+
+```bash
+ocpp-csms mail history
+ocpp-csms mail history --failed
+ocpp-csms mail history --json
+```
+
+`mail status` includes notification delivery counts when the outbox exists.
+Email processing never blocks OCPP handlers. Scheduled digest reports are
+planned for later chunks.
 
 ### Configuration
 
