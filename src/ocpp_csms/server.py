@@ -13,6 +13,7 @@ from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.recovery import recovery_loop
+from ocpp_csms.notifications import notification_loop
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.archive import TransactionArchive
@@ -141,11 +142,13 @@ class CSMSServer:
                         LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
                         worker = asyncio.create_task(recovery_loop(self))
+                        mail_worker = asyncio.create_task(notification_loop(self.events.data_dir))
                         try:
                             await asyncio.Future()
                         finally:
                             worker.cancel()
-                            await asyncio.gather(worker, return_exceptions=True)
+                            mail_worker.cancel()
+                            await asyncio.gather(worker, mail_worker, return_exceptions=True)
                     finally:
                         object.__setattr__(self, "_tls_listener", None)
                         await tls.stop()
