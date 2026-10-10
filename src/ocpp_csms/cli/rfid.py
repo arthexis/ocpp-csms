@@ -25,7 +25,7 @@ def add_rfid_command(
             "Columns: rfid,name,enabled. Without the file, all RFID tags are accepted."
         ),
     )
-    rfid_subcommands = rfid.add_subparsers(dest="rfid_command", required=True)
+    rfid_subcommands = rfid.add_subparsers(dest="rfid_command")
 
     report = rfid_subcommands.add_parser(
         "report",
