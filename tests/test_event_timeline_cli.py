@@ -27,6 +27,19 @@ def args(**overrides):
     return argparse.Namespace(**defaults)
 
 
+
+@pytest.fixture
+def captured_queries(monkeypatch):
+    """Capture event query arguments independently of rendering and storage."""
+    queries = []
+    monkeypatch.setattr(cli, "events_between", lambda *_args, **kwargs: queries.append(kwargs) or [])
+    return queries
+
+
+def query_events(captured_queries, **options):
+    cli.run_events(args(**options))
+    return captured_queries[-1]
+
 def test_parser_accepts_verbose():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
@@ -145,12 +158,10 @@ def test_relative_since_uses_current_utc(monkeypatch, duration, seconds):
     assert captured[0]["limit"] == 100
 
 
-def test_relative_bounds_keep_common_reference_time(monkeypatch):
-    captured = []
-    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: captured.append(kw) or [])
-    cli.run_events(args(since="3d", until="1d"))
-    since = datetime.fromisoformat(captured[0]["since"])
-    until = datetime.fromisoformat(captured[0]["until"])
+def test_relative_bounds_keep_common_reference_time(captured_queries):
+    query = query_events(captured_queries, since="3d", until="1d")
+    since = datetime.fromisoformat(query["since"])
+    until = datetime.fromisoformat(query["until"])
     assert until - since == timedelta(days=2)
 
 
@@ -179,21 +190,18 @@ def test_duration_limit_has_no_count_cap(monkeypatch, duration, seconds):
     assert seen[0]["limit"] is None
 
 
-def test_duration_window_ends_at_explicit_until(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
-    cli.run_events(args(until="2026-10-09T12:00:00Z", limit="1d"))
-    assert seen[0]["since"] == "2026-10-08T12:00:00+00:00"
-    assert seen[0]["until"] == "2026-10-09T12:00:00+00:00"
+def test_duration_window_ends_at_explicit_until(captured_queries):
+    query = query_events(captured_queries, until="2026-10-09T12:00:00Z", limit="1d")
+    assert query["since"] == "2026-10-08T12:00:00+00:00"
+    assert query["until"] == "2026-10-09T12:00:00+00:00"
 
 
-def test_duration_limit_intersects_since(monkeypatch):
-    seen = []
-    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
-    cli.run_events(args(since="1h", limit="1d"))
+def test_duration_limit_intersects_since(captured_queries):
     before = datetime.now(timezone.utc)
-    assert before - timedelta(hours=1, seconds=2) <= datetime.fromisoformat(seen[0]["since"]) <= before
-    assert seen[0]["limit"] is None
+    query = query_events(captured_queries, since="1h", limit="1d")
+    after = datetime.now(timezone.utc)
+    assert before - timedelta(hours=1) <= datetime.fromisoformat(query["since"]) <= after - timedelta(hours=1)
+    assert query["limit"] is None
 
 
 @pytest.mark.parametrize("limit", ["0", "0h", "-1", "nonsense", "2months"])
