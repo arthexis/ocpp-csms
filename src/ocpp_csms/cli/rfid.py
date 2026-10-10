@@ -22,9 +22,9 @@ def add_rfid_command(
 ) -> argparse.ArgumentParser:
     rfid = subcommands.add_parser(
         "rfid",
-        help="Inspect and manage RFID authorization (edit rfid.csv in the data directory)",
+        help="Inspect and manage RFID authorization (use rfid edit to open rfid.csv)",
         epilog=(
-            f"Edit RFID authorization and labels in {default_data_dir() / 'rfid.csv'} "
+            f"Use ocpp-csms rfid edit to open {default_data_dir() / 'rfid.csv'} "
             "(default location). If --data-dir is set, edit <data-dir>/rfid.csv instead. "
             "Columns: rfid,name,enabled. Without the file, all RFID tags are accepted."
         ),
