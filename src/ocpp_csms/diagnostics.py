@@ -105,28 +105,52 @@ def transaction_events(
 
 
 def _summary(row: sqlite3.Row) -> str:
+    """Summarize one stored event without assuming frame correlation."""
     if row["kind"] == "runtime":
-        return row["action"].replace("_", " ")
+        return str(row["action"]).replace("_", " ")
 
-    payload: dict[str, Any] = json.loads(row["payload"] or "{}")
-    if row["direction"] == "out":
-        status = payload.get("status")
-        info = payload.get("idTagInfo")
-        if status is None and isinstance(info, dict):
-            status = info.get("status")
-        suffix = f" {status}" if status else " response"
-        if row["transaction_id"] is not None:
-            suffix += f" tx={row['transaction_id']}"
-        return f"→ {row['action']}{suffix}"
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (TypeError, ValueError):
+        return f"{row['action']} [invalid payload]"
+    if not isinstance(payload, dict):
+        return f"{row['action']} [unexpected payload]"
 
+    action = str(row["action"])
+    direction = row["direction"]
     details = []
+    connector = payload.get("connector_id")
+    if connector is not None:
+        details.append(f"C{connector}")
     if row["id_tag"]:
         details.append(f"RFID {row['id_tag']}")
     if row["transaction_id"] is not None:
         details.append(f"tx={row['transaction_id']}")
-    if row["action"] == "StatusNotification":
-        details.extend(str(value) for value in (payload.get("status"), payload.get("error_code"), payload.get("info")) if value and value != "NoError")
-    return " ".join([row["action"], *details])
+
+    if action == "StatusNotification":
+        details.extend(str(value) for value in (
+            payload.get("status"), payload.get("error_code"), payload.get("info")
+        ) if value is not None and value != "" and value != "NoError")
+    elif direction == "out":
+        status = payload.get("status")
+        info = payload.get("idTagInfo")
+        if status is None and isinstance(info, dict):
+            status = info.get("status")
+        if status is not None:
+            details.append(str(status))
+        if payload.get("transaction_id") is not None and row["transaction_id"] is None:
+            details.append(f"tx={payload['transaction_id']}")
+        if payload.get("current_time") is not None and action == "Heartbeat":
+            details.append("ack")
+        if not details:
+            details.append("response")
+        return "→ " + " ".join([action, *details])
+    elif action in {"StartTransaction", "StopTransaction"}:
+        for key in ("reason", "meter_start", "meter_stop"):
+            if payload.get(key) is not None:
+                details.append(f"{key}={payload[key]}")
+
+    return " ".join([action, *details])
 
 
 def format_events(rows: list[sqlite3.Row], heading: str | None = None) -> str:
