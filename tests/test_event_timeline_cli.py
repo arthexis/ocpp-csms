@@ -1,6 +1,7 @@
 """CLI-level regression tests for the compact and verbose event timeline."""
 import argparse
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -21,10 +22,23 @@ def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
 
 def args(**overrides):
     defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
-                    until=None, limit=200, json=False, raw=False, verbose=False)
+                    until=None, limit=100, json=False, raw=False, verbose=False)
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
+
+
+@pytest.fixture
+def captured_queries(monkeypatch):
+    """Capture event query arguments independently of rendering and storage."""
+    queries = []
+    monkeypatch.setattr(cli, "events_between", lambda *_args, **kwargs: queries.append(kwargs) or [])
+    return queries
+
+
+def query_events(captured_queries, **options):
+    cli.run_events(args(**options))
+    return captured_queries[-1]
 
 def test_parser_accepts_verbose():
     parser = argparse.ArgumentParser()
@@ -34,7 +48,7 @@ def test_parser_accepts_verbose():
     assert parsed.command == "events"
     assert parsed.charger == "CP1"
     assert parsed.verbose is True
-    assert parsed.limit == 2
+    assert parsed.limit == "2"
 
 
 def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
@@ -125,5 +139,95 @@ def test_filters_are_forwarded_unchanged(monkeypatch, capsys):
                         until="2026-10-09T23:59:59Z", limit=4))
     capsys.readouterr()
     assert captured == [dict(charger_id="CP2", transaction_id=11,
-                             since="2026-10-09T00:00:00Z",
-                             until="2026-10-09T23:59:59Z", limit=4)]
+                             since="2026-10-09T00:00:00+00:00",
+                             until="2026-10-09T23:59:59+00:00", limit=4)]
+
+
+@pytest.mark.parametrize("duration,seconds", [
+    ("3d", 3 * 86400), ("12H", 12 * 3600), ("30m", 1800),
+    ("1w", 7 * 86400), ("1.5h", 5400),
+])
+def test_relative_since_uses_current_utc(captured_queries, duration, seconds):
+    before = datetime.now(timezone.utc)
+    query = query_events(captured_queries, since=duration)
+    after = datetime.now(timezone.utc)
+    actual = datetime.fromisoformat(query["since"])
+    assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
+    assert query["limit"] == 100
+
+
+def test_relative_bounds_keep_common_reference_time(captured_queries):
+    query = query_events(captured_queries, since="3d", until="1d")
+    since = datetime.fromisoformat(query["since"])
+    until = datetime.fromisoformat(query["until"])
+    assert until - since == timedelta(days=2)
+
+
+@pytest.mark.parametrize("bounds", [
+    {"since": "banana"}, {"until": "2months"},
+    {"since": "1d", "until": "3d"},
+    {"since": "2026-10-10T00:00:00Z", "until": "2026-10-09T00:00:00Z"},
+])
+def test_invalid_or_reversed_time_bounds_do_not_query(monkeypatch, bounds):
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
+    with pytest.raises(ValueError):
+        cli.run_events(args(**bounds))
+
+
+@pytest.mark.parametrize("duration,seconds", [
+    ("1d", 86400), ("72h", 72 * 3600), ("1W", 7 * 86400),
+])
+def test_duration_limit_has_no_count_cap(captured_queries, duration, seconds):
+    before = datetime.now(timezone.utc)
+    query = query_events(captured_queries, limit=duration)
+    after = datetime.now(timezone.utc)
+    actual = datetime.fromisoformat(query["since"])
+    assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
+    assert query["limit"] is None
+
+
+def test_duration_window_ends_at_explicit_until(captured_queries):
+    query = query_events(captured_queries, until="2026-10-09T12:00:00Z", limit="1d")
+    assert query["since"] == "2026-10-08T12:00:00+00:00"
+    assert query["until"] == "2026-10-09T12:00:00+00:00"
+
+
+def test_duration_limit_intersects_since(captured_queries):
+    before = datetime.now(timezone.utc)
+    query = query_events(captured_queries, since="1h", limit="1d")
+    after = datetime.now(timezone.utc)
+    assert before - timedelta(hours=1) <= datetime.fromisoformat(query["since"]) <= after - timedelta(hours=1)
+    assert query["limit"] is None
+
+
+@pytest.mark.parametrize("limit", ["0", "0h", "-1", "nonsense", "2months"])
+def test_invalid_event_limits(monkeypatch, limit):
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
+    with pytest.raises(ValueError, match="--limit"):
+        cli.run_events(args(limit=limit))
+
+
+def test_short_limit_alias_matches_long_flag(monkeypatch):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    recorded = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: recorded.append(kw) or [])
+    for value in ("50", "1d", "1.5h"):
+        for flag in ("-n", "--limit"):
+            parsed = parser.parse_args(["events", flag, value])
+            parsed.data_dir = "unused"
+            cli.run_events(parsed)
+        short, long = recorded[-2:]
+        assert short["limit"] == long["limit"]
+        if short["since"] is None:
+            assert long["since"] is None
+        else:
+            assert abs((datetime.fromisoformat(short["since"]) - datetime.fromisoformat(long["since"])).total_seconds()) < 1
+
+
+def test_parser_default_limit_is_100():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    assert parser.parse_args(["events"]).limit == "100"

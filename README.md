@@ -44,7 +44,7 @@ ocpp-csms profile clear ...
 ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
-ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [--limit N]
+ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
@@ -55,6 +55,18 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ### Transactions and events
 
 `transactions`/`txn` expose transaction history and active/last transaction views. `--txn` aliases `--transaction` where a transaction ID is accepted. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger.
+
+By default, `events` shows the latest **100 events**. `-n` and `--limit` are interchangeable: an integer caps the number of matching events, while a duration (`s`, `m`, `h`, `d`, or `w`, case-insensitive) returns **all** events in that time window without a count cap. `--since` and `--until` accept either relative durations such as `3d` or ISO-8601 timestamps. A duration limit ends at `--until` when given, otherwise at the current UTC time; `--since` further restricts the window. The latest events are selected first and printed chronologically. Compact grouping and JSON output use the same filters.
+
+```bash
+ocpp-csms events                       # latest 100 events
+ocpp-csms events -n 50                 # latest 50 events
+ocpp-csms events -n 1d                 # all events from the last day
+ocpp-csms events --since 3d            # latest 100 events within three days
+ocpp-csms events --since 3d -n 1d      # all events within the last day
+ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
+ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
+```
 
 ### Configuration
 
