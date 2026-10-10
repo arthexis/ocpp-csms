@@ -8,6 +8,7 @@ from collections import defaultdict
 from ocpp_csms.control import send_control
 from ocpp_csms.rfid.authorization import load_rfid_authorization
 from ocpp_csms.rfid.cache import RFIDCacheState, resolve_rfid_cache_sync
+from ocpp_csms.transactions.archive import default_data_dir
 from ocpp_csms.transactions.formatting import format_transactions, transaction_energy_wh
 from ocpp_csms.transactions.query import TransactionQuery, TransactionView
 
@@ -15,7 +16,15 @@ from ocpp_csms.transactions.query import TransactionQuery, TransactionView
 def add_rfid_command(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
-    rfid = subcommands.add_parser("rfid", help="Inspect and manage RFID authorization")
+    rfid = subcommands.add_parser(
+        "rfid",
+        help="Inspect and manage RFID authorization (edit rfid.csv in the data directory)",
+        epilog=(
+            f"Edit RFID authorization and labels in {default_data_dir() / 'rfid.csv'} "
+            "(default location). If --data-dir is set, edit <data-dir>/rfid.csv instead. "
+            "Columns: rfid,name,enabled. Without the file, all RFID tags are accepted."
+        ),
+    )
     rfid_subcommands = rfid.add_subparsers(dest="rfid_command", required=True)
 
     report = rfid_subcommands.add_parser(
