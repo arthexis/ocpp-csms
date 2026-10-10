@@ -1,6 +1,6 @@
 """A disconnected recovery is a presentation label, not a fabricated StopTransaction."""
-from ocpp_csms.transaction_query import TransactionView
-from ocpp_csms.transaction_cli import format_transaction, format_transactions
+from ocpp_csms.transactions.query import TransactionView
+from ocpp_csms.transactions.formatting import format_transaction, format_transactions
 
 
 def test_disconnected_label_preserves_persisted_inference(tmp_path):
