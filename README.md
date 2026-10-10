@@ -70,6 +70,16 @@ ocpp-csms unlock -c 1
 
 Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
 
+### Capability inspection and reconciliation
+
+```bash
+ocpp-csms capabilities [--cp CP001] [--json]
+ocpp-csms reconcile [--cp CP001] [-c 1] [--json]
+ocpp-csms rfid cache clear [--cp CP001]
+```
+
+`capabilities` fetches `SupportedFeatureProfiles` from a connected charge point, labeling features **Advertised**, **Not advertised**, or **Unknown**. Advertised features are not necessarily verified as operational. `reconcile` is a **read-only local snapshot** of stored connector notifications and open transaction archives; it does not interrogate the charger, assert physical state, infer missing StopTransaction frames, or modify transactions. Disconnected charge points are marked uncertain. `rfid cache clear` issues OCPP `ClearCache`, and does not change the charger local authorization list managed by `rfid clear`.
+
 ### Status and charger views
 
 `charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
