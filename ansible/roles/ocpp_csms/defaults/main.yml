@@ -5,6 +5,8 @@ ocpp_csms_host: "0.0.0.0"
 ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
+# Opt in to activating the periodic mail timer at deployment time.
+ocpp_csms_mail_timer_enabled: false
 
 # A takeover target is discovered from observed host-local OCPP traffic rather
 # than from a catalog of product-specific service names or ports. Keep the
