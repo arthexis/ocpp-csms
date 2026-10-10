@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from ocpp_discover import redirect as redirect_tools
+from ocpp_discover import network
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
 from ocpp_discover.arp import discover_candidate
@@ -39,9 +40,10 @@ def require_root() -> None:
         raise RuntimeError("root_required")
 
 
-def _require_ip() -> None:
-    if shutil.which("ip") is None:
-        raise RuntimeError("ip_not_found")
+# Forwarding entry points preserve the discovery API and test injection seams.
+_require_ip = network.require_ip
+_ip_error = network.ip_error
+_ipv4_addresses = network.ipv4_addresses
 
 
 def _run_ip(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -49,43 +51,12 @@ def _run_ip(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
-def _ip_error(result: subprocess.CompletedProcess[str], fallback: str) -> RuntimeError:
-    detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else fallback
-    return RuntimeError(detail)
-
-
-def _ipv4_addresses(payload: object) -> set[str]:
-    try:
-        return {
-            str(info["local"])
-            for item in payload
-            for info in item.get("addr_info", [])
-            if info.get("family") == "inet" and "local" in info
-        }
-    except (TypeError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
-
-
 def interface_addresses(interface: str) -> set[str]:
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    result = _run_ip(["ip", "-j", "address", "show", "dev", interface])
-    if result.returncode != 0:
-        raise _ip_error(result, "interface_address_query_failed")
-    try:
-        return _ipv4_addresses(json.loads(result.stdout))
-    except (TypeError, ValueError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
+    return network.interface_addresses(interface, run=_run_ip)
 
 
 def host_addresses() -> set[str]:
-    result = _run_ip(["ip", "-j", "address", "show"])
-    if result.returncode != 0:
-        raise _ip_error(result, "host_address_query_failed")
-    try:
-        return _ipv4_addresses(json.loads(result.stdout))
-    except (TypeError, ValueError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
+    return network.host_addresses(run=_run_ip)
 
 
 def _claim_path(state_dir: str | Path) -> Path:
