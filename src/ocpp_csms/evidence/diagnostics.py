@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from ocpp_csms.events import DATABASE_FILENAME
+from ocpp_csms.evidence.store import DATABASE_FILENAME
 
 
 def _time(value: str) -> str:

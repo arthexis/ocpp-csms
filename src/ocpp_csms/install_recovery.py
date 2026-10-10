@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.install_cutover import apply_schema_action, verify_schema_integrity
 from ocpp_csms.install_preflight import evaluate_preflight
 from ocpp_csms.recovery import recover_once, read_policy

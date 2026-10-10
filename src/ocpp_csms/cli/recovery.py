@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.recovery import RecoveryPolicy, read_policy, recover_once, write_policy
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.schema import inspect_schema, CURRENT_SCHEMA_VERSION

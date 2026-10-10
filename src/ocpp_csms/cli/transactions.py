@@ -4,7 +4,7 @@ import argparse
 import re
 from datetime import datetime, timedelta, timezone
 
-from ocpp_csms.diagnostics import format_events, transaction_events
+from ocpp_csms.evidence.diagnostics import format_events, transaction_events
 from ocpp_csms.transaction_cli import format_transaction, format_transactions
 from ocpp_csms.transaction_query import TransactionQuery
 

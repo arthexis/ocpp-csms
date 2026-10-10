@@ -2,7 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import PID_FILENAME, write_pid
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.transactions import TransactionArchive

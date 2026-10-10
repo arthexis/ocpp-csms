@@ -1,7 +1,7 @@
 import pytest
 
-from ocpp_csms.diagnostics import events_between, explain, format_events
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.diagnostics import events_between, explain, format_events
+from ocpp_csms.evidence.store import EventStore
 
 
 def test_events_merge_runtime_and_ocpp(tmp_path):

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from ocpp_csms.cli.recovery import run_recovery
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.recovery import RecoveryPolicy, read_policy, write_policy
 from ocpp_csms.schema import database_path
 from ocpp_csms.transactions import TransactionArchive

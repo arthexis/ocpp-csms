@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
 

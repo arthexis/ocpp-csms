@@ -3,7 +3,7 @@ import asyncio
 import json
 import sqlite3
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.schema import database_path, inspect_schema
 from ocpp_csms.transactions import TransactionArchive
 from ocpp_csms.transaction_query import TransactionQuery

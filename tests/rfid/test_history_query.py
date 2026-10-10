@@ -1,4 +1,4 @@
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.rfid.list_query import RFIDListQuery
 from tests.rfid.helpers import record_list
 
@@ -50,7 +50,7 @@ def test_query_scopes_history_by_charger_and_version(tmp_path):
 def test_reused_version_returns_most_recent_snapshot(tmp_path, monkeypatch):
     store = EventStore(tmp_path)
     times = iter(("2026-10-07T01:00:00Z", "2026-10-07T02:00:00Z"))
-    monkeypatch.setattr("ocpp_csms.events.utc_now_iso", lambda: next(times))
+    monkeypatch.setattr("ocpp_csms.evidence.store.utc_now_iso", lambda: next(times))
     record_list(store, "charger-a", 0, rfid="FIRST", source=None)
     record_list(store, "charger-a", 0, rfid="SECOND", source=None)
 

@@ -1,6 +1,6 @@
 from ocpp_csms.cli.diagnostics import run_diagnostic
-from ocpp_csms.diagnostics import events_between
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.diagnostics import events_between
+from ocpp_csms.evidence.store import EventStore
 
 
 def test_status_runs_through_cli_module(cli_parser, tmp_path, capsys):
