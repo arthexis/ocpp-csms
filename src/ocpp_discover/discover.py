@@ -15,7 +15,7 @@ from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
 from ocpp_discover.arp import discover_candidate
 from ocpp_discover.cli_parser import build_parser
-from ocpp_discover.websocket import _validate_candidate, _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
+from ocpp_discover.websocket import _TCP_PACKET, _validate_candidate, _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"
