@@ -336,7 +336,36 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "update_firmware":
+        if command == "reserve":
+            from datetime import datetime, timezone
+            connector = request.get("connector")
+            reservation_id = request.get("reservation_id")
+            id_tag = request.get("id_tag")
+            parent = request.get("parent_id_tag")
+            expiry = request.get("expiry_date")
+            if not _non_negative_int(connector):
+                return {"error": "invalid_connector"}
+            if not _positive_int(reservation_id):
+                return {"error": "invalid_reservation_id"}
+            if not isinstance(id_tag, str) or not 1 <= len(id_tag) <= 20:
+                return {"error": "invalid_id_tag"}
+            if parent is not None and (not isinstance(parent, str) or not 1 <= len(parent) <= 20):
+                return {"error": "invalid_parent_id_tag"}
+            if not isinstance(expiry, str):
+                return {"error": "invalid_expiry"}
+            try:
+                when = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                if when.tzinfo is None or when <= datetime.now(timezone.utc):
+                    return {"error": "invalid_expiry"}
+            except ValueError:
+                return {"error": "invalid_expiry"}
+            response = await session.reserve_now(connector, expiry, id_tag, reservation_id, parent)
+        elif command == "cancel_reservation":
+            reservation_id = request.get("reservation_id")
+            if not _positive_int(reservation_id):
+                return {"error": "invalid_reservation_id"}
+            response = await session.cancel_reservation(reservation_id)
+        elif command == "update_firmware":
             from datetime import datetime, timezone
             from urllib.parse import urlsplit
             location = request.get("location")

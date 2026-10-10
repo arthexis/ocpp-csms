@@ -245,3 +245,18 @@ class SessionCommands:
         ))
         self._record("UpdateFirmware", dict(response.__dict__), direction="in")
         return response
+
+    async def reserve_now(self, connector_id: int, expiry_date: str, id_tag: str, reservation_id: int, parent_id_tag: str | None = None) -> call_result.ReserveNowPayload:
+        payload: dict[str, Any] = {"connector_id": connector_id, "expiry_date": expiry_date, "id_tag": id_tag, "reservation_id": reservation_id}
+        if parent_id_tag is not None:
+            payload["parent_id_tag"] = parent_id_tag
+        self._record("ReserveNow", payload, direction="out")
+        response = await self.call(call.ReserveNowPayload(**payload))
+        self._record("ReserveNow", dict(response.__dict__), direction="in")
+        return response
+
+    async def cancel_reservation(self, reservation_id: int) -> call_result.CancelReservationPayload:
+        self._record("CancelReservation", {"reservation_id": reservation_id}, direction="out")
+        response = await self.call(call.CancelReservationPayload(reservation_id=reservation_id))
+        self._record("CancelReservation", dict(response.__dict__), direction="in")
+        return response

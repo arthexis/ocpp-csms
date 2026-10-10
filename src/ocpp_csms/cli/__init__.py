@@ -16,6 +16,7 @@ from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.maintenance import COMMANDS as MAINTENANCE_COMMANDS, add_maintenance_commands, run_maintenance
 from ocpp_csms.cli.mail import add_mail_command, run_mail
 from ocpp_csms.cli.report import add_report_command, run_report
+from ocpp_csms.cli.reservation import add_reservation_commands, run_reservation
 from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
@@ -34,6 +35,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_maintenance_commands(subcommands))
     commands.update(add_inspection_commands(subcommands))
     commands.update(add_charger_commands(subcommands))
+    commands.update(add_reservation_commands(subcommands))
     commands["firmware"] = add_firmware_command(subcommands)
     commands["diagnostics"] = add_diagnostics_command(subcommands)
     commands["config"] = add_config_command(subcommands)
@@ -89,6 +91,7 @@ def main() -> int:
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
+        if args.command in ("reserve", "reservation"): return run_reservation(args)
         if args.command == "firmware": return run_firmware(args)
         if args.command == "diagnostics": return run_diagnostics(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
