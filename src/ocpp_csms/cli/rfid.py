@@ -3,10 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import os
+import shlex
+import subprocess
+from pathlib import Path
 from collections import defaultdict
 
 from ocpp_csms.control import send_control
-from ocpp_csms.rfid.authorization import load_rfid_authorization
+from ocpp_csms.rfid.authorization import RFID_AUTH_FILENAME, load_rfid_authorization
 from ocpp_csms.rfid.cache import RFIDCacheState, resolve_rfid_cache_sync
 from ocpp_csms.transactions.archive import default_data_dir
 from ocpp_csms.transactions.formatting import format_transactions, transaction_energy_wh
@@ -26,6 +30,8 @@ def add_rfid_command(
         ),
     )
     rfid_subcommands = rfid.add_subparsers(dest="rfid_command")
+
+    rfid_subcommands.add_parser("edit", help="Open rfid.csv in $VISUAL, $EDITOR, or nano")
 
     report = rfid_subcommands.add_parser(
         "report",
@@ -47,6 +53,25 @@ def add_rfid_command(
         command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
 
     return rfid
+
+
+def run_rfid_edit(args: argparse.Namespace) -> int:
+    path = Path(args.data_dir).expanduser() / RFID_AUTH_FILENAME
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
+    try:
+        command = shlex.split(editor)
+        if not command:
+            raise ValueError("Editor command is empty")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Let the editor create a new file rather than enabling restrictions
+        # through an implicit empty authorization list.
+        if not path.exists():
+            path.write_text("rfid,name,enabled\\n", encoding="utf-8")
+        result = subprocess.run([*command, str(path)], check=False)
+    except (OSError, ValueError) as exc:
+        print(f"RFID edit failed: {exc}")
+        return 1
+    return result.returncode
 
 
 def _format_energy(total_wh: int) -> str:
