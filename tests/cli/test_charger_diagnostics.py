@@ -50,3 +50,21 @@ async def test_dispatch_rejects_invalid(params, error):
     registry = SimpleNamespace(connected_chargers=lambda: ["CP1"], session=lambda _: object())
     result = await dispatch_control(registry, {"command": "get_diagnostics", **params})
     assert result["error"] == error
+
+
+def test_diagnostic_window_compares_actual_instants_not_iso_strings():
+    """Differing UTC offsets may reverse lexicographic timestamp order."""
+    args = parse("request", "--location", "https://example.org/upload",
+                 "--since", "2026-10-12T10:00:00+02:00",
+                 "--until", "2026-10-12T09:30:00+00:00")
+    request = _request(args)
+    assert request["start_time"]
+    assert request["stop_time"]
+
+
+def test_diagnostic_window_rejects_reversed_instants():
+    args = parse("request", "--location", "https://example.org/upload",
+                 "--since", "2026-10-12T10:00:00+00:00",
+                 "--until", "2026-10-12T10:30:00+02:00")
+    with pytest.raises(ValueError, match="since"):
+        _request(args)
