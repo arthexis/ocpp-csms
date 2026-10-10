@@ -52,7 +52,7 @@ def _request(args):
         raise ValueError("--retry-interval must be non-negative")
     now = datetime.now(timezone.utc)
     start, stop = _iso(args.since, now=now), _iso(args.until, now=now)
-    if start and stop and start > stop:
+    if start and stop and datetime.fromisoformat(start) > datetime.fromisoformat(stop):
         raise ValueError("--since must not be after --until")
     request = {"command": "get_diagnostics", "location": args.location}
     if args.charger:

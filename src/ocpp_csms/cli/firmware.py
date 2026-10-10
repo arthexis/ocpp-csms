@@ -29,7 +29,8 @@ def add_firmware_command(subcommands):
         parser = sub.add_parser(name, help="Show observed firmware status" if name == "status" else "Show firmware OCPP evidence")
         parser.add_argument("--cp", "--charger", dest="charger")
         parser.add_argument("--since")
-        parser.add_argument("-n", "--limit", type=int, default=100)
+        if name == "history":
+            parser.add_argument("-n", "--limit", type=int, default=100)
         parser.add_argument("-j", "--json", action="store_true")
     return root
 
@@ -66,7 +67,7 @@ def firmware_request(args, *, now=None):
     return result
 
 def firmware_events(args):
-    if args.limit < 1:
+    if args.firmware_action == "history" and args.limit < 1:
         raise ValueError("--limit must be positive")
     since = resolve_time(args.since).isoformat() if args.since else None
     rows = events_between(args.data_dir, charger_id=args.charger, since=since, limit=None)
