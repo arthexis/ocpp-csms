@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ocpp_discover import discover
+from ocpp_discover import capture, discover
 
 
 REQUEST = (
@@ -95,8 +95,8 @@ def test_capture_arp_uses_default_bounded_tcpdump_shape(monkeypatch):
         calls["command"] = command
         return Process()
 
-    monkeypatch.setattr(discover.shutil, "which", lambda command: "/usr/bin/tcpdump")
-    monkeypatch.setattr(discover.subprocess, "Popen", popen)
+    monkeypatch.setattr(capture.shutil, "which", lambda command: "/usr/bin/tcpdump")
+    monkeypatch.setattr(capture.subprocess, "Popen", popen)
 
     assert discover.capture_arp("eth0", 3) == REQUEST + SECOND_REQUEST
     assert calls["command"] == ["tcpdump", "-i", "eth0", "-l", "-nn", "-e", "arp"]
@@ -106,7 +106,7 @@ def test_capture_arp_uses_default_bounded_tcpdump_shape(monkeypatch):
 
 
 def test_capture_arp_reports_missing_tcpdump(monkeypatch):
-    monkeypatch.setattr(discover.shutil, "which", lambda command: None)
+    monkeypatch.setattr(capture.shutil, "which", lambda command: None)
     with pytest.raises(RuntimeError, match="tcpdump_not_found"):
         discover.capture_arp("eth0", 3)
 
