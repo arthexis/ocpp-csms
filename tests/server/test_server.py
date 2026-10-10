@@ -116,3 +116,20 @@ async def test_connection_records_path_identity_and_subprotocol(monkeypatch, sub
 
     websocket.closed.set()
     await task
+
+
+@pytest.mark.asyncio
+async def test_websocket_keeps_exact_latest_frame():
+    raw = '[2,"abc","Heartbeat",{}]'
+
+    class WebSocket:
+        async def recv(self):
+            return raw
+
+    from ocpp_csms.server import RecordedWebSocket
+
+    websocket = RecordedWebSocket(WebSocket())
+
+    assert await websocket.recv() == raw
+    assert websocket.last_frame == raw
+
