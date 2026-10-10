@@ -132,6 +132,14 @@ and the period subtotal; charger health is a generation-time snapshot.
 
 ### SMTP mail transport
 
+Ansible installs a documented, fully disabled `/etc/ocpp-csms/mail.toml`
+only when the file is absent; later deploys preserve operator changes. It
+validates the existing TOML as the service user before configuring the mail
+timer, but does not create password files. The report timer is installed but
+**inactive by default**; set Ansible variable `ocpp_csms_mail_timer_enabled:
+true` to activate it, after configuring SMTP and the desired report schedules.
+
+
 SMTP is optional and disabled unless explicitly enabled in
 `/etc/ocpp-csms/mail.toml`. The mail command accepts a custom path via
 `--config` before the subcommand:

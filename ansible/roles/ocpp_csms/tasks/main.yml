@@ -751,6 +751,43 @@
 
 # Scheduled report checks are harmless when mail is disabled. Actual send
 # eligibility and calendar boundaries come exclusively from mail.toml.
+- name: Create OCPP CSMS mail configuration directory
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms
+    state: directory
+    owner: root
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0750"
+
+- name: Create disabled default mail configuration if absent
+  become: true
+  ansible.builtin.template:
+    src: mail.toml.j2
+    dest: /etc/ocpp-csms/mail.toml
+    owner: root
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0640"
+    force: false
+
+- name: Validate existing mail configuration as service user
+  become: true
+  become_user: "{{ ocpp_csms_service_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -c
+      - >-
+        from ocpp_csms.mail import load_mail_config;
+        from ocpp_csms.notifications import policy;
+        from ocpp_csms.report_schedule import _jobs;
+        from pathlib import Path;
+        p = Path('/etc/ocpp-csms/mail.toml');
+        load_mail_config(p);
+        policy(p);
+        list(_jobs(p))
+  changed_when: false
+
 - name: Install scheduled report service unit
   become: true
   ansible.builtin.template:
@@ -765,10 +802,10 @@
     dest: /etc/systemd/system/ocpp-csms-mail-report.timer
     mode: "0644"
 
-- name: Enable scheduled report timer
+- name: Configure scheduled report timer enablement
   become: true
   ansible.builtin.systemd_service:
     name: ocpp-csms-mail-report.timer
-    enabled: true
-    state: started
+    enabled: "{{ ocpp_csms_mail_timer_enabled | bool }}"
+    state: "{{ 'started' if ocpp_csms_mail_timer_enabled | bool else 'stopped' }}"
     daemon_reload: true

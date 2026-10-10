@@ -1,0 +1,40 @@
+# Created once by Ansible. Operator edits are never overwritten.
+# Enable mail only after setting SMTP credentials outside this file.
+[mail]
+enabled = false
+from = ""
+to = []
+
+[mail.smtp]
+host = ""
+port = 587
+starttls = true
+ssl = false
+username = ""
+password_env = "OCPP_CSMS_SMTP_PASSWORD"
+timeout = 10
+
+# Exceptional charger and CSMS evidence.
+[mail.alerts]
+enabled = false
+minimum_severity = "warning"
+cooldown = "10m"
+
+# Ordinary charging sessions are opt-in; no cooldown is applied.
+[mail.events.transaction_started]
+enabled = false
+
+[mail.events.transaction_stopped]
+enabled = false
+
+# Set timezone to the installation's local IANA timezone when enabling.
+[mail.reports.daily]
+enabled = false
+time = "08:00"
+timezone = "UTC"
+
+[mail.reports.weekly]
+enabled = false
+weekday = "monday"
+time = "08:00"
+timezone = "UTC"
