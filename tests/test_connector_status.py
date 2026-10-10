@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.status import appliance_status, format_status
 
 

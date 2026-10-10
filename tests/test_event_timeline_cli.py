@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from ocpp_csms.cli import diagnostics as cli
-from ocpp_csms.diagnostics import format_events
-from ocpp_csms.event_contract import events_contract, raw_events_contract
+from ocpp_csms.evidence.diagnostics import format_events
+from ocpp_csms.evidence.contracts import events_contract, raw_events_contract
 
 
 def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",

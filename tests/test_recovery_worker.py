@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.recovery import recover_once
 from ocpp_csms.schema import database_path
 from ocpp_csms.transaction_query import TransactionQuery

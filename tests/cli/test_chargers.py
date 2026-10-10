@@ -16,7 +16,7 @@ def test_chargers_and_cps_aliases_normalize_to_plural(parse_cli):
 
 
 def test_singular_charger_renders_connector_detail(parse_cli, tmp_path, capsys):
-    from ocpp_csms.events import EventStore
+    from ocpp_csms.evidence.store import EventStore
 
     store = EventStore(tmp_path)
     store.record_runtime("charger_connected", charger_id="charger-a", details={"subprotocol": "ocpp1.6"})
@@ -31,7 +31,7 @@ def test_singular_charger_renders_connector_detail(parse_cli, tmp_path, capsys):
 
 
 def test_plural_chargers_renders_fleet_without_appliance_header(parse_cli, tmp_path, capsys):
-    from ocpp_csms.events import EventStore
+    from ocpp_csms.evidence.store import EventStore
 
     store = EventStore(tmp_path)
     store.record_runtime("charger_connected", charger_id="charger-a")

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.energy_query import _entry_sample
-from ocpp_csms.event_contract import event_record
+from ocpp_csms.evidence.contracts import event_record
 from ocpp_csms.output import json_command_result
 from ocpp_csms.schema import DATABASE_FILENAME, source_id
 from ocpp_csms.status import appliance_status

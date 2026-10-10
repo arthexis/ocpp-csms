@@ -12,7 +12,7 @@ def test_forwarder_does_not_import_csms_database_implementation():
     )
 
     assert "ocpp_csms.schema" not in text
-    assert "ocpp_csms.events" not in text
+    assert "ocpp_csms.evidence.store" not in text
     assert "sqlite3" not in text
 
 

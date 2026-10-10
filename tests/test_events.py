@@ -4,7 +4,7 @@ from contextlib import closing
 
 import pytest
 
-from ocpp_csms.events import DATABASE_FILENAME, EventStore
+from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
 
 
 def database(tmp_path):

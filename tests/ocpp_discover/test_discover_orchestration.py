@@ -5,7 +5,7 @@ import pytest
 
 from ocpp_discover import discover
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import write_pid
 
 

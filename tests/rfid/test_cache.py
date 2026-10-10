@@ -1,7 +1,7 @@
 import pytest
 
 import ocpp_csms.rfid.cache as cache_module
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.rfid.cache import resolve_rfid_cache
 from tests.rfid.helpers import record_list
 

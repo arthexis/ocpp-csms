@@ -1,6 +1,6 @@
 import sqlite3
 
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 
 
 def test_record_rfid_list_persists_accepted_snapshot(tmp_path):

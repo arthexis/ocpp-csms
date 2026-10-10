@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from ocpp.v16 import call_result
 
-from ocpp_csms.events import DATABASE_FILENAME, EventStore
+from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
 from ocpp_csms.server import RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions import TransactionArchive
