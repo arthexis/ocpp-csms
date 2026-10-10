@@ -336,7 +336,30 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "start":
+        if command == "trigger":
+            message = request.get("message")
+            connector = request.get("connector")
+            if message not in {"BootNotification", "Heartbeat", "StatusNotification", "MeterValues", "DiagnosticsStatusNotification", "FirmwareStatusNotification"}:
+                return {"error": "invalid_trigger_message"}
+            if connector is not None and not _positive_int(connector):
+                return {"error": "invalid_connector"}
+            if connector is not None and message not in {"StatusNotification", "MeterValues"}:
+                return {"error": "connector_not_applicable"}
+            response = await session.trigger_message(message, connector)
+        elif command == "availability":
+            connector = request.get("connector", 0)
+            availability_type = request.get("type")
+            if not _non_negative_int(connector):
+                return {"error": "invalid_connector"}
+            if availability_type not in {"Operative", "Inoperative"}:
+                return {"error": "invalid_availability_type"}
+            response = await session.change_availability(connector, availability_type)
+        elif command == "unlock":
+            connector = request.get("connector")
+            if not _positive_int(connector):
+                return {"error": "invalid_connector"}
+            response = await session.unlock_connector(connector)
+        elif command == "start":
             id_tag = request.get("id_tag")
             connector = request.get("connector")
             if not isinstance(id_tag, str) or not id_tag:
