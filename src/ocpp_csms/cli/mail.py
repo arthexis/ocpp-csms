@@ -8,6 +8,8 @@ from pathlib import Path
 
 from ocpp_csms.mail import load_mail_config, mail_status, send_test, send_message
 from ocpp_csms.reports import format_report
+from ocpp_csms.report_schedule import enqueue_scheduled
+from ocpp_csms.notifications import deliver
 from ocpp_csms.cli.report import report_for_args
 from email.message import EmailMessage
 from ocpp_csms.notifications import history, policy, OUTBOX
@@ -24,6 +26,8 @@ def add_mail_command(subcommands):
     history_parser = children.add_parser("history", help="Inspect automatic message delivery history")
     history_parser.add_argument("--failed", action="store_true")
     history_parser.add_argument("-j", "--json", action="store_true")
+    schedule = children.add_parser("schedule", help="Queue due scheduled reports")
+    schedule.add_argument("schedule_action", choices=("run",))
     send = children.add_parser("send", help="Send a report manually")
     send_sub = send.add_subparsers(dest="send_kind", required=True)
     report = send_sub.add_parser("report", help="Send operational report")
@@ -60,6 +64,11 @@ def run_mail(args: argparse.Namespace) -> int:
                 print(f"{item['created_at']} {item['kind']} {item['state']} to={item['recipient']} attempts={item['attempts']}")
             if not records:
                 print("No matching mail deliveries.")
+        return 0
+    if args.mail_command == "schedule":
+        queued = enqueue_scheduled(Path(args.data_dir), Path(args.config))
+        deliver(Path(args.data_dir), Path(args.config))
+        print(f"Scheduled reports queued: {queued}")
         return 0
     if args.mail_command == "send":
         if config is None or not config.enabled:
