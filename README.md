@@ -90,6 +90,49 @@ The current classifier reports explicitly recognized faults, authorization
 rejections, and disconnects; state-derived offline thresholds and recovery
 correlation are future work.
 
+### SMTP mail transport
+
+SMTP is optional and disabled unless explicitly enabled in
+`/etc/ocpp-csms/mail.toml`. The mail command accepts a custom path via
+`--config` before the subcommand:
+
+```bash
+ocpp-csms mail status
+ocpp-csms mail status --json
+ocpp-csms mail --config ./mail.toml test
+```
+
+Example configuration:
+
+```toml
+[mail]
+enabled = false
+from = "csms@example.com"
+to = ["administrator@example.com"]
+
+[mail.smtp]
+host = "smtp.example.com"
+port = 587
+starttls = true
+username = "csms@example.com"
+password_env = "OCPP_CSMS_SMTP_PASSWORD"
+timeout = 10
+
+[mail.alerts]
+enabled = true
+minimum_severity = "warning"
+
+[mail.events.transaction_started]
+enabled = false
+```
+
+Set the named environment variable in the operator's environment (or securely
+via systemd credentials when integrating a service). Never commit credentials
+to version control. SMTP uses validated TLS and has a bounded timeout.
+`mail test` explicitly sends one test email; SMTP acceptance does not prove
+inbox delivery. The alert/event subscription settings are reserved for
+later automatic-notification chunks; no automatic emails are sent yet.
+
 ### Configuration
 
 `config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
