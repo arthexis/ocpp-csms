@@ -9,7 +9,7 @@ from ocpp.v16 import ChargePoint as OcppChargePoint
 from ocpp.v16 import call, call_result
 
 from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.rfid_authorization import load_rfid_authorization
+from ocpp_csms.rfid.authorization import load_rfid_authorization
 from ocpp_csms.time import utc_now_iso
 from ocpp_csms.transactions import TransactionArchive
 

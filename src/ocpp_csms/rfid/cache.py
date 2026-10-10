@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ocpp_csms.control import send_control
-from ocpp_csms.rfid_list_query import RFIDListQuery, RFIDListSnapshot
+from ocpp_csms.rfid.list_query import RFIDListQuery, RFIDListSnapshot
 
 
 @dataclass(frozen=True)
