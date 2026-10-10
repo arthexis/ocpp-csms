@@ -90,7 +90,7 @@ def _summary_table(data_dir: str) -> str:
     show_cache = file_configured and cache_available
     show_name = show_allow
 
-    headers = ["RFID", "TXNS", "ENERGY"]
+    headers = ["RFID", "TXNS", "ENERGY", "LAST SEEN"]
     if show_allow:
         headers.append("ALLOW")
     if show_cache:
@@ -101,7 +101,8 @@ def _summary_table(data_dir: str) -> str:
     rows: list[tuple[str, ...]] = []
     for tag in sorted(grouped):
         tag_views = grouped[tag]
-        values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True)]
+        last_seen = max(view.activity_at for view in tag_views).strftime("%Y-%m-%d %H:%M")
+        values = [tag, str(len(tag_views)), _energy_summary(tag_views, compact=True), last_seen]
 
         file_entry = policy.entries.get(tag) if policy.valid else None
         cache_entry = cache_entries.get(tag) if cache_entries else None
