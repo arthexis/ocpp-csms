@@ -116,3 +116,15 @@ class SessionHandlers:
             except Exception:
                 LOGGER.exception("frame %s", self.connection.last_frame)
         return call_result.MeterValuesPayload()
+
+    @on("DiagnosticsStatusNotification")
+    async def on_diagnostics_status_notification(self, **payload: Any) -> call_result.DiagnosticsStatusNotificationPayload:
+        """Preserve charger-reported diagnostic upload progress."""
+        self._record("DiagnosticsStatusNotification", payload)
+        return call_result.DiagnosticsStatusNotificationPayload()
+
+    @on("FirmwareStatusNotification")
+    async def on_firmware_status_notification(self, **payload: Any) -> call_result.FirmwareStatusNotificationPayload:
+        """Preserve charger-reported firmware progress, including unsolicited updates."""
+        self._record("FirmwareStatusNotification", payload)
+        return call_result.FirmwareStatusNotificationPayload()

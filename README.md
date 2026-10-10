@@ -103,6 +103,10 @@ ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
 ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
 ```
 
+### Incoming maintenance notifications
+
+The CSMS accepts and records OCPP 1.6 `DiagnosticsStatusNotification` and `FirmwareStatusNotification`, including unsolicited notifications. Their status transitions are available in `events`; `UploadFailed`, `DownloadFailed`, and `InstallationFailed` additionally appear in `alerts`. Ordinary progress is not an alert. These handlers only acknowledge and preserve evidence; they do not request diagnostics, host uploads, or initiate firmware updates.
+
 ### Alerts
 
 `alerts` shows exceptional recorded events as individual occurrences, without
