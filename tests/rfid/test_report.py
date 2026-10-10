@@ -1,5 +1,7 @@
 import pytest
 
+from ocpp_csms.transactions.archive import default_data_dir
+
 import ocpp_csms.cli.rfid as rfid_module
 from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.rfid import run_rfid
@@ -18,6 +20,16 @@ def test_parser_accepts_rfid_report_with_optional_tag():
     assert summary.rfid_command == "report"
     assert summary.tag is None
     assert detailed.tag == "card-a"
+
+
+def test_rfid_help_shows_authorization_file_location_and_fields():
+    parser, commands = build_parser()
+    help_text = commands["rfid"].format_help()
+
+    assert str(default_data_dir() / "rfid.csv") in help_text
+    assert "<data-dir>/rfid.csv" in help_text
+    assert "rfid,name,enabled" in help_text
+    assert "all RFID tags are accepted" in help_text
 
 
 @pytest.mark.asyncio
