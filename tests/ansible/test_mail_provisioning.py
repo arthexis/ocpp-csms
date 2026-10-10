@@ -24,9 +24,19 @@ def test_deployment_creates_once_preserves_edits_and_validates():
     create = task_by_name(TASKS / "main.yml", "Create disabled default mail configuration if absent")
     settings = create["ansible.builtin.template"]
     assert settings["force"] is False
-    assert settings["owner"] == "root"
+    assert settings["owner"] == "{{ ocpp_csms_service_user }}"
     assert settings["mode"] == "0640"
     assert settings["src"] == "mail.toml.j2"
+    directory = task_by_name(TASKS / "main.yml", "Create OCPP CSMS mail configuration directory")
+    assert directory["ansible.builtin.file"]["owner"] == "{{ ocpp_csms_service_user }}"
+    preserve = task_by_name(TASKS / "main.yml", "Preserve existing mail configuration with deploy-user ownership")
+    persistent = preserve["ansible.builtin.file"]
+    assert persistent["state"] == "file"
+    assert persistent["owner"] == "{{ ocpp_csms_service_user }}"
+    assert persistent["group"] == "{{ ocpp_csms_service_group }}"
+    assert persistent["mode"] == "0640"
+    assert "content" not in persistent
+
     check = task_by_name(TASKS / "main.yml", "Validate existing mail configuration as service user")
     assert check["changed_when"] is False
     assert "load_mail_config" in str(check["ansible.builtin.command"])
