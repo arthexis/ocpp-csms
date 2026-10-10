@@ -79,6 +79,8 @@ def main() -> int:
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
         if args.command == "rfid":
+            if args.rfid_command is None:
+                commands["rfid"].print_help(); return 0
             if args.rfid_command == "report":
                 print(run_rfid(args)); return 0
             return run_rfid_action(args)
