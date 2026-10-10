@@ -27,7 +27,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "--transaction", "--txn", dest="transaction", type=int, help="Filter by OCPP transaction ID")
     add(events, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 3d)")
     add(events, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 12h)")
-    add(events, "--limit", default="100", help="Event count or duration (default: 100; e.g. 1d, 72h, 1w)")
+    add(events, "-n", "--limit", default="100", help="Event count or duration (default: 100; e.g. 1d, 72h, 1w)")
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
