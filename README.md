@@ -103,6 +103,19 @@ ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
 ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
 ```
 
+### Charger diagnostic upload requests
+
+`ocpp-csms diagnostics request --location URL` sends OCPP 1.6 `GetDiagnostics` to a connected charge point. The explicit URL must be reachable by the **charger**, and uploads are handled by an external server in this first version.
+
+```bash
+ocpp-csms diagnostics request --location https://uploads.example.org/charger
+ocpp-csms diagnostics request --cp CP001 --location https://uploads.example.org/charger --since 1d --until now --retries 2 --retry-interval 30
+ocpp-csms diagnostics history --cp CP001 --limit 100
+ocpp-csms diagnostics history --json
+```
+
+Request evidence redacts upload credentials, path, and query strings. The `history` command reads the existing event store for GetDiagnostics requests/responses and DiagnosticsStatusNotification events. It does **not** establish strict request-to-notification correlation because the persisted event schema does not include OCPP message IDs, and an `Uploaded` notification is not proof that the destination received the file. A future optional CSMS-managed diagnostic receiver, provisioned by Ansible, will supply default upload URLs and manage stored files; that receiver is intentionally outside this PR.
+
 ### Incoming maintenance notifications
 
 The CSMS accepts and records OCPP 1.6 `DiagnosticsStatusNotification` and `FirmwareStatusNotification`, including unsolicited notifications. Their status transitions are available in `events`; `UploadFailed`, `DownloadFailed`, and `InstallationFailed` additionally appear in `alerts`. Ordinary progress is not an alert. These handlers only acknowledge and preserve evidence; they do not request diagnostics, host uploads, or initiate firmware updates.

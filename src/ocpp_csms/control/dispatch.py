@@ -336,7 +336,39 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "rfid_cache_clear":
+        if command == "get_diagnostics":
+            from urllib.parse import urlsplit
+            from datetime import datetime
+            location = request.get("location")
+            if not isinstance(location, str) or not location:
+                return {"error": "invalid_location"}
+            try:
+                parsed = urlsplit(location)
+                if parsed.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parsed.hostname or parsed.fragment:
+                    return {"error": "invalid_location"}
+            except ValueError:
+                return {"error": "invalid_location"}
+            retries = request.get("retries")
+            interval = request.get("retry_interval")
+            if retries is not None and not _non_negative_int(retries):
+                return {"error": "invalid_retries"}
+            if interval is not None and not _non_negative_int(interval):
+                return {"error": "invalid_retry_interval"}
+            start_time, stop_time = request.get("start_time"), request.get("stop_time")
+            try:
+                start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")) if start_time else None
+                stop_dt = datetime.fromisoformat(stop_time.replace("Z", "+00:00")) if stop_time else None
+                if any(dt.tzinfo is None for dt in (start_dt, stop_dt) if dt is not None):
+                    return {"error": "timezone_required"}
+                if start_dt and stop_dt and start_dt > stop_dt:
+                    return {"error": "invalid_time_window"}
+            except (TypeError, ValueError, AttributeError):
+                return {"error": "invalid_time_window"}
+            response = await session.get_diagnostics(
+                location, retries=retries, retry_interval=interval,
+                start_time=start_time, stop_time=stop_time,
+            )
+        elif command == "rfid_cache_clear":
             response = await session.clear_cache()
         elif command == "trigger":
             message = request.get("message")

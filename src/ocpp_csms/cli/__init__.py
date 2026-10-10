@@ -6,6 +6,7 @@ from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, 
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
 from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, run_config_download, run_configuration
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
+from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
 from ocpp_csms.cli.energy import add_energy_command, run_energy
 from ocpp_csms.cli.export import add_export_command, run_export
@@ -32,6 +33,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_maintenance_commands(subcommands))
     commands.update(add_inspection_commands(subcommands))
     commands.update(add_charger_commands(subcommands))
+    commands["diagnostics"] = add_diagnostics_command(subcommands)
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
     commands["recover"] = add_recovery_parser(subcommands)
@@ -85,6 +87,7 @@ def main() -> int:
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
+        if args.command == "diagnostics": return run_diagnostics(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
         if args.command == "mail": return run_mail(args)
