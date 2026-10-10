@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ocpp_csms.events import DATABASE_FILENAME
+from ocpp_csms.evidence.store import DATABASE_FILENAME
 
 
 def physical_connector_ids(data_dir: str | Path, charger_id: str) -> list[int]:

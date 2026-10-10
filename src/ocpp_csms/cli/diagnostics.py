@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from ocpp_csms.cli.transactions import resolve_time
 
-from ocpp_csms.diagnostics import events_between, explain, format_events
-from ocpp_csms.event_contract import events_contract, raw_events_contract
+from ocpp_csms.evidence.diagnostics import events_between, explain, format_events
+from ocpp_csms.evidence.contracts import events_contract, raw_events_contract
 from ocpp_csms.output import emit_json
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
