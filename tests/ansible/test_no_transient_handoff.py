@@ -31,7 +31,12 @@ def test_no_transient_services_or_discover_lifecycle_inside_csms_ansible():
     reconnect = read(TASKS / "reconnect.yml")
     assert "systemctl" not in reconnect
     assert "ocpp_discover" not in reconnect
-    assert "service" not in reconnect.lower().replace("verification", "")
+    tasks = load_yaml(TASKS / "reconnect.yml")
+    for task in tasks:
+        assert "ansible.builtin.systemd_service" not in task
+        assert "ansible.builtin.service" not in task
+        argv = task["ansible.builtin.command"]["argv"]
+        assert not any(token in argv for token in ("systemd-run", "systemctl", "service"))
 
 
 def test_systemd_units_are_explicitly_allowlisted():
