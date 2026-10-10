@@ -9,7 +9,7 @@ from .helpers import TASKS, load_yaml, read
 
 
 def test_reconnect_verifies_without_starting_discover():
-    tasks = load_yaml(TASKS / "reconnect_with_discover.yml")
+    tasks = load_yaml(TASKS / "reconnect.yml")
     assert len(tasks) == 2
     assert {t["name"] for t in tasks} == {
         "Verify managed charger reconnect",
@@ -28,7 +28,7 @@ def test_no_transient_services_or_discover_lifecycle_inside_csms_ansible():
         data = read(path)
         assert "systemd-run" not in data, f"unexpected transient unit in {path}"
         assert "ocpp-discover-handoff" not in data, f"unexpected handoff unit in {path}"
-    reconnect = read(TASKS / "reconnect_with_discover.yml")
+    reconnect = read(TASKS / "reconnect.yml")
     assert "systemctl" not in reconnect
     assert "ocpp_discover" not in reconnect
     assert "service" not in reconnect.lower().replace("verification", "")
