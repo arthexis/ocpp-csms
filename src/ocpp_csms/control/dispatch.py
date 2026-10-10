@@ -1,89 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import socket
-import struct
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
-
-CONTROL_SOCKET_FILENAME = "control.sock"
-
-
-class Session(Protocol):
-    async def remote_start(self, *, id_tag: str, connector_id: int | None = None) -> Any: ...
-    async def remote_stop(self, transaction_id: int) -> Any: ...
-    async def reset(self, reset_type: str = "Soft") -> Any: ...
-    async def get_configuration(self, keys: list[str] | None = None) -> Any: ...
-    async def change_configuration(self, key: str, value: str) -> Any: ...
-    async def get_local_list_version(self) -> Any: ...
-    async def send_local_list(self, list_version: int, entries: list[dict[str, Any]]) -> Any: ...
-    async def set_charging_profile(self, connector_id: int, profile: dict[str, Any]) -> Any: ...
-    async def clear_charging_profile(
-        self,
-        *,
-        profile_id: int | None = None,
-        connector_id: int | None = None,
-        purpose: str | None = None,
-        stack_level: int | None = None,
-    ) -> Any: ...
-    async def get_composite_schedule(
-        self,
-        connector_id: int,
-        duration: int,
-        charging_rate_unit: str | None = None,
-    ) -> Any: ...
-
-
-class SessionRegistry(Protocol):
-    def session(self, charge_point_id: str) -> Session | None: ...
-    def connected_chargers(self) -> list[str]: ...
-    def physical_connector_ids(self, charge_point_id: str) -> list[int]: ...
-    def active_transactions(self, charge_point_id: str) -> list[tuple[int, int | None]]: ...
-    def active_transaction_ids(self, charge_point_id: str) -> list[int]: ...
-    def record_control_event(self, event: str, *, charger_id: str, details: dict[str, Any] | None = None) -> None: ...
-    def latest_rfid_list_version(self, charger_id: str) -> int | None: ...
-    def record_rfid_list(
-        self,
-        charger_id: str,
-        *,
-        list_version: int,
-        entries: list[dict[str, Any]],
-        source_file: str | None,
-        list_hash: str,
-        verified_version: int | None,
-    ) -> int: ...
-
-
-def control_socket_path(data_dir: str | Path) -> Path:
-    return Path(data_dir) / CONTROL_SOCKET_FILENAME
-
+from .protocols import Session, SessionRegistry
 
 def _response_payload(response: Any) -> dict[str, Any]:
     payload = getattr(response, "__dict__", None)
     if isinstance(payload, dict):
         return dict(payload)
     return {"status": getattr(response, "status", None)}
-
-
-async def send_control(data_dir: str | Path, request: dict[str, Any]) -> dict[str, Any]:
-    path = control_socket_path(data_dir)
-    reader, writer = await asyncio.open_unix_connection(str(path))
-    try:
-        writer.write(json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n")
-        await writer.drain()
-        line = await reader.readline()
-        if not line:
-            raise ConnectionError("control socket closed without a response")
-        response = json.loads(line)
-        if not isinstance(response, dict):
-            raise ValueError("invalid control response")
-        return response
-    finally:
-        writer.close()
-        await writer.wait_closed()
 
 
 def _configuration_keys(request: dict[str, Any]) -> list[str] | None | object:
@@ -548,56 +474,3 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     return {"ok": True, "response": _response_payload(response)}
 
 
-class ControlServer:
-    def __init__(self, registry: SessionRegistry, path: str | Path) -> None:
-        self.registry = registry
-        self.path = Path(path)
-
-    async def __aenter__(self) -> ControlServer:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
-        self.server = await asyncio.start_unix_server(self._handle, path=str(self.path))
-        os.chmod(self.path, 0o660)
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        self.server.close()
-        await self.server.wait_closed()
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
-
-    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        try:
-            line = await reader.readline()
-            if not line:
-                return
-            try:
-                request = json.loads(line)
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                response = {"error": "invalid_json"}
-            else:
-                if not isinstance(request, dict):
-                    response = {"error": "invalid_request"}
-                else:
-                    command = request.get("command")
-                    if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
-                        sock = writer.get_extra_info("socket")
-                        try:
-                            raw = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-                            _pid, uid, _gid = struct.unpack("3i", raw)
-                            authorized = uid in (0, os.geteuid())
-                        except (AttributeError, OSError, struct.error):
-                            authorized = False
-                        response = await dispatch_control(self.registry, request) if authorized else {"error": "tls_permission_denied"}
-                    else:
-                        response = await dispatch_control(self.registry, request)
-            writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
-            await writer.drain()
-        finally:
-            writer.close()
-            await writer.wait_closed()
