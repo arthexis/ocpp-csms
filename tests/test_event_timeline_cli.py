@@ -147,15 +147,13 @@ def test_filters_are_forwarded_unchanged(monkeypatch, capsys):
     ("3d", 3 * 86400), ("12H", 12 * 3600), ("30m", 1800),
     ("1w", 7 * 86400), ("1.5h", 5400),
 ])
-def test_relative_since_uses_current_utc(monkeypatch, duration, seconds):
-    captured = []
-    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: captured.append(kw) or [])
+def test_relative_since_uses_current_utc(captured_queries, duration, seconds):
     before = datetime.now(timezone.utc)
-    cli.run_events(args(since=duration))
+    query = query_events(captured_queries, since=duration)
     after = datetime.now(timezone.utc)
-    actual = datetime.fromisoformat(captured[0]["since"])
+    actual = datetime.fromisoformat(query["since"])
     assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
-    assert captured[0]["limit"] == 100
+    assert query["limit"] == 100
 
 
 def test_relative_bounds_keep_common_reference_time(captured_queries):
@@ -179,15 +177,13 @@ def test_invalid_or_reversed_time_bounds_do_not_query(monkeypatch, bounds):
 @pytest.mark.parametrize("duration,seconds", [
     ("1d", 86400), ("72h", 72 * 3600), ("1W", 7 * 86400),
 ])
-def test_duration_limit_has_no_count_cap(monkeypatch, duration, seconds):
-    seen = []
-    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
+def test_duration_limit_has_no_count_cap(captured_queries, duration, seconds):
     before = datetime.now(timezone.utc)
-    cli.run_events(args(limit=duration))
+    query = query_events(captured_queries, limit=duration)
     after = datetime.now(timezone.utc)
-    actual = datetime.fromisoformat(seen[0]["since"])
+    actual = datetime.fromisoformat(query["since"])
     assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
-    assert seen[0]["limit"] is None
+    assert query["limit"] is None
 
 
 def test_duration_window_ends_at_explicit_until(captured_queries):
