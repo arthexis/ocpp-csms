@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ocpp_discover import discover, redirect
+from ocpp_discover import capture, discover, redirect
 
 
 CANDIDATE = discover.DiscoveryCandidate("eth0", "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
@@ -83,14 +83,14 @@ def test_capture_tcp_filters_to_discovered_mac_ip_and_interface(monkeypatch):
         calls["command"] = command
         calls["seconds"] = seconds
         return packet(port=8888)
-    monkeypatch.setattr(discover, "_bounded_tcpdump", bounded)
+    monkeypatch.setattr(capture, "_bounded_tcpdump", bounded)
     assert discover.capture_tcp(CANDIDATE, 4) == packet(port=8888)
     assert calls == {"command": ["tcpdump", "-i", "eth0", "-l", "-nn", "-s0", "-A", "ether src aa:bb:cc:dd:ee:ff and ip src 192.168.129.182 and tcp"], "seconds": 4}
 
 
 def test_capture_tcp_rejects_candidate_values_before_building_filter(monkeypatch):
     malicious = discover.DiscoveryCandidate('eth0;rm', "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
-    monkeypatch.setattr(discover, "_bounded_tcpdump", lambda *args: pytest.fail("capture must not run"))
+    monkeypatch.setattr(capture, "_bounded_tcpdump", lambda *args: pytest.fail("capture must not run"))
     with pytest.raises(ValueError, match="invalid_interface"):
         discover.capture_tcp(malicious, 4)
 
@@ -123,7 +123,7 @@ def test_passive_parser_refuses_ambiguous_local_websocket_sources():
 
 def test_capture_passive_tcp_is_bounded_to_interface(monkeypatch):
     calls = {}
-    monkeypatch.setattr(discover, "_bounded_tcpdump", lambda command, seconds: calls.update(command=command, seconds=seconds) or "capture")
+    monkeypatch.setattr(capture, "_bounded_tcpdump", lambda command, seconds: calls.update(command=command, seconds=seconds) or "capture")
     assert discover.capture_passive_tcp("eth0", 4) == "capture"
     assert calls == {"command": ["tcpdump", "-i", "eth0", "-l", "-nn", "-s0", "-A", "tcp"], "seconds": 4}
 
