@@ -1,6 +1,6 @@
 from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.appliance import initialize_storage
-from ocpp_csms.events import DATABASE_FILENAME
+from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.status import appliance_status
 
 

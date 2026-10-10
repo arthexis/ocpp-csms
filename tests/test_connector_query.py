@@ -1,5 +1,5 @@
 from ocpp_csms.connector_query import physical_connector_ids
-from ocpp_csms.events import EventStore
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.server import CSMSServer
 from ocpp_csms.transactions import TransactionArchive
 
