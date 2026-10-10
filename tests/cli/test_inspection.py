@@ -41,3 +41,38 @@ def test_inspection_parser():
     parser = argparse.ArgumentParser()
     add_inspection_commands(parser.add_subparsers(dest="command"))
     assert parser.parse_args(["reconcile", "--cp", "CP1", "-c", "1"]).connector == 1
+
+
+@pytest.mark.parametrize(("connected", "status", "ids", "expected"), [
+    (True, "Available", [42], "Conflict"),
+    (True, "Charging", [42, 43], "Conflict (overlapping transactions)"),
+    (True, "Available", [42, 43], "Conflict (overlapping transactions)"),
+    (False, "Available", [42], "Offline/uncertain"),
+    (True, None, [42], "Unknown"),
+    (True, "Charging", [42], "Consistent (snapshot)"),
+])
+def test_reconcile_classifies_transaction_evidence(connected, status, ids, expected):
+    from ocpp_csms.cli.inspection import _assessment
+    assert _assessment(connected=connected, status=status, ids=ids) == expected
+
+
+def test_reconcile_honors_cp_filter_for_missing_connector_observations(monkeypatch):
+    from ocpp_csms.cli import inspection
+    from types import SimpleNamespace
+    monkeypatch.setattr(inspection, "appliance_status", lambda _: {"chargers": []})
+    transactions = [
+        SimpleNamespace(charge_point_id="CP1", connector_id=1, transaction_id=42),
+        SimpleNamespace(charge_point_id="CP2", connector_id=1, transaction_id=43),
+    ]
+    class FakeQuery:
+        def __init__(self, _):
+            pass
+
+        def active(self, *, charger, connector):
+            return transactions  # deliberately unfiltered to verify the output guard
+
+    monkeypatch.setattr(inspection, "TransactionQuery", FakeQuery)
+    rows = inspection._reconciliation("/unused", "CP1", None)
+    assert len(rows) == 1
+    assert rows[0]["cp"] == "CP1"
+    assert rows[0]["assessment"] == "No connector observation"
