@@ -22,6 +22,20 @@ _HOST = re.compile(r"(?im)^Host:\s*(?P<host>\S+)\s*$")
 _UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
 _CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
 
+def _validate_candidate(candidate: DiscoveryCandidate) -> tuple[str, str]:
+    if not _INTERFACE.fullmatch(candidate.interface):
+        raise ValueError("invalid_interface")
+    if not _MAC.fullmatch(candidate.source_mac):
+        raise ValueError("invalid_source_mac")
+    try:
+        source_ip = ipaddress.ip_address(candidate.source_ip)
+    except ValueError:
+        raise ValueError("invalid_source_ip") from None
+    if source_ip.version != 4:
+        raise ValueError("invalid_source_ip")
+    return candidate.source_mac.lower(), str(source_ip)
+
+
 def _tcp_blocks(text: str) -> list[tuple[re.Match[str], str]]:
     matches = list(_TCP_PACKET.finditer(text))
     return [(match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)]) for index, match in enumerate(matches)]
