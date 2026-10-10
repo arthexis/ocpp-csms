@@ -336,7 +336,9 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "trigger":
+        if command == "rfid_cache_clear":
+            response = await session.clear_cache()
+        elif command == "trigger":
             message = request.get("message")
             connector = request.get("connector")
             if message not in {"BootNotification", "Heartbeat", "StatusNotification", "MeterValues", "DiagnosticsStatusNotification", "FirmwareStatusNotification"}:
