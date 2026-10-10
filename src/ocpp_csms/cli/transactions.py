@@ -31,7 +31,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     add(transactions, "--today", action="store_true", help="Activity during the current UTC day")
     add(transactions, "-T", "--local-time", action="store_true", help="Use CSMS receive time for event display, filtering, and ordering")
     limits = transactions.add_mutually_exclusive_group()
-    limits.add_argument("-n", "--limit", type=int, default=20, help="Maximum transactions to print (default: %(default)s)")
+    limits.add_argument("-n", "--limit", type=int, default=None, help="Maximum transactions to print (default: 20)")
     limits.add_argument("-N", "--no-limit", action="store_true", help="Show all matching transactions without the default 20-transaction cap")
     add(transactions, "--events", action="store_true", help="Show OCPP timeline for a transaction ID")
     return transactions
@@ -90,7 +90,7 @@ def run_transactions(args: argparse.Namespace) -> str:
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until, args.between, args.at, args.today))
     if args.events and args.transaction_id is None:
         raise ValueError("--events requires a transaction ID")
-    if args.transaction_id is not None and (args.active or args.last or filtered or (args.limit != 20 or getattr(args, "no_limit", False))):
+    if args.transaction_id is not None and (args.active or args.last or filtered or (args.limit is not None or getattr(args, "no_limit", False))):
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
 
     query = TransactionQuery(args.data_dir)
@@ -112,5 +112,5 @@ def run_transactions(args: argparse.Namespace) -> str:
         view = query.last(**filters)
         views = [view] if view is not None else []
     else:
-        views = query.list(limit=None if getattr(args, "no_limit", False) else args.limit, **filters)
+        views = query.list(limit=None if getattr(args, "no_limit", False) else (20 if args.limit is None else args.limit), **filters)
     return format_transactions(views, local_time=args.local_time)
