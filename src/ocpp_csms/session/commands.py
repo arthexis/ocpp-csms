@@ -225,3 +225,23 @@ class SessionCommands:
         ))
         self._record("GetDiagnostics", dict(response.__dict__), direction="in")
         return response
+
+    async def update_firmware(
+        self, location: str, retrieve_date: str, *,
+        retries: int | None = None, retry_interval: int | None = None,
+    ) -> call_result.UpdateFirmwarePayload:
+        from urllib.parse import urlsplit, urlunsplit
+        parts = urlsplit(location)
+        safe_url = urlunsplit((parts.scheme, parts.hostname or "", "/[redacted]", "", ""))
+        recorded = {"location": safe_url, "retrieve_date": retrieve_date}
+        if retries is not None:
+            recorded["retries"] = retries
+        if retry_interval is not None:
+            recorded["retry_interval"] = retry_interval
+        self._record("UpdateFirmware", recorded, direction="out")
+        response = await self.call(call.UpdateFirmwarePayload(
+            location=location, retrieve_date=retrieve_date,
+            retries=retries, retry_interval=retry_interval,
+        ))
+        self._record("UpdateFirmware", dict(response.__dict__), direction="in")
+        return response
