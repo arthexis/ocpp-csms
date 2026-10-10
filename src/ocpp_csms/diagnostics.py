@@ -140,13 +140,13 @@ def _summary(row: sqlite3.Row) -> str:
             details.append(str(status))
         if payload.get("transaction_id") is not None and row["transaction_id"] is None:
             details.append(f"tx={payload['transaction_id']}")
-        if action == "Heartbeat" and payload.get("current_time") is not None:
+        if action == "Heartbeat" and (payload.get("currentTime") is not None or payload.get("current_time") is not None):
             details.append("response")
         if not details:
             details.append("response")
         # Keep unexpected response details visible rather than presenting an
         # unfamiliar payload as a routine acknowledgement.
-        known = {"status", "idTagInfo", "transaction_id", "current_time"}
+        known = {"status", "idTagInfo", "transaction_id", "current_time", "currentTime"}
         extras = {k: v for k, v in payload.items() if k not in known}
         if extras:
             details.append(f"extra={json.dumps(extras, sort_keys=True, ensure_ascii=False)}")
@@ -177,8 +177,8 @@ def _group_key(row: sqlite3.Row) -> tuple[object, ...] | None:
     if action == "Heartbeat":
         if direction == "in" and not payload:
             return ("heartbeat-request", row["charger_id"])
-        if (direction == "out" and set(payload) == {"current_time"}
-                and isinstance(payload["current_time"], str) and payload["current_time"]):
+        if (direction == "out" and len(payload) == 1
+                and any(isinstance(payload.get(k), str) and payload[k] for k in ("currentTime", "current_time"))):
             return ("heartbeat-response", row["charger_id"])
         return None
     if action == "StatusNotification" and direction == "in":
@@ -236,20 +236,34 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 f"{summary} ×{len(group)}"
             )
 
-    group: list[sqlite3.Row] = []
-    key: tuple[object, ...] | None = None
-    for row in rows:
-        candidate = _group_key(row)
-        if group and (candidate is None or candidate != key):
-            append_group(group)
-            group = []
-        group.append(row)
-        key = candidate
-        if candidate is None:
-            append_group(group)
-            group = []
-            key = None
-    if group:
+    # Adjacency indicates an observed exchange, not protocol-level correlation.
+    index = 0
+    while index < len(rows):
+        first = rows[index]
+        if _group_key(first) == ("heartbeat-request", first["charger_id"]):
+            count = 0
+            end_at = first["occurred_at"]
+            while index + 1 < len(rows):
+                request, response = rows[index], rows[index + 1]
+                if (_group_key(request) != ("heartbeat-request", first["charger_id"])
+                        or _group_key(response) != ("heartbeat-response", first["charger_id"])):
+                    break
+                count += 1
+                end_at = response["occurred_at"]
+                index += 2
+            if count:
+                charger = f" {first['charger_id']}" if first["charger_id"] else ""
+                span = (f"{first['occurred_at']}–{end_at}" if count > 1
+                        else first["occurred_at"])
+                lines.append(f"{span}{charger}  Heartbeat ↔ ×{count}")
+                continue
+        key = _group_key(first)
+        group = [first]
+        index += 1
+        if key is not None:
+            while index < len(rows) and _group_key(rows[index]) == key:
+                group.append(rows[index])
+                index += 1
         append_group(group)
     return "\n".join(lines)
 
