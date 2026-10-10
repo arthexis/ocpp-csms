@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+
+from ocpp_csms.cli.transactions import resolve_time
 
 from ocpp_csms.diagnostics import events_between, explain, format_events
 from ocpp_csms.event_contract import events_contract, raw_events_contract
@@ -21,8 +24,8 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     events = subcommands.add_parser("events", help="Show recorded events")
     add(events, "charger", nargs="?", help="Optional charge point ID")
     add(events, "--transaction", "--txn", dest="transaction", type=int, help="Filter by OCPP transaction ID")
-    add(events, "--since", help="ISO-8601 lower timestamp bound")
-    add(events, "--until", help="ISO-8601 upper timestamp bound")
+    add(events, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 3d)")
+    add(events, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 12h)")
     add(events, "--limit", type=int, default=200, help="Maximum events to print")
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
@@ -55,7 +58,16 @@ def run_events(args: argparse.Namespace) -> int:
         raise ValueError("--raw requires --json")
     if args.verbose and args.json:
         raise ValueError("--verbose cannot be combined with --json")
-    rows = events_between(args.data_dir, charger_id=args.charger, transaction_id=args.transaction, since=args.since, until=args.until, limit=args.limit)
+    now = datetime.now(timezone.utc)
+    since = resolve_time(args.since, now=now) if args.since else None
+    until = resolve_time(args.until, now=now) if args.until else None
+    if since is not None and until is not None and since > until:
+        raise ValueError("--since must be earlier than or equal to --until")
+    rows = events_between(
+        args.data_dir, charger_id=args.charger, transaction_id=args.transaction,
+        since=since.isoformat() if since else None,
+        until=until.isoformat() if until else None, limit=args.limit,
+    )
     if args.json:
         emit_json(raw_events_contract(rows) if args.raw else events_contract(rows))
     else:
