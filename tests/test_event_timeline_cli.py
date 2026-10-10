@@ -1,0 +1,129 @@
+"""CLI-level regression tests for the compact and verbose event timeline."""
+import argparse
+import json
+
+import pytest
+
+from ocpp_csms.cli import diagnostics as cli
+from ocpp_csms.diagnostics import format_events
+from ocpp_csms.event_contract import events_contract, raw_events_contract
+
+
+def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
+          transaction=None, tag=None, kind="ocpp"):
+    return {
+        "id": n, "occurred_at": f"2026-10-09T14:00:{n:02d}Z",
+        "charger_id": charger, "kind": kind, "action": action,
+        "direction": direction, "transaction_id": transaction, "id_tag": tag,
+        "payload": json.dumps(payload if payload is not None else {}),
+    }
+
+
+def args(**overrides):
+    defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
+                    until=None, limit=200, json=False, raw=False, verbose=False)
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def test_parser_accepts_verbose():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    parsed = parser.parse_args(["events", "CP1", "--verbose", "--limit", "2"])
+    assert parsed.command == "events"
+    assert parsed.charger == "CP1"
+    assert parsed.verbose is True
+    assert parsed.limit == 2
+
+
+def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
+    observed = []
+    stored = [event(1), event(2), event(3)]
+    def retrieve(*_args, **kwargs):
+        observed.append(kwargs)
+        return stored[-kwargs["limit"]:]
+    monkeypatch.setattr(cli, "events_between", retrieve)
+    cli.run_events(args(limit=2))
+    compact = capsys.readouterr().out
+    cli.run_events(args(limit=2, verbose=True))
+    verbose = capsys.readouterr().out
+    assert observed[0] == observed[1]
+    assert "×2" in compact
+    assert verbose.count("payload=") == 2
+    assert "14:00:01Z" not in verbose
+
+
+def test_verbose_preserves_response_payload_and_transaction(monkeypatch, capsys):
+    rows = [event(1, "StartTransaction", {"connector_id": 2, "meter_start": 30},
+                  transaction=45, tag="ABC"),
+            event(2, "Heartbeat", {"current_time": "2026-10-09T14:00:02Z"},
+                  direction="out")]
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_k: rows)
+    cli.run_events(args(verbose=True))
+    output = capsys.readouterr().out
+    assert output.count("payload=") == 2
+    assert "tx=45" in output and "RFID=ABC" in output
+    assert "[ocpp out]" in output
+    assert '"current_time"' in output
+
+
+def test_json_modes_keep_original_contract(monkeypatch, capsys):
+    rows = [event(1, "Heartbeat"), event(2, "Heartbeat")]
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_k: rows)
+    cli.run_events(args(json=True))
+    assert json.loads(capsys.readouterr().out) == events_contract(rows)
+    cli.run_events(args(json=True, raw=True))
+    assert json.loads(capsys.readouterr().out) == raw_events_contract(rows)
+
+
+@pytest.mark.parametrize("options", [
+    {"json": True, "verbose": True}, {"raw": True},
+    {"limit": 0}, {"transaction": -1},
+])
+def test_invalid_options_rejected_before_retrieval(monkeypatch, options):
+    def forbidden(*_a, **_k):
+        pytest.fail("invalid options must not retrieve events")
+    monkeypatch.setattr(cli, "events_between", forbidden)
+    with pytest.raises(ValueError):
+        cli.run_events(args(**options))
+
+
+def test_emergency_stop_without_transaction_and_recovery():
+    rows = [
+        event(1, "StatusNotification", {"connector_id": 1, "status": "Faulted",
+              "error_code": "InternalError", "info": "EmergencyStop"}),
+        event(2, "StatusNotification", {"connector_id": 1, "status": "Available",
+              "error_code": "NoError"}),
+    ]
+    compact = format_events(rows)
+    verbose = format_events(rows, verbose=True)
+    assert "Faulted InternalError EmergencyStop" in compact
+    assert "Available" in compact
+    assert "×" not in compact
+    assert verbose.count("payload=") == 2
+
+
+def test_runtime_interrupts_group_and_transaction_is_visible():
+    rows = [event(1), event(2, "service_restarted", kind="runtime"),
+            event(3, "StartTransaction", {"connector_id": 1}, transaction=7),
+            event(4)]
+    compact = format_events(rows)
+    assert "×" not in compact
+    assert "service restarted" in compact
+    assert "tx=7" in compact
+
+
+def test_filters_are_forwarded_unchanged(monkeypatch, capsys):
+    captured = []
+    def retrieve(*_a, **kwargs):
+        captured.append(kwargs)
+        return []
+    monkeypatch.setattr(cli, "events_between", retrieve)
+    cli.run_events(args(charger="CP2", transaction=11,
+                        since="2026-10-09T00:00:00Z",
+                        until="2026-10-09T23:59:59Z", limit=4))
+    capsys.readouterr()
+    assert captured == [dict(charger_id="CP2", transaction_id=11,
+                             since="2026-10-09T00:00:00Z",
+                             until="2026-10-09T23:59:59Z", limit=4)]
