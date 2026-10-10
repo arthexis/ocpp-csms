@@ -51,6 +51,23 @@ ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
+### Field maintenance (OCPP 1.6J)
+
+Use the existing Unix control socket to send one-shot maintenance requests to a connected charge point.
+Omit `--cp` when only one charge point is connected; otherwise specify `--cp ID` (or `--charger ID`).
+
+```bash
+ocpp-csms trigger heartbeat
+ocpp-csms trigger status -c 1
+ocpp-csms trigger meter -c 1
+ocpp-csms availability disable -c 2
+ocpp-csms availability enable -c 2
+ocpp-csms availability disable  # connector 0: whole charge point
+ocpp-csms unlock -c 1
+```
+
+Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
+
 ### Status and charger views
 
 `charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
