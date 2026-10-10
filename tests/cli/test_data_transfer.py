@@ -1,5 +1,4 @@
 """Vendor DataTransfer CLI, dispatch and unsolicited message tests."""
-import argparse
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -10,14 +9,8 @@ from ocpp_csms.control.dispatch import dispatch_control
 from ocpp_csms.session.handlers import SessionHandlers
 
 
-def parse(*argv):
-    parser = argparse.ArgumentParser()
-    add_data_transfer_command(parser.add_subparsers(dest="command"))
-    return parser.parse_args(["data-transfer", "send", *argv])
-
-
-def test_cli_preserves_opaque_data():
-    request = transfer_request(parse("--cp", "CP1", "--vendor", "com.example",
+def test_cli_preserves_opaque_data(parse_cli):
+    request = transfer_request(parse_cli("data-transfer", "send", "--cp", "CP1", "--vendor", "com.example",
                                      "--message-id", "test", "--data", '{"answer":42}'))
     assert request == {"command": "data_transfer", "charger": "CP1",
                        "vendor_id": "com.example", "message_id": "test",
