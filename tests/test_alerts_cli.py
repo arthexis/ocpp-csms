@@ -38,7 +38,7 @@ class AlertsCliTests(unittest.TestCase):
                 self.assertEqual(run_alerts(args), 0)
         self.assertIsNone(get_rows.call_args.kwargs["limit"])
         data = json.loads(output.getvalue())
-        self.assertEqual([a["source_event_id"] for a in data["alerts"]], [1, 3])
+        self.assertEqual([a["source_event_id"] for a in data["data"]["alerts"]], [1, 3])
 
     def test_no_matching_alerts(self):
         args = self.parser.parse_args(["alerts"])
