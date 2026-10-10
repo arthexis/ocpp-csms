@@ -102,3 +102,38 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
 def test_cp_and_charger_select_charge_point(parse_cli):
     assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
     assert parse_cli("txn", "--charger", "charger-a").charger == "charger-a"
+
+
+@pytest.mark.parametrize("command", ["txn", "txns", "transaction", "transactions"])
+@pytest.mark.parametrize("flag", ["-N", "--no-limit"])
+def test_transaction_no_limit_aliases(parse_cli, command, flag):
+    args = parse_cli(command, "--since", "3d", flag)
+    assert args.no_limit is True
+    assert args.since == "3d"
+
+
+@pytest.mark.parametrize("limit_flag, unlimited_flag", [
+    ("--limit", "--no-limit"), ("-n", "-N"),
+])
+def test_transaction_limit_and_no_limit_are_mutually_exclusive(limit_flag, unlimited_flag):
+    from ocpp_csms.cli import build_parser
+
+    parser, _ = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["txn", limit_flag, "20", unlimited_flag])
+
+
+def test_unlimited_transaction_query_forwards_none(parse_cli, monkeypatch):
+    from ocpp_csms.cli import transactions as cli
+
+    observed = []
+    monkeypatch.setattr(cli.TransactionQuery, "list", lambda self, **kwargs: observed.append(kwargs) or [])
+    cli.run_transactions(parse_cli("txn", "--since", "3d", "-N"))
+    assert len(observed) == 1
+    assert observed[0]["limit"] is None
+    assert observed[0]["since"] is not None
+
+
+def test_transaction_id_rejects_no_limit(parse_cli, tmp_path):
+    with pytest.raises(ValueError):
+        run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "1", "-N"))

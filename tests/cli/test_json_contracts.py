@@ -112,3 +112,16 @@ def test_transaction_json_local_time_controls_filter_and_event_times(tmp_path, c
     assert transaction["started_at"] == "2026-10-06T12:00:00Z"
     assert transaction["stopped_at"] == "2026-10-06T12:10:00Z"
     assert transaction["last_activity_at"] == "2026-10-06T12:10:00Z"
+
+
+def test_transaction_json_no_limit_forwards_unbounded_query(monkeypatch, capsys):
+    from ocpp_csms.transactions.query import TransactionQuery
+
+    observed = []
+    monkeypatch.setattr(TransactionQuery, "list", lambda self, **kw: observed.append(kw) or [])
+    parser, _ = build_parser()
+    args = parser.parse_args(["txn", "--since", "3d", "-N", "--json"])
+    assert run_transactions_json(args) == 0
+    assert observed[0]["limit"] is None
+    assert observed[0]["since"] is not None
+    assert json.loads(capsys.readouterr().out)["schema"] == "ocpp-csms/transactions/v1"
