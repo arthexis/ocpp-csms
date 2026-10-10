@@ -14,8 +14,8 @@ from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.recovery import recovery_loop
 from ocpp_csms.session import ChargePointSession
-from ocpp_csms.transaction_query import TransactionQuery
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.transactions.archive import TransactionArchive
 from ocpp_csms.tls_listener import TLSListener
 
 LOGGER = logging.getLogger(__name__)

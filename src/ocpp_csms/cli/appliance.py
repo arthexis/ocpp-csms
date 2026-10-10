@@ -6,7 +6,7 @@ import logging
 
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.server import CSMSServer
-from ocpp_csms.transactions import TransactionArchive
+from ocpp_csms.transactions.archive import TransactionArchive
 
 
 APPLIANCE_COMMANDS = ("init", "serve")

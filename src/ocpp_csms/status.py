@@ -9,7 +9,7 @@ from typing import Any
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.query import TransactionQuery
 
 
 @dataclass

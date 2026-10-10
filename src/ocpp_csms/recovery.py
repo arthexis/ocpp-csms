@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from ocpp_csms.transaction_query import TransactionQuery
+from ocpp_csms.transactions.query import TransactionQuery
 
 LOGGER = logging.getLogger(__name__)
 TIMEOUT_SECONDS = 3600
