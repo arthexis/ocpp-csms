@@ -40,13 +40,13 @@ async def test_dispatch_sends_get_diagnostics():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("request", "error"), [
+@pytest.mark.parametrize(("params", "error"), [
     ({"location": "file:///tmp/a"}, "invalid_location"),
     ({"location": "https://example.org", "retries": -1}, "invalid_retries"),
     ({"location": "https://example.org", "retry_interval": -1}, "invalid_retry_interval"),
     ({"location": "https://example.org", "start_time": "2026-10-11T00:00:00Z", "stop_time": "2026-10-10T00:00:00Z"}, "invalid_time_window"),
 ])
-async def test_dispatch_rejects_invalid(request, error):
+async def test_dispatch_rejects_invalid(params, error):
     registry = SimpleNamespace(connected_chargers=lambda: ["CP1"], session=lambda _: object())
-    result = await dispatch_control(registry, {"command": "get_diagnostics", **request})
+    result = await dispatch_control(registry, {"command": "get_diagnostics", **params})
     assert result["error"] == error
