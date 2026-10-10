@@ -197,3 +197,9 @@ class SessionCommands:
         response = await self.call(call.UnlockConnectorPayload(connector_id=connector_id))
         self._record("UnlockConnector", dict(response.__dict__), direction="in")
         return response
+
+    async def clear_cache(self) -> call_result.ClearCachePayload:
+        self._record("ClearCache", {}, direction="out")
+        response = await self.call(call.ClearCachePayload())
+        self._record("ClearCache", dict(response.__dict__), direction="in")
+        return response
