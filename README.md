@@ -103,6 +103,19 @@ ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
 ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
 ```
 
+### Firmware management (OCPP 1.6J)
+
+`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` and one of `--now` or `--at` are required.
+
+```bash
+ocpp-csms firmware update --location https://example.org/fw.bin --now --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T03:00:00Z --confirm
+ocpp-csms firmware status --cp CP001
+ocpp-csms firmware history --cp CP001 --since 7d
+```
+
+The CLI also supports `--retries`, `--retry-interval`, and `--json`. The OCPP `UpdateFirmware.conf` is an empty acknowledgement and **does not establish successful downloading or installation**. `firmware status` and `firmware history` inspect recorded `FirmwareStatusNotification` observations; no polling service or firmware hosting is installed. Firmware URLs are redacted in event evidence, including user info, path, and query tokens. Validate vendor/model compatibility and the charger's supported retrieval protocol before submitting an update.
+
 ### Charger diagnostic upload requests
 
 `ocpp-csms diagnostics request --location URL` sends OCPP 1.6 `GetDiagnostics` to a connected charge point. The explicit URL must be reachable by the **charger**, and uploads are handled by an external server in this first version.
