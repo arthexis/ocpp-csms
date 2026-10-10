@@ -81,6 +81,9 @@ async def test_report_without_tag_summarizes_observed_rfids(tmp_path):
     assert "RFID" in report
     assert "TXNS" in report
     assert "ENERGY" in report
+    assert "LAST SEEN" in report.splitlines()[0]
+    assert "2026-10-06 11:30" in report
+    assert "2026-10-06 12:30" in report
     assert "card-a" in report
     assert "2" in report
     assert "4.000 kWh" in report
@@ -140,6 +143,25 @@ async def test_summary_marks_incomplete_energy_per_rfid(tmp_path):
     report = run_rfid(args(tmp_path, None))
 
     assert "1.500 kWh (1/2)" in report
+
+
+@pytest.mark.asyncio
+async def test_summary_last_seen_uses_latest_activity_even_when_transaction_open(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(
+        "charger-a", start_payload(id_tag="card-a", timestamp="2026-10-06T09:00:00Z"),
+    )
+    await archive.stop(
+        "charger-a", stop_payload(first, timestamp="2026-10-06T09:30:00Z"),
+    )
+    await archive.start(
+        "charger-a", start_payload(id_tag="card-a", timestamp="2026-10-06T13:00:00Z"),
+    )
+
+    report = run_rfid(args(tmp_path, None))
+    row = next(line for line in report.splitlines() if line.startswith("card-a"))
+    assert "2026-10-06 13:00" in row
+    assert "2026-10-06 09:30" not in row
 
 
 def test_summary_with_no_captured_rfids_is_empty(tmp_path):
@@ -288,7 +310,7 @@ async def test_summary_ignores_connected_charger_cache_when_we_have_no_history(m
     report = run_rfid(args(tmp_path, None))
     header = report.splitlines()[0]
 
-    assert header.split() == ["RFID", "TXNS", "ENERGY"]
+    assert header.split() == ["RFID", "TXNS", "ENERGY", "LAST", "SEEN"]
 
 
 @pytest.mark.asyncio
