@@ -128,7 +128,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
     assert "Alice" in rows["card-a"]
     assert "Blocked" in rows["card-b"]
     assert "Former" in rows["card-b"]
-    assert "Invalid" in rows["card-c"]
+    assert "Unregistered" in rows["card-c"]
     assert rows["card-c"].endswith("--")
 
 
