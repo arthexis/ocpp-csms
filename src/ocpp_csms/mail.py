@@ -94,22 +94,15 @@ def mail_status(config: MailConfig | None) -> dict[str, Any]:
     }
 
 
-def send_test(config: MailConfig) -> None:
-    """Explicitly send a test message. Never called from OCPP handlers."""
-    if not config.enabled:
-        raise ValueError("mail is disabled")
-    if not config.starttls and not config.ssl_enabled:
-        raise ValueError("SMTP TLS is required")
+def send_message(config: MailConfig, msg: EmailMessage) -> None:
+    """Deliver one prepared message over authenticated, verified TLS."""
+    if not config.enabled or not (config.starttls or config.ssl_enabled):
+        raise ValueError("mail disabled or SMTP TLS unavailable")
     if not config.host or not config.sender or not config.recipients:
         raise ValueError("mail is not completely configured")
     password = os.environ.get(config.password_env) if config.password_env else None
     if config.username and not password:
         raise ValueError("SMTP credential environment variable is unavailable")
-    msg = EmailMessage()
-    msg["From"] = config.sender
-    msg["To"] = ", ".join(config.recipients)
-    msg["Subject"] = "OCPP-CSMS SMTP test"
-    msg.set_content("This test confirms the SMTP server accepted a message from OCPP-CSMS.")
     context = ssl.create_default_context()
     connection_type = smtplib.SMTP_SSL if config.ssl_enabled else smtplib.SMTP
     with connection_type(config.host, config.port, timeout=config.timeout,
@@ -121,3 +114,13 @@ def send_test(config: MailConfig) -> None:
         if config.username:
             smtp.login(config.username, password)
         smtp.send_message(msg)
+
+
+def send_test(config: MailConfig) -> None:
+    """Explicit operator test; never invoked from OCPP handlers."""
+    msg = EmailMessage()
+    msg["From"] = config.sender
+    msg["To"] = ", ".join(config.recipients)
+    msg["Subject"] = "OCPP-CSMS SMTP test"
+    msg.set_content("This test confirms the SMTP server accepted a message from OCPP-CSMS.")
+    send_message(config, msg)
