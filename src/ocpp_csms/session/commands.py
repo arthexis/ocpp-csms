@@ -260,3 +260,12 @@ class SessionCommands:
         response = await self.call(call.CancelReservationPayload(reservation_id=reservation_id))
         self._record("CancelReservation", dict(response.__dict__), direction="in")
         return response
+
+    async def data_transfer(self, vendor_id: str, message_id: str | None = None, data: str | None = None) -> call_result.DataTransferPayload:
+        payload: dict[str, Any] = {"vendor_id": vendor_id}
+        if message_id is not None: payload["message_id"] = message_id
+        if data is not None: payload["data"] = data
+        self._record("DataTransfer", payload, direction="out")
+        response = await self.call(call.DataTransferPayload(vendor_id=vendor_id, message_id=message_id, data=data))
+        self._record("DataTransfer", dict(response.__dict__), direction="in")
+        return response
