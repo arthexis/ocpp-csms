@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from ocpp_discover import capture, discover, redirect
+from ocpp_discover import capture, discover, redirect, websocket
 
 
 CANDIDATE = discover.DiscoveryCandidate("eth0", "aa:bb:cc:dd:ee:ff", "192.168.129.182", "192.168.129.1", 2)
@@ -172,3 +172,30 @@ def test_old_redirect_receipt_without_destination_port_loads_as_port_80(tmp_path
     payload = {"interface": "eth0", "listen_port": 9000, "source_ip": "192.168.129.182", "destination_ips": ["203.0.113.10"], "requests": [{"destination_ip": "203.0.113.10", "host": "cloud.example", "path": "/ocpp/CHARGER"}], "captured_at": "2026-10-04T04:00:00+00:00"}
     (tmp_path / "redirect.json").write_text(json.dumps(payload))
     assert redirect.load_receipt(tmp_path).destination_port == 80
+
+
+# WebSocket parser exports and validation
+def test_websocket_parsers_remain_importable_from_discover():
+    assert discover.parse_tcp_websocket is websocket.parse_tcp_websocket
+    assert discover.parse_passive_websocket is websocket.parse_passive_websocket
+    assert discover._websocket_receipt is websocket._websocket_receipt
+    assert discover._validate_candidate is websocket._validate_candidate
+
+
+def test_passive_parser_rejects_missing_local_addresses():
+    try:
+        websocket.parse_passive_websocket("", interface="eth0", local_addresses=set(), listen_port=9000)
+    except ValueError as exc:
+        assert str(exc) == "no_local_ipv4_addresses"
+    else:
+        raise AssertionError("missing local addresses must be rejected")
+
+
+# Shared provisional TCP packet grammar
+def test_provisional_tcp_packet_pattern_is_shared():
+    assert discover._TCP_PACKET is websocket._TCP_PACKET
+    packet = "12:00:00.000000 IP 192.0.2.5.50000 > 192.0.2.1.8888: Flags [S], seq 1"
+    match = discover._TCP_PACKET.search(packet)
+    assert match is not None
+    assert match.group("src") == "192.0.2.5"
+    assert match.group("dst_port") == "8888"
