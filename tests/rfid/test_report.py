@@ -30,6 +30,7 @@ def test_rfid_help_shows_authorization_file_location_and_fields():
     assert "<data-dir>/rfid.csv" in help_text
     assert "rfid,name,enabled" in help_text
     assert "all RFID tags are accepted" in help_text
+    assert parser.parse_args(["rfid"]).rfid_command is None
 
 
 @pytest.mark.asyncio
