@@ -118,7 +118,6 @@ def collect(data_dir: Path, config_path: Path = DEFAULT_CONFIG) -> None:
                          'runtime' AS kind, event AS action, NULL AS direction,
                          NULL AS transaction_id, NULL AS id_tag, details_json AS payload
                          FROM runtime_events WHERE id>? ORDER BY id LIMIT 500"""),
-            "transactions": ("transactions", "transaction_id", ""),
         }
         now = datetime.now(timezone.utc)
         for source, (table, key, query) in sources.items():
@@ -126,10 +125,6 @@ def collect(data_dir: Path, config_path: Path = DEFAULT_CONFIG) -> None:
             if cursor is None:
                 top = src.execute(f"SELECT COALESCE(MAX({key}), 0) FROM {table}").fetchone()[0]
                 dst.execute("INSERT INTO cursors VALUES (?,?)", (source, top))
-                continue
-            if source == "transactions":
-                # Transaction IDs are not guaranteed to be insertion ordered.
-                # Transaction notifications are derived from OCPP source IDs below.
                 continue
             last_id = int(cursor[0])
             while True:
@@ -156,6 +151,11 @@ def collect(data_dir: Path, config_path: Path = DEFAULT_CONFIG) -> None:
                         # Persisted transaction state, not merely a received request.
                         state = src.execute("SELECT charger_id, connector_id, id_tag, started_at, stopped_at, meter_start, meter_stop FROM transactions WHERE transaction_id=?", (txn,)).fetchone()
                         if state is None or (action == "StopTransaction" and state["stopped_at"] is None):
+                            # Evidence can precede the transaction DB commit. Rescan this
+                            # event on the next cycle instead of losing the notification.
+                            # Do not block permanently for an unknown/historical ID.
+                            if state is not None:
+                                break
                             continue
                         for recipient in config.recipients:
                             kind = name
@@ -166,7 +166,7 @@ def collect(data_dir: Path, config_path: Path = DEFAULT_CONFIG) -> None:
                                     body=body, kind=kind, at=at)
                     last_id = record["id"]
                 dst.execute("UPDATE cursors SET last_id=? WHERE source=?", (last_id, source))
-                if len(rows) < 500:
+                if len(rows) < 500 or (rows and last_id < rows[-1]["id"]):
                     break
 
 
