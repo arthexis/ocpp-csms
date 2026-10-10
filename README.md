@@ -848,3 +848,16 @@ ocpp-csms events -f --json
 ```
 
 Follow mode honors existing time-window, transaction, charger and history-limit filters. With `--json`, it outputs **one JSON event per line (JSONL)** instead of the one-shot events envelope, for straightforward streaming pipelines. It tracks OCPP and runtime event IDs separately to avoid relying on globally unique IDs. Routine events are displayed using the existing human-readable formatter, with no synthetic OCPP message correlation.
+
+### Compare charger configuration snapshots
+
+`config diff` is read-only and uses the same JSON snapshot format as `config download`:
+
+```bash
+ocpp-csms config download --cp CP001 --output baseline.json
+ocpp-csms config diff baseline.json newer.json
+ocpp-csms config diff baseline.json --cp CP001
+ocpp-csms config diff baseline.json --json
+```
+
+Two files are compared entirely offline. With one file, the command runs a fresh OCPP GetConfiguration query against `--cp`, or the charge point recorded in the snapshot, and compares the live response. Added, removed and changed keys are reported, including read-only flag differences. Passwords and other sensitive keys are masked in comparisons regardless of how the input snapshots were captured. Exit status: 0 for identical, 1 for differences; invalid inputs or live query errors are reported as errors. No charger configuration is modified.
