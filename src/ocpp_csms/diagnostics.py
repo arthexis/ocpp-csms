@@ -153,13 +153,84 @@ def _summary(row: sqlite3.Row) -> str:
     return " ".join([action, *details])
 
 
+def _group_key(row: sqlite3.Row) -> tuple[object, ...] | None:
+    """Only collapse adjacent, independently identifiable routine records.
+
+    In particular, stored events have no OCPP message ID: requests and
+    responses are never paired, even when adjacent.
+    """
+    if row["kind"] != "ocpp" or row["transaction_id"] is not None or row["id_tag"] is not None:
+        return None
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    action, direction = row["action"], row["direction"]
+    if action == "Heartbeat":
+        if direction == "in" and not payload:
+            return ("heartbeat-request", row["charger_id"])
+        if (direction == "out" and set(payload) == {"current_time"}
+                and isinstance(payload["current_time"], str) and payload["current_time"]):
+            return ("heartbeat-response", row["charger_id"])
+        return None
+    if action == "StatusNotification" and direction == "in":
+        status = payload.get("status")
+        error = payload.get("error_code")
+        info = payload.get("info")
+        if status not in {"Available", "Preparing", "Charging", "SuspendedEV",
+                          "SuspendedEVSE", "Finishing", "Reserved", "Unavailable"}:
+            return None
+        if error not in (None, "NoError") or info not in (None, ""):
+            return None
+        connector = payload.get("connector_id")
+        if not isinstance(connector, int) or isinstance(connector, bool):
+            return None
+        # Unexpected fields may carry important evidence; do not collapse them.
+        if set(payload) - {"connector_id", "status", "error_code", "info",
+                            "timestamp", "vendor_id", "vendor_error_code"}:
+            return None
+        if payload.get("vendor_id") or payload.get("vendor_error_code"):
+            return None
+        return ("status", row["charger_id"], connector, status, error, info)
+    return None
+
+
 def format_events(rows: list[sqlite3.Row], heading: str | None = None) -> str:
     if not rows:
         return "No matching events."
     lines = [heading, ""] if heading else []
+
+    def append_group(group: list[sqlite3.Row]) -> None:
+        first, last = group[0], group[-1]
+        charger = f" {first['charger_id']}" if first["charger_id"] else ""
+        summary = _summary(first)
+        if len(group) == 1:
+            lines.append(f"{first['occurred_at']}{charger}  {summary}")
+        else:
+            # These are counts of observed stored events, not inferred
+            # request/response pairs or claims about unseen window edges.
+            lines.append(
+                f"{first['occurred_at']}–{last['occurred_at']}{charger}  "
+                f"{summary} ×{len(group)}"
+            )
+
+    group: list[sqlite3.Row] = []
+    key: tuple[object, ...] | None = None
     for row in rows:
-        charger = f" {row['charger_id']}" if row["charger_id"] else ""
-        lines.append(f"{row['occurred_at']}{charger}  {_summary(row)}")
+        candidate = _group_key(row)
+        if group and (candidate is None or candidate != key):
+            append_group(group)
+            group = []
+        group.append(row)
+        key = candidate
+        if candidate is None:
+            append_group(group)
+            group = []
+            key = None
+    if group:
+        append_group(group)
     return "\n".join(lines)
 
 
