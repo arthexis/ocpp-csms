@@ -11,9 +11,11 @@ import time
 from pathlib import Path
 
 from ocpp_discover import redirect as redirect_tools
+from ocpp_discover import network
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
 from ocpp_discover.arp import discover_candidate
+from ocpp_discover.capture import _INTERFACE, _bounded_tcpdump, capture_arp, capture_tcp, capture_passive_tcp
 from ocpp_discover.cli_parser import build_parser
 from ocpp_discover.websocket import _TCP_PACKET, _validate_candidate, _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
 from ocpp_csms.status import appliance_status
@@ -25,35 +27,8 @@ _ADDRESS_STATE = "address.json"
 _DISCOVERY_STATE = "discovery.json"
 _REDIRECT_STATE = "redirect.json"
 
-_INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _MAC = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", re.IGNORECASE)
 
-
-def _bounded_tcpdump(command: list[str], seconds: float) -> str:
-    if seconds <= 0:
-        raise ValueError("seconds_must_be_positive")
-    if shutil.which("tcpdump") is None:
-        raise RuntimeError("tcpdump_not_found")
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        stdout, stderr = process.communicate(timeout=seconds)
-    except subprocess.TimeoutExpired:
-        process.terminate()
-        try:
-            stdout, stderr = process.communicate(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
-    if process.returncode not in {0, -15}:
-        detail = stderr.strip().splitlines()[-1] if stderr.strip() else "capture_failed"
-        raise RuntimeError(detail)
-    return stdout
-
-
-def capture_arp(interface: str, seconds: float) -> str:
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"], seconds)
 
 
 def discover(*, interface: str = _DEFAULT_INTERFACE, seconds: float = _DEFAULT_SECONDS, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
@@ -65,9 +40,10 @@ def require_root() -> None:
         raise RuntimeError("root_required")
 
 
-def _require_ip() -> None:
-    if shutil.which("ip") is None:
-        raise RuntimeError("ip_not_found")
+# Forwarding entry points preserve the discovery API and test injection seams.
+_require_ip = network.require_ip
+_ip_error = network.ip_error
+_ipv4_addresses = network.ipv4_addresses
 
 
 def _run_ip(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -75,43 +51,12 @@ def _run_ip(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
-def _ip_error(result: subprocess.CompletedProcess[str], fallback: str) -> RuntimeError:
-    detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else fallback
-    return RuntimeError(detail)
-
-
-def _ipv4_addresses(payload: object) -> set[str]:
-    try:
-        return {
-            str(info["local"])
-            for item in payload
-            for info in item.get("addr_info", [])
-            if info.get("family") == "inet" and "local" in info
-        }
-    except (TypeError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
-
-
 def interface_addresses(interface: str) -> set[str]:
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    result = _run_ip(["ip", "-j", "address", "show", "dev", interface])
-    if result.returncode != 0:
-        raise _ip_error(result, "interface_address_query_failed")
-    try:
-        return _ipv4_addresses(json.loads(result.stdout))
-    except (TypeError, ValueError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
+    return network.interface_addresses(interface, run=_run_ip)
 
 
 def host_addresses() -> set[str]:
-    result = _run_ip(["ip", "-j", "address", "show"])
-    if result.returncode != 0:
-        raise _ip_error(result, "host_address_query_failed")
-    try:
-        return _ipv4_addresses(json.loads(result.stdout))
-    except (TypeError, ValueError, KeyError):
-        raise RuntimeError("invalid_ip_address_output") from None
+    return network.host_addresses(run=_run_ip)
 
 
 def _claim_path(state_dir: str | Path) -> Path:
@@ -166,17 +111,6 @@ def cleanup_address(state_dir: str | Path) -> AddressClaim:
     path.unlink()
     return claim
 
-
-def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
-    source_mac, source_ip = _validate_candidate(candidate)
-    packet_filter = f"ether src {source_mac} and ip src {source_ip} and tcp"
-    return _bounded_tcpdump(["tcpdump", "-i", candidate.interface, "-l", "-nn", "-s0", "-A", packet_filter], seconds)
-
-
-def capture_passive_tcp(interface: str, seconds: float) -> str:
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-s0", "-A", "tcp"], seconds)
 
 
 def _write_capture_log(path: str | Path, capture: str) -> None:
