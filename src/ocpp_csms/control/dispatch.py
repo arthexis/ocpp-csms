@@ -336,7 +336,41 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "get_diagnostics":
+        if command == "update_firmware":
+            from datetime import datetime, timezone
+            from urllib.parse import urlsplit
+            location = request.get("location")
+            retrieve_date = request.get("retrieve_date")
+            if not isinstance(location, str) or not location:
+                return {"error": "invalid_location"}
+            try:
+                parsed = urlsplit(location)
+                if parsed.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parsed.hostname or parsed.fragment:
+                    return {"error": "invalid_location"}
+            except ValueError:
+                return {"error": "invalid_location"}
+            if not isinstance(retrieve_date, str):
+                return {"error": "invalid_retrieve_date"}
+            try:
+                when = datetime.fromisoformat(retrieve_date.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    return {"error": "timezone_required"}
+            except ValueError:
+                return {"error": "invalid_retrieve_date"}
+            retries = request.get("retries")
+            retry_interval = request.get("retry_interval")
+            if retries is not None and not _non_negative_int(retries):
+                return {"error": "invalid_retries"}
+            if retry_interval is not None and not _non_negative_int(retry_interval):
+                return {"error": "invalid_retry_interval"}
+            if when < datetime.now(timezone.utc) and not request.get("immediate"):
+                return {"error": "retrieve_date_in_past"}
+            if not isinstance(request.get("immediate"), bool):
+                return {"error": "invalid_immediate"}
+            response = await session.update_firmware(
+                location, retrieve_date, retries=retries, retry_interval=retry_interval
+            )
+        elif command == "get_diagnostics":
             from urllib.parse import urlsplit
             from datetime import datetime
             location = request.get("location")

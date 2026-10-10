@@ -9,6 +9,7 @@ from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, contro
 from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
 from ocpp_csms.cli.energy import add_energy_command, run_energy
+from ocpp_csms.cli.firmware import add_firmware_command, run_firmware
 from ocpp_csms.cli.export import add_export_command, run_export
 from ocpp_csms.cli.inspection import add_inspection_commands, run_inspection
 from ocpp_csms.cli.json_contracts import run_transactions_json
@@ -33,6 +34,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_maintenance_commands(subcommands))
     commands.update(add_inspection_commands(subcommands))
     commands.update(add_charger_commands(subcommands))
+    commands["firmware"] = add_firmware_command(subcommands)
     commands["diagnostics"] = add_diagnostics_command(subcommands)
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
@@ -87,6 +89,7 @@ def main() -> int:
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
+        if args.command == "firmware": return run_firmware(args)
         if args.command == "diagnostics": return run_diagnostics(args)
         if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
