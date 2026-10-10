@@ -89,8 +89,9 @@ async def test_report_without_tag_summarizes_observed_rfids(tmp_path):
     assert "4.000 kWh" in report
     assert "card-b" in report
     assert "750 Wh" in report
-    assert "ALLOW" not in report
-    assert "NAME" not in report
+    assert "CURRENT AUTH" in report.splitlines()[0]
+    assert "LABEL" in report.splitlines()[0]
+    assert "Accepted" in report
 
 
 @pytest.mark.asyncio
@@ -121,13 +122,14 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
     report = run_rfid(args(tmp_path, None))
     header = report.splitlines()[0]
 
-    assert header.index("ENERGY") < header.index("ALLOW") < header.index("NAME")
+    assert header.index("ENERGY") < header.index("CURRENT AUTH") < header.index("LABEL")
     rows = {line.split()[0]: line for line in report.splitlines()[1:] if line.strip() and not line.startswith(("Charger local list:", "Sync:"))}
-    assert "true" in rows["card-a"]
+    assert "Accepted" in rows["card-a"]
     assert "Alice" in rows["card-a"]
-    assert "false" in rows["card-b"]
+    assert "Blocked" in rows["card-b"]
     assert "Former" in rows["card-b"]
-    assert "missing" in rows["card-c"]
+    assert "Invalid" in rows["card-c"]
+    assert rows["card-c"].endswith("--")
 
 
 @pytest.mark.asyncio
@@ -198,12 +200,12 @@ async def test_summary_uses_known_cache_as_allow_source_when_no_rfid_file(monkey
     header = lines[0]
     rows = {line.split()[0]: line for line in lines[1:] if line.strip() and not line.startswith(("Charger local list:", "Sync:"))}
 
-    assert "ALLOW" in header
+    assert "CURRENT AUTH" in header
     assert "CACHE" not in header
-    assert "NAME" in header
-    assert "true" in rows["card-a"]
-    assert "Alice" in rows["card-a"]
-    assert "missing" in rows["card-b"]
+    assert "LABEL" in header
+    assert "Accepted" in rows["card-a"]
+    assert rows["card-a"].endswith("--")
+    assert "Accepted" in rows["card-b"]
 
 
 @pytest.mark.asyncio
@@ -250,13 +252,13 @@ async def test_summary_shows_allow_and_cache_when_file_and_known_cache_both_exis
         if line.strip() and not line.startswith(("Charger local list:", "Sync:"))
     }
 
-    assert header.index("ENERGY") < header.index("ALLOW") < header.index("CACHE") < header.index("NAME")
-    assert "true" in rows["card-a"]
+    assert header.index("ENERGY") < header.index("CURRENT AUTH") < header.index("LABEL") < header.index("CACHE")
+    assert "Accepted" in rows["card-a"]
     assert "Alice" in rows["card-a"]
-    assert rows["card-b"].count("true") == 1
-    assert "false" in rows["card-b"]
+    assert "Blocked" in rows["card-b"]
     assert "Bob" in rows["card-b"]
-    assert "missing" in rows["card-c"]
+    assert "Invalid" not in rows["card-c"]
+    assert "Accepted" in rows["card-c"]
     assert "Carol" in rows["card-c"]
 
 
@@ -291,7 +293,7 @@ async def test_summary_omits_cache_when_charger_is_disconnected(monkeypatch, tmp
     report = run_rfid(args(tmp_path, None))
     header = report.splitlines()[0]
 
-    assert "ALLOW" in header
+    assert "CURRENT AUTH" in header
     assert "CACHE" not in header
 
 
@@ -310,7 +312,7 @@ async def test_summary_ignores_connected_charger_cache_when_we_have_no_history(m
     report = run_rfid(args(tmp_path, None))
     header = report.splitlines()[0]
 
-    assert header.split() == ["RFID", "TXNS", "ENERGY", "LAST", "SEEN"]
+    assert header.split() == ["RFID", "TXNS", "ENERGY", "LAST", "SEEN", "CURRENT", "AUTH", "LABEL"]
 
 
 @pytest.mark.asyncio
