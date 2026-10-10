@@ -8,12 +8,14 @@ import re
 import shutil
 import subprocess
 import time
-from collections import Counter
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
+from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
+from ocpp_discover.arp import discover_candidate
+from ocpp_discover.cli_parser import build_parser
+from ocpp_discover.websocket import _TCP_PACKET, _validate_candidate, _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"
@@ -23,66 +25,8 @@ _ADDRESS_STATE = "address.json"
 _DISCOVERY_STATE = "discovery.json"
 _REDIRECT_STATE = "redirect.json"
 
-_ARP_REQUEST = re.compile(
-    r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+"
-    r"(?P<src_mac>[0-9a-f:]{17})\s+>\s+(?P<dst_mac>[0-9a-f:]{17}),.*?"
-    r"ARP.*?Request who-has (?P<target_ip>\d+\.\d+\.\d+\.\d+) "
-    r"tell (?P<source_ip>\d+\.\d+\.\d+\.\d+)",
-    re.IGNORECASE,
-)
-_ARP_REPLY = re.compile(
-    r"ARP.*?Reply (?P<ip>\d+\.\d+\.\d+\.\d+) is-at (?P<mac>[0-9a-f:]{17})",
-    re.IGNORECASE,
-)
-_TCP_PACKET = re.compile(
-    r"^(?P<time>\d\d:\d\d:\d\d(?:\.\d+)?)\s+IP\s+"
-    r"(?P<src>\d+\.\d+\.\d+\.\d+)\.(?P<src_port>\d+)\s+>\s+"
-    r"(?P<dst>\d+\.\d+\.\d+\.\d+)\.(?P<dst_port>\d+):",
-    re.MULTILINE,
-)
-_GET = re.compile(r"GET\s+(?P<path>\S+)\s+HTTP/1\.[01]", re.IGNORECASE)
-_HOST = re.compile(r"(?im)^Host:\s*(?P<host>\S+)\s*$")
-_UPGRADE = re.compile(r"(?im)^Upgrade:\s*websocket\s*$")
-_CONNECTION = re.compile(r"(?im)^Connection:\s*(?P<value>[^\r\n]+)$")
 _INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _MAC = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class DiscoveryCandidate:
-    interface: str
-    source_mac: str
-    source_ip: str
-    target_ip: str
-    requests: int
-
-    def to_json(self) -> dict[str, object]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class AddressClaim:
-    interface: str
-    address: str
-
-    def to_json(self) -> dict[str, str]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class DiscoveryResult:
-    status: str
-    charger_id: str | None
-    candidate: DiscoveryCandidate | None = None
-    redirect: RedirectReceipt | None = None
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "status": self.status,
-            "charger_id": self.charger_id,
-            "candidate": self.candidate.to_json() if self.candidate else None,
-            "redirect": self.redirect.to_json() if self.redirect else None,
-        }
 
 
 def _bounded_tcpdump(command: list[str], seconds: float) -> str:
@@ -110,38 +54,6 @@ def capture_arp(interface: str, seconds: float) -> str:
     if not _INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
     return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-e", "arp"], seconds)
-
-
-def discover_candidate(text: str, *, interface: str = _DEFAULT_INTERFACE, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
-    if min_requests < 1:
-        raise ValueError("min_requests_must_be_positive")
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    answered: set[str] = set()
-    counts: Counter[tuple[str, str, str]] = Counter()
-    for line in text.splitlines():
-        reply = _ARP_REPLY.search(line)
-        if reply:
-            answered.add(reply.group("ip"))
-            continue
-        request = _ARP_REQUEST.search(line)
-        if not request:
-            continue
-        source_ip = request.group("source_ip")
-        target_ip = request.group("target_ip")
-        if source_ip == target_ip:
-            continue
-        counts[(request.group("src_mac").lower(), source_ip, target_ip)] += 1
-    candidates = [
-        DiscoveryCandidate(interface, source_mac, source_ip, target_ip, count)
-        for (source_mac, source_ip, target_ip), count in counts.items()
-        if count >= min_requests and target_ip not in answered
-    ]
-    if not candidates:
-        raise ValueError("no_unresolved_arp_candidate")
-    if len(candidates) != 1:
-        raise ValueError("ambiguous_arp_candidates")
-    return candidates[0]
 
 
 def discover(*, interface: str = _DEFAULT_INTERFACE, seconds: float = _DEFAULT_SECONDS, min_requests: int = _MIN_REQUESTS) -> DiscoveryCandidate:
@@ -255,20 +167,6 @@ def cleanup_address(state_dir: str | Path) -> AddressClaim:
     return claim
 
 
-def _validate_candidate(candidate: DiscoveryCandidate) -> tuple[str, str]:
-    if not _INTERFACE.fullmatch(candidate.interface):
-        raise ValueError("invalid_interface")
-    if not _MAC.fullmatch(candidate.source_mac):
-        raise ValueError("invalid_source_mac")
-    try:
-        source_ip = ipaddress.ip_address(candidate.source_ip)
-    except ValueError:
-        raise ValueError("invalid_source_ip") from None
-    if source_ip.version != 4:
-        raise ValueError("invalid_source_ip")
-    return candidate.source_mac.lower(), str(source_ip)
-
-
 def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
     source_mac, source_ip = _validate_candidate(candidate)
     packet_filter = f"ether src {source_mac} and ip src {source_ip} and tcp"
@@ -290,84 +188,6 @@ def _write_capture_log(path: str | Path, capture: str) -> None:
             handle.write(capture)
     except FileExistsError:
         raise RuntimeError("capture_log_exists") from None
-
-
-def _tcp_blocks(text: str) -> list[tuple[re.Match[str], str]]:
-    matches = list(_TCP_PACKET.finditer(text))
-    return [(match, text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)]) for index, match in enumerate(matches)]
-
-
-def _websocket_receipt(
-    text: str,
-    *,
-    interface: str,
-    listen_port: int,
-    source_ip: str | None = None,
-    destination_filter: set[str] | None = None,
-) -> RedirectReceipt:
-    if not _INTERFACE.fullmatch(interface):
-        raise ValueError("invalid_interface")
-    if not 1 <= listen_port <= 65535:
-        raise ValueError("invalid_listen_port")
-    websocket_candidates: list[tuple[str, str, int, WebSocketRequest]] = []
-    saw_tls = False
-    for packet, payload in _tcp_blocks(text):
-        packet_source = packet.group("src")
-        destination_ip = packet.group("dst")
-        if source_ip is not None and packet_source != source_ip:
-            continue
-        if destination_filter is not None and destination_ip not in destination_filter:
-            continue
-        destination_port = int(packet.group("dst_port"))
-        if destination_port == 443:
-            saw_tls = True
-            continue
-        get = _GET.search(payload)
-        host = _HOST.search(payload)
-        connection = _CONNECTION.search(payload)
-        if not (get and host and _UPGRADE.search(payload) and connection):
-            continue
-        if "upgrade" not in {token.strip().lower() for token in connection.group("value").split(",")}:
-            continue
-        websocket_candidates.append((packet_source, destination_ip, destination_port, WebSocketRequest(destination_ip, host.group("host"), get.group("path"))))
-    if not websocket_candidates:
-        if saw_tls:
-            raise ValueError("secure_or_opaque_traffic")
-        raise ValueError("no_plaintext_websocket_upgrade")
-    sources = {item[0] for item in websocket_candidates}
-    if len(sources) != 1:
-        raise ValueError("ambiguous_websocket_sources")
-    ports = {item[2] for item in websocket_candidates}
-    if len(ports) != 1:
-        raise ValueError("ambiguous_tcp_destinations")
-    requests: list[WebSocketRequest] = []
-    seen_requests: set[tuple[str, str, str]] = set()
-    for _, _, _, request in websocket_candidates:
-        key = (request.destination_ip, request.host, request.path)
-        if key not in seen_requests:
-            seen_requests.add(key)
-            requests.append(request)
-    destination_ips = sorted({destination_ip for _, destination_ip, _, _ in websocket_candidates}, key=ipaddress.ip_address)
-    return RedirectReceipt(
-        interface=interface,
-        listen_port=listen_port,
-        source_ip=next(iter(sources)),
-        destination_ips=destination_ips,
-        requests=requests,
-        captured_at="discovered",
-        destination_port=next(iter(ports)),
-    )
-
-
-def parse_tcp_websocket(text: str, candidate: DiscoveryCandidate, *, listen_port: int) -> RedirectReceipt:
-    _, source_ip = _validate_candidate(candidate)
-    return _websocket_receipt(text, interface=candidate.interface, listen_port=listen_port, source_ip=source_ip)
-
-
-def parse_passive_websocket(text: str, *, interface: str, local_addresses: set[str], listen_port: int) -> RedirectReceipt:
-    if not local_addresses:
-        raise ValueError("no_local_ipv4_addresses")
-    return _websocket_receipt(text, interface=interface, listen_port=listen_port, destination_filter=local_addresses)
 
 
 def discover_tcp(candidate: DiscoveryCandidate, *, listen_port: int, seconds: float = _DEFAULT_SECONDS) -> RedirectReceipt:
@@ -534,45 +354,6 @@ def run_discovery(
         finally:
             _state_path(state_dir).unlink(missing_ok=True)
         raise
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m field.discover", description="Discover and bootstrap a charger-facing Ethernet endpoint.")
-    subparsers = parser.add_subparsers(dest="command")
-    run_parser = subparsers.add_parser("run", help="Run transactional discovery and preserve successful network state")
-    run_parser.add_argument("--data-dir", required=True)
-    run_parser.add_argument("--state-dir", required=True)
-    run_parser.add_argument("--interface", default=_DEFAULT_INTERFACE)
-    run_parser.add_argument("--listen-port", type=int, default=9000)
-    run_parser.add_argument("--grace-seconds", type=float, default=10.0)
-    run_parser.add_argument("--arp-seconds", type=float, default=_DEFAULT_SECONDS)
-    run_parser.add_argument("--tcp-seconds", type=float, default=_DEFAULT_SECONDS)
-    run_parser.add_argument("--connect-timeout", type=float, default=30.0)
-    run_parser.add_argument(
-        "--existing-endpoint-only",
-        action="store_true",
-        help="Capture only an existing host-local OCPP endpoint; never fall back to ARP/address claiming.",
-    )
-    run_parser.add_argument(
-        "--passive-diagnostic-only",
-        action="store_true",
-        help="Record and report an existing host-local endpoint without installing a redirect.",
-    )
-    run_parser.add_argument(
-        "--force-passive-capture",
-        action="store_true",
-        help="Bypass the current-session grace check and begin passive capture immediately.",
-    )
-    run_parser.add_argument(
-        "--passive-capture-log",
-        help="Write the bounded passive TCP capture to a new local file for diagnosis.",
-    )
-    cleanup_parser = subparsers.add_parser("cleanup", help="Remove discovery-owned redirect and address state")
-    cleanup_parser.add_argument("--state-dir", required=True)
-    parser.add_argument("--interface", default=_DEFAULT_INTERFACE)
-    parser.add_argument("--seconds", type=float, default=_DEFAULT_SECONDS)
-    parser.add_argument("--min-requests", type=int, default=_MIN_REQUESTS)
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
