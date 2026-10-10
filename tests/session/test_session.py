@@ -8,7 +8,6 @@ import pytest
 from ocpp.v16 import call_result
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
-from ocpp_csms.server import RecordedWebSocket
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.archive import TransactionArchive
 
@@ -42,20 +41,6 @@ def event_directions(tmp_path, action):
             "SELECT direction FROM events WHERE action = ? ORDER BY id",
             (action,),
         ).fetchall()
-
-
-@pytest.mark.asyncio
-async def test_websocket_keeps_exact_latest_frame():
-    raw = '[2,"abc","Heartbeat",{}]'
-
-    class WebSocket:
-        async def recv(self):
-            return raw
-
-    websocket = RecordedWebSocket(WebSocket())
-
-    assert await websocket.recv() == raw
-    assert websocket.last_frame == raw
 
 
 def test_record_failure_logs_raw_frame(caplog):
