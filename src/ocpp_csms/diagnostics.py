@@ -105,28 +105,41 @@ def transaction_events(
 
 
 def _summary(row: sqlite3.Row) -> str:
+    """Compact one-event summary, without inferring unrecorded request pairing."""
     if row["kind"] == "runtime":
         return row["action"].replace("_", " ")
 
     payload: dict[str, Any] = json.loads(row["payload"] or "{}")
+    action = row["action"]
     if row["direction"] == "out":
         status = payload.get("status")
         info = payload.get("idTagInfo")
         if status is None and isinstance(info, dict):
             status = info.get("status")
-        suffix = f" {status}" if status else " response"
+        # Empty acknowledgements are common OCPP CallResults. Keep them
+        # distinct from explicit Accepted/Rejected outcomes.
+        suffix = f" {status}" if status else (" OK" if not payload else " response")
         if row["transaction_id"] is not None:
             suffix += f" tx={row['transaction_id']}"
-        return f"→ {row['action']}{suffix}"
+        return f"→ {action}{suffix}"
 
     details = []
     if row["id_tag"]:
         details.append(f"RFID {row['id_tag']}")
     if row["transaction_id"] is not None:
         details.append(f"tx={row['transaction_id']}")
-    if row["action"] == "StatusNotification":
-        details.extend(str(value) for value in (payload.get("status"), payload.get("error_code"), payload.get("info")) if value and value != "NoError")
-    return " ".join([row["action"], *details])
+    if action == "StatusNotification":
+        connector = payload.get("connector_id")
+        if connector is not None:
+            details.append(f"C{connector}")
+        details.extend(
+            str(value) for value in (
+                payload.get("status"), payload.get("error_code"), payload.get("info")
+            ) if value and value != "NoError"
+        )
+    elif action == "StopTransaction" and payload.get("reason"):
+        details.append(f"reason={payload['reason']}")
+    return " ".join([action, *details])
 
 
 def format_events(rows: list[sqlite3.Row], heading: str | None = None) -> str:
