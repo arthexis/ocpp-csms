@@ -231,3 +231,45 @@ def test_parser_default_limit_is_100():
     sub = parser.add_subparsers(dest="command")
     cli.add_diagnostic_commands(sub)
     assert parser.parse_args(["events"]).limit == "100"
+
+
+def test_no_limit_aliases_disable_count_cap(captured_queries):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    for flag in ("--no-limit", "-N"):
+        parsed = parser.parse_args(["events", "--since", "3d", flag])
+        parsed.data_dir = "unused"
+        cli.run_events(parsed)
+        assert captured_queries[-1]["limit"] is None
+        assert captured_queries[-1]["since"] is not None
+
+
+def test_no_limit_conflicts_with_explicit_limit():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    for explicit in ("--limit", "-n"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["events", explicit, "10", "--no-limit"])
+
+
+def test_no_limit_with_json_preserves_underlying_rows(monkeypatch, capsys):
+    rows = [event(n) for n in range(1, 4)]
+    observed = []
+
+    def retrieve(*_args, **kwargs):
+        observed.append(kwargs)
+        return rows
+
+    monkeypatch.setattr(cli, "events_between", retrieve)
+    cli.run_events(args(no_limit=True, json=True, since="3d"))
+    assert observed[-1]["limit"] is None
+    assert json.loads(capsys.readouterr().out) == events_contract(rows)
+
+
+def test_no_limit_without_time_filter_queries_all_events(captured_queries):
+    query = query_events(captured_queries, no_limit=True)
+    assert query["limit"] is None
+    assert query["since"] is None
+    assert query["until"] is None
