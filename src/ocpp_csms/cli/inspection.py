@@ -49,6 +49,19 @@ async def _query_capabilities(data_dir, charger):
     return await send_control(data_dir, request)
 
 
+def _assessment(*, connected, status, ids):
+    """Classify evidence; observations never prove a transaction has ended."""
+    if not connected:
+        return "Offline/uncertain"
+    if len(ids) > 1:
+        return "Conflict (overlapping transactions)"
+    if ids and status in {"Available", "Unavailable"}:
+        return "Conflict"
+    if status is None:
+        return "Unknown"
+    return "Consistent (snapshot)"
+
+
 def _reconciliation(data_dir, charger, connector):
     result = []
     snapshot = appliance_status(data_dir)
@@ -68,19 +81,17 @@ def _reconciliation(data_dir, charger, connector):
             ids = recorded.get(key, [])
             status = item.status
             # StatusNotification is an observation, not proof a transaction stopped.
-            conflict = bool(ids and status in {"Available", "Unavailable"})
             result.append({"cp": cp.charger_id, "connector": item.connector_id,
                            "connected": cp.connected, "observed_status": status,
                            "active_transactions": ids,
-                           "assessment": "Offline/uncertain" if not cp.connected else
-                           "Conflict" if conflict else "Unknown" if status is None else
-                           "Consistent (snapshot)"})
+                           "assessment": _assessment(connected=cp.connected, status=status, ids=ids)})
     for key, ids in recorded.items():
-        if key in covered:
+        if key in covered or (charger is not None and key[0] != charger):
             continue
         result.append({"cp": key[0], "connector": key[1], "connected": False,
                        "observed_status": None, "active_transactions": ids,
-                       "assessment": "No connector observation"})
+                       "assessment": "Conflict (overlapping transactions)" if len(ids) > 1 else
+                                     "No connector observation"})
     return result
 
 
