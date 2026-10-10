@@ -179,7 +179,7 @@
       changed_when: false
 
     - name: Verify previously connected chargers reconnect
-      ansible.builtin.include_tasks: reconnect_with_discover.yml
+      ansible.builtin.include_tasks: reconnect.yml
 
     - name: Point previous at successfully active release
       ansible.builtin.file:
