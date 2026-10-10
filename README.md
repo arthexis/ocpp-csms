@@ -108,8 +108,27 @@ ocpp-csms report --since 7d --cp CP001 --json
 ocpp-csms mail send report --since 1d
 ```
 
-Manual report email requires an enabled SMTP configuration; periodic delivery
-is reserved for the scheduling chunk.
+Manual email requires SMTP. Scheduled delivery is configured independently:
+
+```toml
+[mail.reports.daily]
+enabled = true
+time = "08:00"
+timezone = "America/Monterrey"
+
+[mail.reports.weekly]
+enabled = true
+weekday = "monday"
+time = "08:00"
+timezone = "America/Monterrey"
+```
+
+`ocpp-csms mail schedule run` checks for due completed local calendar periods,
+queues each report once per recipient with a stable period identity, and invokes
+the existing retrying mail outbox. Ansible installs a persistent systemd timer
+running this check every 15 minutes. This avoids a heavyweight scheduler and
+does not send anything while mail is disabled. Reports include transaction RFIDs
+and the period subtotal; charger health is a generation-time snapshot.
 
 ### SMTP mail transport
 
