@@ -14,7 +14,6 @@ ALERT_SCHEMA = "ocpp-csms/alert/v1"
 # These are noteworthy runtime transitions, not necessarily faults.
 _RUNTIME_RULES: dict[str, tuple[str, str, str]] = {
     "charger_disconnected": ("warning", "connectivity", "Charger disconnected"),
-    "charger_connected": ("info", "connectivity", "Charger connected"),
 }
 
 _FAULT_STATUSES = {"Faulted"}
@@ -40,7 +39,8 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
     The output carries its source event ID; unrelated OCPP messages are never
     correlated based on adjacency. The rule list is conservative by design.
     """
-    row = dict(row)  # sqlite3.Row exposes keys but not Mapping.get\n    action = str(row.get("action") or "")
+    row = dict(row)  # sqlite3.Row exposes keys but not Mapping.get
+    action = str(row.get("action") or "")
     kind = str(row.get("kind") or "")
     payload = _details(row)
     severity: str
@@ -78,7 +78,8 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
         if payload.get(key) not in (None, "")
     }
     record: dict[str, Any] = {
-        "source_event_id": row.get("id"),\n        "source_kind": kind,
+        "source_event_id": row.get("id"),
+        "source_kind": kind,
         "at": row.get("occurred_at"),
         "charger_id": row.get("charger_id"),
         "severity": severity,
@@ -99,3 +100,28 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
 def classify_events(rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Retain every qualifying occurrence in source order, without grouping."""
     return [alert for row in rows if (alert := classify_event(row)) is not None]
+
+def alerts_contract(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Versioned machine-readable diagnostic result."""
+    from ocpp_csms.output import json_command_result
+    return json_command_result({"alerts": alerts}, schema=ALERT_SCHEMA)
+
+
+def format_alerts(alerts: list[dict[str, Any]]) -> str:
+    """Display each stored occurrence separately, including available details."""
+    if not alerts:
+        return "No matching alerts."
+    lines = []
+    for alert in alerts:
+        header = (f"{alert['at']} {str(alert['severity']).upper()} "
+                  f"{alert.get('charger_id') or '-'} {alert['message']}")
+        lines.append(header)
+        context = []
+        for field in ("connector_id", "transaction_id", "rfid"):
+            if field in alert:
+                context.append(f"{field}={alert[field]}")
+        for key, value in alert.get("details", {}).items():
+            context.append(f"{key}={value}")
+        if context:
+            lines.append("  " + " ".join(context))
+    return "\n".join(lines)
