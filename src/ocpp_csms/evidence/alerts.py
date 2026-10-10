@@ -78,7 +78,7 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
         if payload.get(key) not in (None, "")
     }
     record: dict[str, Any] = {
-        "source_event_id": row.get("id"),
+        "source_event_id": row.get("id"),\n        "source_kind": kind,
         "at": row.get("occurred_at"),
         "charger_id": row.get("charger_id"),
         "severity": severity,
