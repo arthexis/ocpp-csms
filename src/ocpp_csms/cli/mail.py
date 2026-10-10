@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
+import subprocess
 import smtplib
 import ssl
 from pathlib import Path
@@ -20,6 +23,7 @@ def add_mail_command(subcommands):
     parser = subcommands.add_parser("mail", help="Inspect or test SMTP transport")
     parser.add_argument("--config", default="/etc/ocpp-csms/mail.toml", help="Mail TOML configuration path")
     children = parser.add_subparsers(dest="mail_command", required=True)
+    children.add_parser("edit", help="Open mail.toml using $VISUAL, $EDITOR, or nano")
     status = children.add_parser("status", help="Show safe mail configuration status")
     status.add_argument("-j", "--json", action="store_true")
     test = children.add_parser("test", help="Send one explicit SMTP test message")
@@ -38,6 +42,20 @@ def add_mail_command(subcommands):
 
 
 def run_mail(args: argparse.Namespace) -> int:
+    if args.mail_command == "edit":
+        path = Path(args.config).expanduser()
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
+        try:
+            command = shlex.split(editor)
+            if not command:
+                raise ValueError("Editor command is empty")
+            # Do not create or truncate the config before the editor saves it.
+            # The default /etc path may require permission; report that failure.
+            result = subprocess.run([*command, str(path)], check=False)
+        except (OSError, ValueError) as exc:
+            print(f"Mail edit failed: {exc}")
+            return 1
+        return result.returncode
     try:
         config = load_mail_config(Path(args.config))
     except (OSError, ValueError) as exc:
