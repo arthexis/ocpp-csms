@@ -200,7 +200,7 @@ async def test_summary_last_seen_uses_latest_activity_even_when_transaction_open
         "charger-a", start_payload(id_tag="card-a", timestamp="2026-10-06T09:00:00Z"),
     )
     await archive.stop(
-        "charger-a", stop_payload(first, timestamp="2026-10-06T09:30:00Z"),
+        "charger-a", stop_payload(first, meter_stop=2000, timestamp="2026-10-06T09:30:00Z"),
     )
     await archive.start(
         "charger-a", start_payload(id_tag="card-a", timestamp="2026-10-06T13:00:00Z"),
