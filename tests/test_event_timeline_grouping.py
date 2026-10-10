@@ -20,8 +20,8 @@ def test_heartbeat_requests_and_responses_not_paired():
         row(4, "Heartbeat", {"current_time": "2026-10-09T14:00:04Z"}, direction="out"),
     ]
     output = format_events(rows)
-    assert "Heartbeat ×2" in output
-    assert "→ Heartbeat ack ×2" in output
+    assert "Heartbeat requests (responses not established) ×2" in output
+    assert "→ Heartbeat responses ×2" in output
     assert "4 responses" not in output
 
 
@@ -57,7 +57,7 @@ def test_anomalous_heartbeat_and_missing_response_remain_visible():
             row(3, "Heartbeat"), row(4, "Heartbeat")]
     output = format_events(rows)
     assert output.count("Heartbeat") == 3
-    assert "Heartbeat ×2" in output
+    assert "Heartbeat requests (responses not established) ×2" in output
 
 
 def test_limited_window_counts_only_observed_rows():
@@ -66,3 +66,32 @@ def test_limited_window_counts_only_observed_rows():
     assert "×2" in output
     assert "14:00:05Z" in output and "14:00:06Z" in output
     assert "×3" not in output
+
+
+def test_unanswered_heartbeat_run_is_not_claimed_as_success():
+    output = format_events([row(1, "Heartbeat"), row(2, "Heartbeat"), row(3, "Heartbeat")])
+    assert "requests (responses not established) ×3" in output
+    assert "responses ×3" not in output
+
+
+def test_unusual_response_details_remain_visible():
+    output = format_events([
+        row(1, "Heartbeat", {"current_time": "2026-10-09T14:00:01Z",
+                             "error": "unexpected"}, direction="out"),
+        row(2, "Heartbeat", {"current_time": "2026-10-09T14:00:02Z"},
+            direction="out"),
+    ])
+    assert 'extra={"error": "unexpected"}' in output
+    assert "×2" not in output
+
+
+def test_connector_and_transaction_boundaries():
+    status = {"connector_id": 1, "status": "Available", "error_code": "NoError"}
+    second = dict(status, connector_id=2)
+    rows = [row(1, "StatusNotification", status),
+            row(2, "StatusNotification", second),
+            row(3, "StartTransaction", {"connector_id": 1, "transaction_id": 42}),
+            row(4, "StatusNotification", status)]
+    output = format_events(rows)
+    assert "×" not in output
+    assert "StartTransaction" in output
