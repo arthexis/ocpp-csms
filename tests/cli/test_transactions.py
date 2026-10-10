@@ -112,9 +112,15 @@ def test_transaction_no_limit_aliases(parse_cli, command, flag):
     assert args.since == "3d"
 
 
-def test_transaction_limit_and_no_limit_are_mutually_exclusive(cli_parser):
+@pytest.mark.parametrize("limit_flag, unlimited_flag", [
+    ("--limit", "--no-limit"), ("-n", "-N"),
+])
+def test_transaction_limit_and_no_limit_are_mutually_exclusive(limit_flag, unlimited_flag):
+    from ocpp_csms.cli import build_parser
+
+    parser, _ = build_parser()
     with pytest.raises(SystemExit):
-        cli_parser.parse_args(["txn", "-n", "20", "-N"])
+        parser.parse_args(["txn", limit_flag, "20", unlimited_flag])
 
 
 def test_unlimited_transaction_query_forwards_none(parse_cli, monkeypatch):
