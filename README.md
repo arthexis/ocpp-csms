@@ -90,6 +90,65 @@ The current classifier reports explicitly recognized faults, authorization
 rejections, and disconnects; state-derived offline thresholds and recovery
 correlation are future work.
 
+### SMTP mail transport
+
+SMTP is optional and disabled unless explicitly enabled in
+`/etc/ocpp-csms/mail.toml`. The mail command accepts a custom path via
+`--config` before the subcommand:
+
+```bash
+ocpp-csms mail status
+ocpp-csms mail status --json
+ocpp-csms mail --config ./mail.toml test
+```
+
+Example configuration:
+
+```toml
+[mail]
+enabled = false
+from = "csms@example.com"
+to = ["administrator@example.com"]
+
+[mail.smtp]
+host = "smtp.example.com"
+port = 587
+starttls = true
+username = "csms@example.com"
+password_env = "OCPP_CSMS_SMTP_PASSWORD"
+timeout = 10
+
+[mail.alerts]
+enabled = true
+minimum_severity = "warning"
+
+[mail.events.transaction_started]
+enabled = false
+```
+
+Set the named environment variable in the operator's environment (or securely
+via systemd credentials when integrating a service). Never commit credentials
+to version control. SMTP uses validated TLS and has a bounded timeout.
+`mail test` explicitly sends one test email; SMTP acceptance does not prove
+inbox delivery. Automatic notifications run independently of charger message handling and use
+a small durable SQLite outbox in the data directory. Enable [mail.alerts]
+to send qualifying exceptional events, and opt into [mail.events.transaction_started]
+or [mail.events.transaction_stopped] for ordinary transactions. Cooldown
+applies only to repeated alerts, never to distinct transactions. The first
+enabled worker cycle starts from the current evidence high-water mark to avoid
+backfilling historical messages. Failed SMTP attempts retry with bounded
+exponential backoff.
+
+```bash
+ocpp-csms mail history
+ocpp-csms mail history --failed
+ocpp-csms mail history --json
+```
+
+`mail status` includes notification delivery counts when the outbox exists.
+Email processing never blocks OCPP handlers. Scheduled digest reports are
+planned for later chunks.
+
 ### Configuration
 
 `config download` issues a full OCPP `GetConfiguration` and records every returned key with both its `readonly` flag and current value.
