@@ -212,7 +212,7 @@ class SessionCommands:
         # Upload URLs may contain credentials or signed tokens. Never persist them.
         from urllib.parse import urlsplit, urlunsplit
         parts = urlsplit(location)
-        safe_location = urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
+        safe_location = urlunsplit((parts.scheme, parts.hostname or "", "/[redacted]", "", ""))
         payload: dict[str, Any] = {"location": safe_location}
         if retries is not None: payload["retries"] = retries
         if retry_interval is not None: payload["retry_interval"] = retry_interval
