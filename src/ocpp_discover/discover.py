@@ -14,7 +14,7 @@ from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 from ocpp_discover.models import AddressClaim, DiscoveryCandidate, DiscoveryResult
 from ocpp_discover.arp import discover_candidate
-from ocpp_discover.websocket import _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
+from ocpp_discover.websocket import _validate_candidate, _tcp_blocks, _websocket_receipt, parse_tcp_websocket, parse_passive_websocket
 from ocpp_csms.status import appliance_status
 
 _DEFAULT_INTERFACE = "eth0"
@@ -164,20 +164,6 @@ def cleanup_address(state_dir: str | Path) -> AddressClaim:
             raise _ip_error(result, "address_remove_failed")
     path.unlink()
     return claim
-
-
-def _validate_candidate(candidate: DiscoveryCandidate) -> tuple[str, str]:
-    if not _INTERFACE.fullmatch(candidate.interface):
-        raise ValueError("invalid_interface")
-    if not _MAC.fullmatch(candidate.source_mac):
-        raise ValueError("invalid_source_mac")
-    try:
-        source_ip = ipaddress.ip_address(candidate.source_ip)
-    except ValueError:
-        raise ValueError("invalid_source_ip") from None
-    if source_ip.version != 4:
-        raise ValueError("invalid_source_ip")
-    return candidate.source_mac.lower(), str(source_ip)
 
 
 def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
