@@ -26,6 +26,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "--limit", type=int, default=200, help="Maximum events to print")
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
+    add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
     explain_parser = subcommands.add_parser("explain", help="Show charger evidence for a time window")
     add(explain_parser, "charger", help="Charge point ID")
@@ -52,11 +53,13 @@ def run_events(args: argparse.Namespace) -> int:
         raise ValueError("--transaction/--txn must be zero or greater")
     if args.raw and not args.json:
         raise ValueError("--raw requires --json")
+    if args.verbose and args.json:
+        raise ValueError("--verbose cannot be combined with --json")
     rows = events_between(args.data_dir, charger_id=args.charger, transaction_id=args.transaction, since=args.since, until=args.until, limit=args.limit)
     if args.json:
         emit_json(raw_events_contract(rows) if args.raw else events_contract(rows))
     else:
-        print(format_events(rows))
+        print(format_events(rows, verbose=args.verbose))
     return 0
 
 
