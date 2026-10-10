@@ -103,6 +103,17 @@ ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
 ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
 ```
 
+### Vendor DataTransfer (OCPP 1.6J)
+
+Send opaque vendor-specific strings over the existing charge-point WebSocket:
+
+```bash
+ocpp-csms data-transfer send --cp CP001 --vendor com.example.vendor --message-id diagnostic --data '{"value":1}'
+ocpp-csms data-transfer send --vendor com.example.vendor --data 'opaque text' --json
+```
+
+`--data` is transmitted as a string without interpreting or transforming its contents. The charger may respond with `Accepted`, `Rejected`, `UnknownVendorId`, or `UnknownMessageId`; only `Accepted` is considered successful. Incoming charger-originated DataTransfer messages are recorded in the existing evidence store and acknowledged with `UnknownVendorId` by default; they **never execute arbitrary vendor operations**. No vendor-specific plugins, new services, or schema changes are introduced.
+
 ### OCPP reservations
 
 Use `reserve` to create an OCPP `ReserveNow` reservation; `reservation create` is an equivalent spelling. Reservation IDs are operator-supplied positive integers, unique for the charger. Connector 0 lets the charger choose any connector. The charger must support reservations; an `Accepted` response acknowledges the request, not guaranteed future availability.
