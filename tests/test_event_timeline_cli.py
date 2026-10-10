@@ -201,3 +201,29 @@ def test_invalid_event_limits(monkeypatch, limit):
     monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
     with pytest.raises(ValueError, match="--limit"):
         cli.run_events(args(limit=limit))
+
+
+def test_short_limit_alias_matches_long_flag(monkeypatch):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    recorded = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: recorded.append(kw) or [])
+    for value in ("50", "1d", "1.5h"):
+        for flag in ("-n", "--limit"):
+            parsed = parser.parse_args(["events", flag, value])
+            parsed.data_dir = "unused"
+            cli.run_events(parsed)
+        short, long = recorded[-2:]
+        assert short["limit"] == long["limit"]
+        if short["since"] is None:
+            assert long["since"] is None
+        else:
+            assert abs((datetime.fromisoformat(short["since"]) - datetime.fromisoformat(long["since"])).total_seconds()) < 1
+
+
+def test_parser_default_limit_is_100():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    assert parser.parse_args(["events"]).limit == "100"
