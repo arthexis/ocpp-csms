@@ -40,7 +40,7 @@ def classify_event(row: Mapping[str, Any]) -> dict[str, Any] | None:
     The output carries its source event ID; unrelated OCPP messages are never
     correlated based on adjacency. The rule list is conservative by design.
     """
-    action = str(row.get("action") or "")
+    row = dict(row)  # sqlite3.Row exposes keys but not Mapping.get\n    action = str(row.get("action") or "")
     kind = str(row.get("kind") or "")
     payload = _details(row)
     severity: str
