@@ -22,7 +22,7 @@ def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
 
 def args(**overrides):
     defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
-                    until=None, limit=200, json=False, raw=False, verbose=False)
+                    until=None, limit=100, json=False, raw=False, verbose=False)
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
@@ -35,7 +35,7 @@ def test_parser_accepts_verbose():
     assert parsed.command == "events"
     assert parsed.charger == "CP1"
     assert parsed.verbose is True
-    assert parsed.limit == 2
+    assert parsed.limit == "2"
 
 
 def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
@@ -142,7 +142,7 @@ def test_relative_since_uses_current_utc(monkeypatch, duration, seconds):
     after = datetime.now(timezone.utc)
     actual = datetime.fromisoformat(captured[0]["since"])
     assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
-    assert captured[0]["limit"] == 200
+    assert captured[0]["limit"] == 100
 
 
 def test_relative_bounds_keep_common_reference_time(monkeypatch):
@@ -163,3 +163,41 @@ def test_invalid_or_reversed_time_bounds_do_not_query(monkeypatch, bounds):
     monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
     with pytest.raises(ValueError):
         cli.run_events(args(**bounds))
+
+
+@pytest.mark.parametrize("duration,seconds", [
+    ("1d", 86400), ("72h", 72 * 3600), ("1W", 7 * 86400),
+])
+def test_duration_limit_has_no_count_cap(monkeypatch, duration, seconds):
+    seen = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
+    before = datetime.now(timezone.utc)
+    cli.run_events(args(limit=duration))
+    after = datetime.now(timezone.utc)
+    actual = datetime.fromisoformat(seen[0]["since"])
+    assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
+    assert seen[0]["limit"] is None
+
+
+def test_duration_window_ends_at_explicit_until(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
+    cli.run_events(args(until="2026-10-09T12:00:00Z", limit="1d"))
+    assert seen[0]["since"] == "2026-10-08T12:00:00+00:00"
+    assert seen[0]["until"] == "2026-10-09T12:00:00+00:00"
+
+
+def test_duration_limit_intersects_since(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: seen.append(kw) or [])
+    cli.run_events(args(since="1h", limit="1d"))
+    before = datetime.now(timezone.utc)
+    assert before - timedelta(hours=1, seconds=2) <= datetime.fromisoformat(seen[0]["since"]) <= before
+    assert seen[0]["limit"] is None
+
+
+@pytest.mark.parametrize("limit", ["0", "0h", "-1", "nonsense", "2months"])
+def test_invalid_event_limits(monkeypatch, limit):
+    monkeypatch.setattr(cli, "events_between", lambda *_a, **_kw: pytest.fail("unexpected query"))
+    with pytest.raises(ValueError, match="--limit"):
+        cli.run_events(args(limit=limit))
