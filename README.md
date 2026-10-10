@@ -45,6 +45,7 @@ ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS
 ocpp-csms stop CHARGER (--transaction ID|--txn ID) (--now|--after SECONDS|--within SECONDS)
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
+ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
 
@@ -67,6 +68,27 @@ ocpp-csms events --since 3d -n 1d      # all events within the last day
 ocpp-csms events --until 2d -n 1d      # events from 3 to 2 days ago
 ocpp-csms events -n 1.5h --json        # JSON events from the last 90 minutes
 ```
+
+### Alerts
+
+`alerts` shows exceptional recorded events as individual occurrences, without
+compact grouping. It shares the relative/ISO time and count/duration limit
+semantics of `events`, including `-N/--no-limit`. The default selects the
+latest 100 **matching alerts**, rather than the latest 100 unfiltered events.
+Use `--cp` (or `--charger`), a positional charger, or `--txn` to restrict
+the result; `--json` exposes the versioned alert contract.
+
+```bash
+ocpp-csms alerts --since 3d
+ocpp-csms alerts --since 3d -N
+ocpp-csms alerts --cp CP001 --txn 123 --json
+```
+
+Ordinary charging starts remain events, not alerts. Future mail configuration
+will allow opting into transaction-start emails independently, disabled by default.
+The current classifier reports explicitly recognized faults, authorization
+rejections, and disconnects; state-derived offline thresholds and recovery
+correlation are future work.
 
 ### Configuration
 
