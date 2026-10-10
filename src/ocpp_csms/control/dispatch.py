@@ -336,7 +336,18 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "charger_not_connected", "charger": charger}
 
     try:
-        if command == "reserve":
+        if command == "data_transfer":
+            vendor_id = request.get("vendor_id")
+            message_id = request.get("message_id")
+            data = request.get("data")
+            if not isinstance(vendor_id, str) or not 1 <= len(vendor_id) <= 255:
+                return {"error": "invalid_vendor_id"}
+            if message_id is not None and (not isinstance(message_id, str) or not 1 <= len(message_id) <= 50):
+                return {"error": "invalid_message_id"}
+            if data is not None and not isinstance(data, str):
+                return {"error": "invalid_data"}
+            response = await session.data_transfer(vendor_id, message_id, data)
+        elif command == "reserve":
             from datetime import datetime, timezone
             connector = request.get("connector")
             reservation_id = request.get("reservation_id")
