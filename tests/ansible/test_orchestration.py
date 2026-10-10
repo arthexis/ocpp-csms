@@ -99,10 +99,9 @@ def test_schema_upgrade_happens_only_after_old_service_stops():
 
 
 def test_incumbent_takeover_requires_a_real_charger_reconnect():
-    reconnect = read(TASKS / "reconnect_with_discover.yml")
-    assert "Probe incumbent charger reconnect before Discover recovery" in reconnect
+    reconnect = read(TASKS / "reconnect.yml")
+    assert "Verify takeover charger reconnect" in reconnect
     assert "wait-any" in reconnect
-    assert "Verify incumbent charger reconnect after candidate Discover recovery" in reconnect
     assert "ocpp_csms_incumbent_service | length > 0" in reconnect
 
 
