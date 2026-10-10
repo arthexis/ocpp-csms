@@ -18,7 +18,7 @@ def run_transactions_json(args: argparse.Namespace) -> int:
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit must be at least 1")
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until, args.between, args.at, args.today))
-    if args.transaction_id is not None and (args.active or args.last or filtered or (args.limit != 20 or getattr(args, "no_limit", False))):
+    if args.transaction_id is not None and (args.active or args.last or filtered or (args.limit is not None or getattr(args, "no_limit", False))):
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
 
     query = TransactionQuery(args.data_dir)
@@ -41,6 +41,6 @@ def run_transactions_json(args: argparse.Namespace) -> int:
             view = query.last(**filters)
             views = [view] if view is not None else []
         else:
-            views = query.list(limit=None if getattr(args, "no_limit", False) else args.limit, **filters)
+            views = query.list(limit=None if getattr(args, "no_limit", False) else (20 if args.limit is None else args.limit), **filters)
     emit_json(transactions_contract(views, local_time=args.local_time))
     return 0
