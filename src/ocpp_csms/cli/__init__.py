@@ -24,6 +24,7 @@ from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
+from ocpp_csms.cli.txn_explain import parse_explain, run_txn_explain
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions.archive import default_data_dir
 
@@ -74,6 +75,15 @@ def print_help(parser, commands, topic=None) -> None:
 
 def main() -> int:
     argv = list(sys.argv[1:])
+    # Route transaction explanation before integer transaction parsing.
+    txn_explain_index = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS
+                              and i + 1 < len(argv) and argv[i + 1] == "explain"), -1)
+    if txn_explain_index >= 0:
+        # Parse the global --data-dir without consuming transaction arguments.
+        global_parser = argparse.ArgumentParser(add_help=False)
+        global_parser.add_argument("--data-dir", default=str(default_data_dir()))
+        global_args, _ = global_parser.parse_known_args(argv[:txn_explain_index])
+        return run_txn_explain(parse_explain(argv[txn_explain_index + 2:], data_dir=global_args.data_dir))
     # Route txn/transactions start and stop through the existing OCPP control CLI.
     # The control parser already defaults omitted timing options to --now.
     txn_offset = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS), -1)
