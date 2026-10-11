@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from ocpp_csms.cli.transactions import resolve_time
 from ocpp_csms.control import send_control
 from ocpp_csms.evidence.diagnostics import events_between
+from ocpp_csms.firmware_preflight import preflight
 
 ACTIONS = {"UpdateFirmware", "FirmwareStatusNotification"}
 
@@ -25,6 +26,12 @@ def add_firmware_command(subcommands):
     update.add_argument("--retry-interval", type=int)
     update.add_argument("--confirm", action="store_true", help="Acknowledge potential service disruption")
     update.add_argument("-j", "--json", action="store_true")
+    check = sub.add_parser("check", help="Read-only firmware update preflight")
+    check.add_argument("--cp", "--charger", dest="charger", required=True)
+    check.add_argument("--location", help="Optional firmware URL to validate syntactically")
+    check.add_argument("--offline", action="store_true", help="Use stored evidence without OCPP queries")
+    check.add_argument("--timeout", type=float, default=8.0, help="Live query timeout in seconds")
+    check.add_argument("-j", "--json", action="store_true")
     for name in ("status", "history"):
         parser = sub.add_parser(name, help="Show observed firmware status" if name == "status" else "Show firmware OCPP evidence")
         parser.add_argument("--cp", "--charger", dest="charger")
@@ -93,6 +100,20 @@ def firmware_events(args):
     return output[-args.limit:]
 
 def run_firmware(args):
+    if args.firmware_action == "check":
+        if not 0 < args.timeout <= 120:
+            raise ValueError("--timeout must be greater than zero and at most 120 seconds")
+        report = asyncio.run(preflight(args.data_dir, args.charger, location=args.location,
+                                       query_capability=not args.offline, timeout=args.timeout))
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False))
+        else:
+            print(f"Firmware preflight: {report['cp']} — {report['assessment']}")
+            for item in report["findings"]:
+                print(f"  {item['state'].upper():7} {item['check']}: {item['detail']}"
+                      + (f" (observed {item['at']})" if item["at"] else ""))
+            print("Firmware compatibility unverified. No update request sent.")
+        return 2 if report["assessment"] == "Blocked" else 1 if report["assessment"] == "Warnings" else 0
     if args.firmware_action != "update":
         items = firmware_events(args)
         if args.json:
