@@ -22,6 +22,7 @@ def add_firmware_command(subcommands):
     timing = update.add_mutually_exclusive_group(required=True)
     timing.add_argument("--now", action="store_true", help="Explicitly request immediate retrieval")
     timing.add_argument("--at", help="Scheduled retrieval time, ISO-8601 with timezone")
+    timing.add_argument("--after", type=int, metavar="SECONDS", help="Schedule retrieval SECONDS from now (must be positive)")
     update.add_argument("--retries", type=int)
     update.add_argument("--retry-interval", type=int)
     update.add_argument("--confirm", action="store_true", help="Acknowledge potential service disruption")
@@ -57,6 +58,11 @@ def firmware_request(args, *, now=None):
     current = now or datetime.now(timezone.utc)
     if args.now:
         date = current
+    elif args.after is not None:
+        if args.after <= 0:
+            raise ValueError("--after must be greater than zero")
+        from datetime import timedelta
+        date = current + timedelta(seconds=args.after)
     else:
         date = datetime.fromisoformat(args.at.replace("Z", "+00:00"))
         if date.tzinfo is None:

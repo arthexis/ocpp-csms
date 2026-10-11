@@ -893,3 +893,15 @@ ocpp-csms firmware check --cp CP001 --offline --json
 ```
 
 `firmware check` reads connection and transaction evidence, reconciliation conflicts, recorded BootNotification firmware version, and prior FirmwareStatusNotification status. For a connected charger (unless `--offline`), it requests only `SupportedFeatureProfiles` through GetConfiguration with a bounded timeout. The optional URL receives syntax validation only; the CSMS does not download the image or assert that the charger can reach the URL. Report statuses distinguish OK, warning, unknown and error. Exit codes: 0 for no known blockers, 1 for warnings, 2 for a blocked preflight. This operation does not establish firmware compatibility and never sends UpdateFirmware.
+
+### Firmware retrieval timing
+
+Firmware updates require `--confirm` and exactly one explicit timing option:
+
+```bash
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --now --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --after 3600 --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T18:00:00Z --confirm
+```
+
+Unlike start/stop, firmware delivery uses the OCPP `retrieveDate` parameter: `--after` and `--at` send the request now **with a future retrieval date**, not a CSMS-side queued command. OCPP does not guarantee when installation starts or finishes. Omission of timing is an error; the charger only receives an immediate retrieval date with explicit `--now`. `--within` is intentionally unavailable because it would require a separate CSMS queue that waits for an idle charger.
