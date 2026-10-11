@@ -2,6 +2,8 @@
 from __future__ import annotations
 import json
 import sqlite3
+
+import pytest
 from types import SimpleNamespace
 
 from ocpp_csms.cli.event_follow import _cursor, _new_events, _emit
@@ -27,41 +29,50 @@ def _write(db, *, kind, when, charger="CP1", action="Heartbeat", tx=None):
                 (when, charger, action, "{}"))
 
 
-def test_follow_tracks_both_tables_and_does_not_replay(tmp_path):
+@pytest.fixture
+def event_feed(tmp_path):
+    """Isolated persisted event cursor and writer for incremental follow tests."""
     db = _prepare(tmp_path)
+    def write(**kwargs):
+        _write(db, **kwargs)
+    return tmp_path, write
+
+
+def test_follow_tracks_both_tables_and_does_not_replay(event_feed):
+    tmp_path, write = event_feed
     before = _cursor(tmp_path)
-    _write(db, kind="ocpp", when="2026-10-10T22:00:00Z")
-    _write(db, kind="runtime", when="2026-10-10T22:00:00Z", action="charger_connected")
+    write(kind="ocpp", when="2026-10-10T22:00:00Z")
+    write(kind="runtime", when="2026-10-10T22:00:00Z", action="charger_connected")
     first = _new_events(tmp_path, before)
     assert len(first) == 2
     assert {row["kind"] for row in first} == {"ocpp", "runtime"}
     assert _new_events(tmp_path, before) == []
-    _write(db, kind="ocpp", when="2026-10-10T22:00:01Z")
+    write(kind="ocpp", when="2026-10-10T22:00:01Z")
     assert len(_new_events(tmp_path, before)) == 1
 
 
-def test_filtered_events_still_advance_cursor(tmp_path):
-    db = _prepare(tmp_path)
+def test_filtered_events_still_advance_cursor(event_feed):
+    tmp_path, write = event_feed
     cursor = _cursor(tmp_path)
-    _write(db, kind="ocpp", when="2026-10-10T22:00:00Z", charger="CP2")
+    write(kind="ocpp", when="2026-10-10T22:00:00Z", charger="CP2")
     assert _new_events(tmp_path, cursor, charger_id="CP1") == []
-    _write(db, kind="ocpp", when="2026-10-10T22:00:01Z", charger="CP1")
+    write(kind="ocpp", when="2026-10-10T22:00:01Z", charger="CP1")
     assert len(_new_events(tmp_path, cursor, charger_id="CP1")) == 1
 
 
-def test_batch_cursor_does_not_skip_ids_with_out_of_order_times(tmp_path):
-    db = _prepare(tmp_path)
+def test_batch_cursor_does_not_skip_ids_with_out_of_order_times(event_feed):
+    tmp_path, write = event_feed
     cursor = _cursor(tmp_path)
-    _write(db, kind="ocpp", when="2026-10-10T22:00:09Z")
-    _write(db, kind="ocpp", when="2026-10-10T22:00:00Z")
+    write(kind="ocpp", when="2026-10-10T22:00:09Z")
+    write(kind="ocpp", when="2026-10-10T22:00:00Z")
     assert len(_new_events(tmp_path, cursor, batch_size=1)) == 1
     assert len(_new_events(tmp_path, cursor, batch_size=1)) == 1
 
 
-def test_follow_jsonl_prints_one_event_per_line(tmp_path, capsys):
-    db = _prepare(tmp_path)
+def test_follow_jsonl_prints_one_event_per_line(event_feed, capsys):
+    tmp_path, write = event_feed
     cursor = _cursor(tmp_path)
-    _write(db, kind="ocpp", when="2026-10-10T22:00:00Z")
+    write(kind="ocpp", when="2026-10-10T22:00:00Z")
     rows = _new_events(tmp_path, cursor)
     args = SimpleNamespace(json=True, raw=False, verbose=False)
     _emit(args, rows)

@@ -8,21 +8,23 @@ from ocpp_csms.control.dispatch import dispatch_control
 
 NOW = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
 
-def test_immediate_request(parse_cli):
-    data = firmware_request(parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                                  "--now", "--confirm"), now=NOW)
-    assert data["immediate"] is True
-    assert data["retrieve_date"] == NOW.isoformat()
+@pytest.mark.parametrize("timing,expected_date,immediate", [
+    (("--now",), NOW, True),
+    (("--at", (NOW + timedelta(days=1)).isoformat()), NOW + timedelta(days=1), False),
+    (("--after", "3600"), NOW + timedelta(hours=1), False),
+])
+def test_firmware_timing_contract(parse_cli, timing, expected_date, immediate):
+    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
+                     *timing, "--confirm")
+    request = firmware_request(args, now=NOW)
+    assert request["retrieve_date"] == expected_date.isoformat()
+    assert request["immediate"] is immediate
 
-def test_scheduled_request(parse_cli):
-    future = (NOW + timedelta(days=1)).isoformat()
-    data = firmware_request(parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                                  "--at", future, "--confirm"), now=NOW)
-    assert data["retrieve_date"] == future
 
 @pytest.mark.parametrize("args", [
     ("--now",),
     ("--at", "2026-10-11T12:00:00Z"),
+    ("--after", "60"),
 ])
 def test_confirmation_required(args, parse_cli):
     with pytest.raises(ValueError, match="confirm"):
@@ -56,14 +58,6 @@ async def test_dispatch_rejects_bad_retries():
             "location": "https://example.org/fw", "retrieve_date": NOW.isoformat(),
             "retries": -1, "immediate": True})
     assert result["error"] == "invalid_retries"
-
-def test_delayed_request(parse_cli):
-    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                     "--after", "3600", "--confirm")
-    data = firmware_request(args, now=NOW)
-    assert data["retrieve_date"] == (NOW + timedelta(hours=1)).isoformat()
-    assert data["immediate"] is False
-
 
 @pytest.mark.parametrize("seconds", ("0", "-1"))
 def test_delayed_request_requires_positive_seconds(parse_cli, seconds):

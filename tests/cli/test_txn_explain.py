@@ -28,34 +28,27 @@ def _analyze(monkeypatch, view, *, overlaps=()):
     return analysis.analyze_transaction("/unused", 42)
 
 
-def test_missing_stop_is_not_assumed_terminal(monkeypatch):
-    report = _analyze(monkeypatch, _view())
-    finding = next(x for x in report["findings"] if x["code"] == "missing_stop")
-    assert finding["certainty"] == "observed"
-    assert "unknown" in finding["message"]
-
-
-def test_recovery_is_explicitly_inferred(monkeypatch):
-    report = _analyze(monkeypatch, _view(state="inferred_stopped"))
-    assert next(x for x in report["findings"] if x["code"] == "inferred_stop")["certainty"] == "inferred"
-
-
-def test_completed_transaction_has_stop_evidence(monkeypatch):
-    report = _analyze(monkeypatch, _view(stop=True))
-    assert report["stop_recorded"]
-    assert any(x["code"] == "stop_recorded" for x in report["findings"])
+@pytest.mark.parametrize("options,expected_code,certainty", [
+    ({}, "missing_stop", "observed"),
+    ({"state": "inferred_stopped"}, "inferred_stop", "inferred"),
+    ({"stop": True}, "stop_recorded", "observed"),
+    ({"stop": True, "first": 500, "last": 200}, "meter_decrease", "observed"),
+])
+def test_transaction_evidence_findings(monkeypatch, options, expected_code, certainty):
+    report = _analyze(monkeypatch, _view(**options))
+    finding = next(x for x in report["findings"] if x["code"] == expected_code)
+    assert finding["certainty"] == certainty
+    if expected_code == "missing_stop":
+        assert "unknown" in finding["message"]
+    if expected_code == "meter_decrease":
+        assert "reset" in finding["message"]
+    if expected_code == "stop_recorded":
+        assert report["stop_recorded"]
 
 
 def test_overlapping_open_transactions(monkeypatch):
     report = _analyze(monkeypatch, _view(), overlaps=[43])
     assert any(x["code"] == "overlapping_open_transactions" for x in report["findings"])
-
-
-def test_decreasing_meter_is_warned_not_explained_as_cause(monkeypatch):
-    report = _analyze(monkeypatch, _view(stop=True, first=500, last=200))
-    finding = next(x for x in report["findings"] if x["code"] == "meter_decrease")
-    assert finding["certainty"] == "observed"
-    assert "reset" in finding["message"]
 
 
 def test_explain_parser_and_context():

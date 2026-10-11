@@ -27,31 +27,38 @@ def test_diff_reports_additions_and_removals():
     assert [(item["key"], item["change"]) for item in changes] == [("NewKey", "added"), ("OldKey", "removed")]
 
 
-def test_two_file_diff_never_contacts_charger(monkeypatch, tmp_path, capsys):
+@pytest.fixture
+def config_diff_harness(monkeypatch, tmp_path):
+    """A single capture point for read-only and live configuration comparisons."""
     import ocpp_csms.cli.config_diff as module
-    send = AsyncMock(side_effect=AssertionError("two-file diff queried charger"))
+    send = AsyncMock(side_effect=AssertionError("unexpected charger contact"))
     monkeypatch.setattr(module, "send_control", send)
-    paths = [tmp_path / "a.json", tmp_path / "b.json"]
-    for path, value in zip(paths, ("30", "60")):
+    def write(name, value):
+        path = tmp_path / name
         path.write_text(json.dumps(snapshot(value)), encoding="utf-8")
-    args = SimpleNamespace(items=["diff", *(str(p) for p in paths)], charger=None,
-                           data_dir=str(tmp_path), force=False, json=True)
+        return str(path)
+    def arguments(*paths, charger=None, json_output=True):
+        return SimpleNamespace(items=["diff", *paths], charger=charger,
+                               data_dir=str(tmp_path), force=False, json=json_output)
+    return send, write, arguments
+
+
+def test_two_file_diff_never_contacts_charger(config_diff_harness, capsys):
+    send, write, arguments = config_diff_harness
+    args = arguments(write("a.json", "30"), write("b.json", "60"))
     assert run_config_diff(args) == 1
     assert json.loads(capsys.readouterr().out)["mode"] == "files"
     send.assert_not_awaited()
 
 
-def test_single_file_queries_charger(monkeypatch, tmp_path, capsys):
-    import ocpp_csms.cli.config_diff as module
-    send = AsyncMock(return_value={"response": {"configuration_key": [
+def test_single_file_queries_charger(config_diff_harness, capsys, tmp_path):
+    send, write, arguments = config_diff_harness
+    send.side_effect = None
+    send.return_value = {"response": {"configuration_key": [
         {"key": "HeartbeatInterval", "readonly": False, "value": "60"},
         {"key": "BackendPassword", "readonly": False, "value": "secretB"},
-    ]}})
-    monkeypatch.setattr(module, "send_control", send)
-    path = tmp_path / "baseline.json"
-    path.write_text(json.dumps(snapshot("30")), encoding="utf-8")
-    args = SimpleNamespace(items=["diff", str(path)], charger=None,
-                           data_dir=str(tmp_path), force=False, json=True)
+    ]}}
+    args = arguments(write("baseline.json", "30"))
     assert run_config_diff(args) == 1
     send.assert_awaited_once_with(str(tmp_path), {"command": "config", "charger": "CP1", "force": False})
     output = capsys.readouterr().out
