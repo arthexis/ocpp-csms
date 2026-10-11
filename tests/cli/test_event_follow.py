@@ -15,7 +15,7 @@ def _prepare(tmp_path):
     return tmp_path / DATABASE_FILENAME
 
 
-def write(*, kind, when, charger="CP1", action="Heartbeat", tx=None):
+def _write(db, *, kind, when, charger="CP1", action="Heartbeat", tx=None):
     with sqlite3.connect(db) as con:
         if kind == "ocpp":
             con.execute("""INSERT INTO events
