@@ -861,3 +861,14 @@ ocpp-csms config diff baseline.json --json
 ```
 
 Two files are compared entirely offline. With one file, the command runs a fresh OCPP GetConfiguration query against `--cp`, or the charge point recorded in the snapshot, and compares the live response. Added, removed and changed keys are reported, including read-only flag differences. Passwords and other sensitive keys are masked in comparisons regardless of how the input snapshots were captured. Exit status: 0 for identical, 1 for differences; invalid inputs or live query errors are reported as errors. No charger configuration is modified.
+
+### Explain a transaction
+
+```bash
+ocpp-csms txn explain 42
+ocpp-csms txn explain 42 --json
+ocpp-csms txn explain 42 --verbose
+ocpp-csms txn explain 42 --context 5
+```
+
+`txn explain` analyzes archived StartTransaction/StopTransaction evidence, recovery state, overlapping open transactions, meter start/stop anomalies and transaction-related events. `--context MINUTES` adds nearby same-charger events, labeled contextual rather than conclusively associated. Findings distinguish observations from inferences. No active charger interrogation, new tables or automatic recovery are involved.
