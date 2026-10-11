@@ -51,9 +51,14 @@ def analyze_transaction(data_dir, transaction_id, *, context_minutes=0):
                    for row in events_between(data_dir, charger_id=view.charge_point_id,
                                              since=start, until=end, limit=None)
                    if row["kind"] == "runtime" or row["transaction_id"] != transaction_id]
+    def timestamp(payload):
+        return payload.get("timestamp") if isinstance(payload, dict) and isinstance(payload.get("timestamp"), str) else None
+    last_event_at = max((row["occurred_at"] for row in rows if row["occurred_at"]), default=None)
     return {"transaction_id": transaction_id, "cp": view.charge_point_id,
             "connector": view.connector_id, "rfid": view.id_tag, "state": view.status,
             "start_recorded": started, "stop_recorded": stopped,
+            "start_at": timestamp(record.get("start")), "stop_at": timestamp(record.get("stop")),
+            "last_event_at": last_event_at,
             "meter_batches": meter_count,
             "events": [{"id": row["id"], "at": row["occurred_at"], "action": row["action"], "direction": row["direction"]}
                        for row in rows],
