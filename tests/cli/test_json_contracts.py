@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import ocpp_csms.cli.config as config_cli
 import ocpp_csms.cli.profile as profile_cli
 from ocpp_csms.cli import build_parser
@@ -30,6 +32,18 @@ def test_events_transaction_alias_and_raw_mode_are_registered():
     assert args.transaction == 42
     assert args.raw is True
     assert args.json is True
+
+
+@pytest.mark.parametrize("argv,field,expected", [
+    (("events", "--follow", "--json"), "follow", True),
+    (("events", "-f", "-j"), "follow", True),
+    (("reservation", "list", "--cp", "CP1", "--all", "-j"), "reservation_action", "list"),
+    (("firmware", "check", "--cp", "CP1", "--offline", "-j"), "firmware_action", "check"),
+    (("firmware", "update", "--location", "https://example.org/fw.bin", "--after", "60", "--confirm"), "after", 60),
+])
+def test_recent_cli_parser_contracts(parse_cli, argv, field, expected):
+    args = parse_cli(*argv)
+    assert getattr(args, field) == expected
 
 
 def test_shared_json_emitter_is_deterministic(capsys):
