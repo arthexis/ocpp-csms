@@ -15,7 +15,10 @@ def run_txn_explain(args):
         return 0
     print(f"Transaction {result['transaction_id']} — {result['state']}")
     print(f"CP: {result['cp']}  C: {result['connector']}  RFID: {result['rfid'] or '-'}")
-    print(f"Start: {'recorded' if result['start_recorded'] else 'missing'}; Stop: {'recorded' if result['stop_recorded'] else 'missing'}; Meter batches: {result['meter_batches']}")
+    print(f"Start: {result['start_at'] or ('time unknown' if result['start_recorded'] else 'not recorded')}")
+    print(f"Stop:  {result['stop_at'] or ('time unknown' if result['stop_recorded'] else 'not recorded')}")
+    print(f"Latest linked event: {result['last_event_at'] or 'not recorded'}")
+    print(f"Meter batches: {result['meter_batches']}")
     for finding in result["findings"]:
         print(f"{finding['severity'].upper()} [{finding['certainty']}] {finding['message']}")
     if args.verbose:
