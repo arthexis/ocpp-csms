@@ -56,3 +56,35 @@ async def test_dispatch_rejects_bad_retries():
             "location": "https://example.org/fw", "retrieve_date": NOW.isoformat(),
             "retries": -1, "immediate": True})
     assert result["error"] == "invalid_retries"
+
+def test_delayed_request(parse_cli):
+    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
+                     "--after", "3600", "--confirm")
+    data = firmware_request(args, now=NOW)
+    assert data["retrieve_date"] == (NOW + timedelta(hours=1)).isoformat()
+    assert data["immediate"] is False
+
+
+@pytest.mark.parametrize("seconds", ("0", "-1"))
+def test_delayed_request_requires_positive_seconds(parse_cli, seconds):
+    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
+                     "--after", seconds, "--confirm")
+    with pytest.raises(ValueError, match="--after"):
+        firmware_request(args, now=NOW)
+
+
+def test_firmware_update_requires_explicit_timing(parse_cli):
+    with pytest.raises(SystemExit):
+        parse_cli("firmware", "update", "--location", "https://example.org/fw.bin", "--confirm")
+
+
+def test_firmware_update_rejects_multiple_timing_flags(parse_cli):
+    with pytest.raises(SystemExit):
+        parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
+                  "--now", "--after", "3600", "--confirm")
+
+
+def test_delayed_request_also_requires_confirmation(parse_cli):
+    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin", "--after", "60")
+    with pytest.raises(ValueError, match="confirm"):
+        firmware_request(args, now=NOW)
