@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from ocpp_csms.cli.transactions import resolve_time
 from ocpp_csms.control import send_control
+from ocpp_csms.reservations import list_reservations
 
 def _create_args(parser):
     parser.add_argument("--cp", "--charger", dest="charger")
@@ -28,6 +29,11 @@ def add_reservation_commands(subcommands):
     sub = reservation.add_subparsers(dest="reservation_action", required=True)
     _create_args(sub.add_parser("create", help="Alias for reserve"))
     _cancel_args(sub.add_parser("cancel", help="Cancel a charger reservation"))
+    listing = sub.add_parser("list", help="List recorded reservation requests and outcomes")
+    listing.add_argument("--cp", "--charger", dest="charger")
+    listing.add_argument("--all", action="store_true", help="Include expired, used, canceled and rejected reservations")
+    listing.add_argument("--since", help="Show requests since timestamp (ISO-8601 or relative, e.g. 7d)")
+    listing.add_argument("-j", "--json", action="store_true")
     return {"reserve": reserve, "reservation": reservation}
 
 def reservation_request(args):
@@ -57,6 +63,21 @@ def reservation_request(args):
     return result
 
 def run_reservation(args):
+    if getattr(args, "reservation_action", None) == "list":
+        since = resolve_time(args.since).isoformat() if args.since else None
+        rows = list_reservations(args.data_dir, charger=args.charger,
+                                 include_all=args.all, since=since)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False))
+        elif not rows:
+            print("No matching reservation evidence.")
+        else:
+            print("ID  CP  C  RFID  REQUESTED  EXPIRES  STATUS")
+            for row in rows:
+                print(f"{row['id']}  {row['cp']}  {row['connector']}  {row['rfid'] or '-'}  "
+                      f"{row['requested']}  {row['expires'] or '-'}  {row['status']}")
+            print("Historical OCPP evidence only; Accepted does not establish current charger state.")
+        return 0
     try:
         result = asyncio.run(send_control(args.data_dir, reservation_request(args)))
     except (OSError, ValueError, ConnectionError) as exc:

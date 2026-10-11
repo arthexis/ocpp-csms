@@ -872,3 +872,14 @@ ocpp-csms txn explain 42 --context 5
 ```
 
 `txn explain` analyzes archived StartTransaction/StopTransaction evidence, recovery state, overlapping open transactions, meter start/stop anomalies and transaction-related events. `--context MINUTES` adds nearby same-charger events, labeled contextual rather than conclusively associated. Findings distinguish observations from inferences. No active charger interrogation, new tables or automatic recovery are involved.
+
+### List reservation evidence
+
+```bash
+ocpp-csms reservation list
+ocpp-csms reservation list --cp CP001
+ocpp-csms reservation list --all --since 7d
+ocpp-csms reservation list --json
+```
+
+This read-only command reconstructs locally observed `ReserveNow`, `CancelReservation` and reservation-associated `StartTransaction` evidence. `Requested` means the CSMS sent the request without an unambiguously attributable response; `Accepted` is the charger's recorded response and **does not mean currently active**. `--all` includes rejected, canceled, used and expired requests. Each row displays the reservation ID and charge point required by `reservation cancel ID --cp CP`. The event archive lacks message-level request/response correlation for these commands, so concurrent ambiguous responses are not attributed by guesswork. No charger queries or new storage are required.
