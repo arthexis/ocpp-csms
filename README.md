@@ -883,3 +883,13 @@ ocpp-csms reservation list --json
 ```
 
 This read-only command reconstructs locally observed `ReserveNow`, `CancelReservation` and reservation-associated `StartTransaction` evidence. `Requested` means the CSMS sent the request without an unambiguously attributable response; `Accepted` is the charger's recorded response and **does not mean currently active**. `--all` includes rejected, canceled, used and expired requests. Each row displays the reservation ID and charge point required by `reservation cancel ID --cp CP`. The event archive lacks message-level request/response correlation for these commands, so concurrent ambiguous responses are not attributed by guesswork. No charger queries or new storage are required.
+
+### Firmware preflight
+
+```bash
+ocpp-csms firmware check --cp CP001
+ocpp-csms firmware check --cp CP001 --location https://example.org/firmware.bin
+ocpp-csms firmware check --cp CP001 --offline --json
+```
+
+`firmware check` reads connection and transaction evidence, reconciliation conflicts, recorded BootNotification firmware version, and prior FirmwareStatusNotification status. For a connected charger (unless `--offline`), it requests only `SupportedFeatureProfiles` through GetConfiguration with a bounded timeout. The optional URL receives syntax validation only; the CSMS does not download the image or assert that the charger can reach the URL. Report statuses distinguish OK, warning, unknown and error. Exit codes: 0 for no known blockers, 1 for warnings, 2 for a blocked preflight. This operation does not establish firmware compatibility and never sends UpdateFirmware.
