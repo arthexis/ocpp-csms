@@ -17,7 +17,7 @@ def add_config_command(
     """Register the configuration command while preserving its existing syntax."""
     config = subcommands.add_parser("config", help="Read or change charger configuration")
     config.add_argument("--cp", "--charger", dest="charger", help="Explicit charge point ID when more than one charger is connected")
-    config.add_argument("items", nargs="*", metavar="KEY", help="Keys to read, or: set KEY VALUE")
+    config.add_argument("items", nargs="*", metavar="KEY", help="Keys to read, set KEY VALUE, download, or diff FILE [FILE]")
     config.add_argument("-f", "--force", action="store_true", help="Operate even with an active transaction")
     add_config_download_arguments(config)
     return config
@@ -28,6 +28,10 @@ def add_config_download_arguments(config: argparse.ArgumentParser) -> None:
     config.add_argument("--show-sensitive", action="store_true", help="Do not mask sensitive configuration values")
     config.add_argument("-j", "--json", action="store_true", help="Print a downloaded snapshot as JSON")
     config.add_argument("--output", help="Write a downloaded JSON snapshot to this file")
+
+
+def is_config_diff(args: argparse.Namespace) -> bool:
+    return bool(args.items) and args.items[0] == 'diff'
 
 
 def is_config_download(args: argparse.Namespace) -> bool:

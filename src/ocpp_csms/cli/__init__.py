@@ -4,7 +4,8 @@ import argparse
 import sys
 from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, run_appliance
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
-from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, run_config_download, run_configuration
+from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, is_config_diff, run_config_download, run_configuration
+from ocpp_csms.cli.config_diff import run_config_diff
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
 from ocpp_csms.cli.data_transfer import add_data_transfer_command, run_data_transfer
@@ -100,7 +101,7 @@ def main() -> int:
         if args.command == "data-transfer": return run_data_transfer(args)
         if args.command == "firmware": return run_firmware(args)
         if args.command == "diagnostics": return run_diagnostics(args)
-        if args.command == "config": return run_config_download(args) if is_config_download(args) else run_configuration(args)
+        if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
         if args.command == "mail": return run_mail(args)
         if args.command == "report": return run_report(args)
