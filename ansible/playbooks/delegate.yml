@@ -23,7 +23,9 @@
         - ocpp_forwarder_enabled | default(false) | bool
         - not (ocpp_csms_stage_only | default(false) | bool)
     - role: ocpp_expose
-      when: ocpp_csms_expose | default('') | length > 0
+      when:
+        - ocpp_csms_expose | default('') | length > 0
+        - not (ocpp_csms_stage_only | default(false) | bool)
 
   post_tasks:
     - name: Disable Forwarder when not part of selected deployment profile
