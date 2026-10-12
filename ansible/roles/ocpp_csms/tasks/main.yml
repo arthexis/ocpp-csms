@@ -5,13 +5,13 @@
       - ansible_user_id != 'root'
       - ansible_user_uid | int != 0
       - ansible_facts.os_family == 'Debian'
-      - ansible_facts.architecture in ['aarch64', 'arm64']
+      - ansible_facts.architecture in ['aarch64', 'arm64', 'x86_64', 'amd64']
       - ocpp_csms_host | length > 0
       - ocpp_csms_port | int >= 1
       - ocpp_csms_port | int <= 65535
     fail_msg: >-
       OCPP CSMS installation must run as a non-root deployment user on a
-      Debian-family ARM64 host with a valid listener host/port configuration.
+      Debian-family ARM64 or x86_64 host with a valid listener host/port configuration.
       Use Ansible become for privileged host changes instead of running the
       playbook itself as root.
 

@@ -16,6 +16,140 @@ The CSMS is permissive by default:
 
 The design principle is: **observe aggressively; block reluctantly.**
 
+## Standalone public CSMS (cloud)
+
+Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
+`satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
+no Forwarder, and no traffic interception. It supports Debian-family ARM64
+and x86_64 machines, including Ubuntu 24.04.
+
+### Expose one hostname through nginx (Lightsail)
+
+Use `--expose` for an isolated hostname such as
+`porsche-abb.gelectriic.com`; the nginx file and enabled site symlink
+are named **exactly** `porsche-abb.gelectriic.com`. This deployment uses
+nginx TLS termination on public 443 and a **loopback-only** CSMS WS backend
+on 127.0.0.1:9000, with the Authorization header passed through.
+The explicit trusted-loopback setting allows the backend to verify Basic
+credentials after nginx terminates TLS; it cannot be enabled on a publicly
+bound WS listener. Do not expose port 9000 externally.
+
+Bootstrap in this order:
+
+1. Provision Ubuntu 24.04 Lightsail with a static IPv4 address; point DNS A
+   for the desired hostname at that address.
+2. Configure Lightsail networking and UFW: allow inbound **TCP 443** from
+   ABB's egress addresses (or 0.0.0.0/0 if those are not known), inbound
+   **TCP 80** temporarily for ACME HTTP-01 issuance/renewal as needed,
+   and inbound **TCP 22** only from an operator-approved IP range.
+   **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
+   Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
+   traffic as required; do not assume ABB uses a fixed source IP.
+3. Bootstrap the CSMS CLI safely with `./deploy.sh --cloud`; this runs the
+   cloud playbook with the CSMS listener bound only to `127.0.0.1` and does
+   not install nginx or expose an anonymous public OCPP service.
+4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
+   the service and verify `ocpp-csms auth status` reports `basic`.
+5. Run `./deploy.sh --expose porsche-abb.gelectriic.com --email admin@gelectriic.com`
+   as a non-root operator with sudo/become rights. This installs nginx and
+   Certbot, creates a temporary port-80 HTTP-01 challenge site without a
+   plaintext OCPP proxy, issues the certificate for the exact hostname,
+   and enables the final port-443 WSS nginx site. The certificate is reused
+   on subsequent deploys. Replace the sample email with an inbox you manage.
+6. Verify `certbot.timer` is enabled and a `certbot renew --dry-run`
+   succeeds. A deploy renewal hook reloads nginx after certificate updates.
+   With externally managed Let's Encrypt-format certificate files, use
+   `--no-certbot`; the hostname certificate must already exist.
+7. Verify `sudo nginx -t`, `systemctl status nginx ocpp-csms`,
+   correct public hostname/certificate and **401 for missing/wrong Basic**
+   credentials on the WSS upgrade. Prove port 9000 is unreachable
+   from outside the instance before ABB handover.
+8. Run a full authenticated public WSS simulator charge from Gway-001
+   and verify stored evidence on Lightsail. Do not hand ABB the URL until
+   this succeeds.
+
+The `--cloud` mode bootstraps a loopback-only CSMS for credential setup;
+`--expose` adds nginx/Certbot after credentials exist. The `--expose` path
+is opt-in; plain `./deploy.sh` continues to
+deploy a satellite as before. One cloud instance is intended to host
+one client-vendor's CSMS; separate hostnames on a shared nginx process
+alone do **not** isolate databases or credentials. Use a separate
+instance/configuration for a truly independent client deployment.
+
+### HTTP Basic authentication (WSS)
+
+The default for existing local deployments is `none` (no `auth.json`).
+For a public standalone endpoint, explicitly configure Basic auth **before
+opening TCP/443**:
+
+```bash
+ocpp-csms auth basic --limit 3d    # pending first-claim enrollment
+# OR: ocpp-csms auth basic --cp ABB-001  # pre-register a known identity
+ocpp-csms auth status
+sudo systemctl restart ocpp-csms.service
+```
+
+With `--limit 3d`, the first successful WSS Basic authentication during the
+next 72 hours claims the supplied URL's final charge-point ID and permanently
+binds the stored credential to that identity. An unclaimed credential expires
+after 72 hours and is rejected; once claimed, normal authenticated reconnections
+do not expire. In pending mode the Basic username must equal the identity in the
+URL. The first-claim risk is intentional: keep the credential private until ABB
+commissions the charger. The known-ID `--cp` alternative needs no enrollment
+window.
+
+The command prompts twice for the password without exposing it on the command
+line; the persistent configuration is stored at `/etc/ocpp-csms/auth.json`
+with mode 0600 and a salted scrypt password hash. Run it as the CSMS service
+identity or a user permitted to write the persistent configuration directory.
+The password is not recoverable from the hash; repeat the command to rotate.
+Existing sessions are interrupted by restart, so schedule rotations.
+
+In Basic mode, the WSS WebSocket upgrade requires an HTTP Authorization Basic
+header. Once enrolled, the username must equal both the bound charge-point ID and the
+last URL path segment; missing or wrong credentials return 401. Plaintext WS
+returns 403 in Basic mode regardless of credentials. Bad persisted auth
+configuration causes startup failure instead of anonymous fallback.
+If the auth file is absent the original anonymous-local behavior remains;
+therefore **never expose a cloud CSMS publicly before setting Basic auth**.
+
+This is Basic authentication, **not** mutual TLS/client certificates. mTLS
+remains a separate feature tracked in the Lightsail epic. An ABB charger
+must be configured to send Basic credentials during the WebSocket handshake.
+
+### Canonical charger URL
+
+Give the charger operator the **full canonical** WSS URL:
+
+```text
+wss://<hostname>/<charge-point-id>
+```
+
+For example, if ABB identifies its charge point as `ABB-001`, the configured
+URL should be `wss://ocpp.example.com/ABB-001` (replace the example hostname
+with the actual DNS record). **Confirm whether the ABB charger appends its
+identity automatically**: if it does, enter only the documented base URL to
+avoid doubling the ID.
+
+The current CSMS takes the **last nonempty URL path segment** (before the
+query string) as its charge-point identity. Thus alternate paths can connect,
+but a different final segment creates a **different logical charger identity**.
+A wrong URL is not an alias of the canonical one. The same final segment
+on two concurrent connections represents a duplicate identity; do not treat
+this as independent chargers or rely on its session state. Use the exact
+canonical URL for every reconnection and rollback procedure.
+
+This convention is **not access control**. The CSMS currently allows unknown
+charge-point identities by default, so arbitrary paths do not establish
+authorization. Before exposing a public endpoint, establish a suitable
+identity/authentication policy and verify the actual ABB firmware requirements.
+
+The native WSS listener requires a readable certificate/key matching the DNS
+hostname. Verify certificate chain trust externally and test a full OCPP 1.6J
+session over public WSS before changing the real charger configuration.
+Binding public TCP/443 from an unprivileged process requires a deliberate
+privileged-port strategy; the default native TLS port is 9443.
+
 ## Commands
 
 Run `ocpp-csms --help` for the authoritative current surface.

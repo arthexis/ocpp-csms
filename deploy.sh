@@ -24,6 +24,10 @@ diagnose=0
 dev=0
 forwarder=0
 recover=0
+expose=""
+cloud=0
+certbot_email=""
+no_certbot=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -70,6 +74,32 @@ while [ "$#" -gt 0 ]; do
             dev=1
             shift
             ;;
+        --cloud)
+            cloud=1
+            shift
+            ;;
+        --expose)
+            [ "$#" -ge 2 ] || { printf 'Missing DNS hostname for --expose.\n' >&2; exit 2; }
+            expose=$2
+            shift 2
+            ;;
+        --expose=*)
+            expose=${1#--expose=}
+            shift
+            ;;
+        --email)
+            [ "$#" -ge 2 ] || { printf 'Missing value for --email.\n' >&2; exit 2; }
+            certbot_email=$2
+            shift 2
+            ;;
+        --email=*)
+            certbot_email=${1#--email=}
+            shift
+            ;;
+        --no-certbot)
+            no_certbot=1
+            shift
+            ;;
         --forwarder)
             forwarder=1
             shift
@@ -98,6 +128,45 @@ validate_positive_seconds() {
             ;;
     esac
 }
+
+if [ "$cloud" -eq 1 ] && [ -n "$expose" ]; then
+    printf '%s\\n' '--cloud and --expose select the same playbook; use one.' >&2
+    exit 2
+fi
+if [ "$cloud" -eq 1 ]; then
+    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    set -- -e ocpp_csms_host=127.0.0.1 "$@"
+fi
+
+if [ -n "$expose" ]; then
+    case "$expose" in
+        *[!a-z0-9.-]*|.*|*..*|"")
+            printf 'Invalid public DNS hostname for --expose: %s\n' "$expose" >&2
+            exit 2
+            ;;
+    esac
+    case "$expose" in
+        *.*) ;;
+        *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
+    esac
+    if [ "$diagnose" -eq 1 ] || [ "$forwarder" -eq 1 ] || [ "$recover" -eq 1 ]; then
+        printf '%s\n' '--expose cannot be combined with --diagnose, --forwarder or --recover.' >&2
+        exit 2
+    fi
+    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    if [ -n "$certbot_email" ]; then
+        set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
+    fi
+    if [ "$no_certbot" -eq 1 ]; then
+        set -- -e ocpp_csms_no_certbot=true "$@"
+    fi
+    set -- -e "ocpp_csms_expose=$expose" -e ocpp_csms_host=127.0.0.1 "$@"
+fi
+
+if [ -z "$expose" ] && { [ -n "$certbot_email" ] || [ "$no_certbot" -eq 1 ]; }; then
+    printf '%s\n' '--email and --no-certbot require --expose.' >&2
+    exit 2
+fi
 
 if [ -n "$observe_seconds" ]; then
     validate_positive_seconds --observe "$observe_seconds"

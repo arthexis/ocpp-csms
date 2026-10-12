@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,7 @@ from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.archive import TransactionArchive
 from ocpp_csms.tls_listener import TLSListener
+from ocpp_csms.auth import load_auth, basic_upgrade_check, auth_path
 
 LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
@@ -119,6 +121,14 @@ class CSMSServer:
     async def serve_forever(self) -> None:
         write_pid(self.events.data_dir)
         self._record_runtime("server_started")
+        # Invalid auth configuration must fail startup, not open an anonymous listener.
+        auth = load_auth()
+        # Trust nginx TLS termination only on the local loopback listener.
+        proxy_tls = os.environ.get("OCPP_CSMS_TRUST_LOOPBACK_TLS_PROXY") == "1"
+        if proxy_tls and self.host not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError("trusted TLS proxy requires loopback-only CSMS bind")
+        if proxy_tls and auth["mode"] != "basic":
+            raise ValueError("trusted TLS proxy requires Basic authentication")
         socket_path = control_socket_path(self.events.data_dir)
         try:
             async with ControlServer(self, socket_path):
@@ -127,6 +137,7 @@ class CSMSServer:
                     self.host,
                     self.port,
                     subprotocols=[OCPP_16_SUBPROTOCOL],
+                    process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=proxy_tls, config_path=auth_path() if proxy_tls else None),
                 ):
                     # TLS startup is independent of the already-bound WS listener.
                     # A bad certificate or occupied WSS port must not stop WS.
@@ -138,6 +149,7 @@ class CSMSServer:
                             host=self.host,
                             ws_port=self.port,
                             subprotocol=OCPP_16_SUBPROTOCOL,
+                            process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=True, config_path=auth_path()),
                         )
                         LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)

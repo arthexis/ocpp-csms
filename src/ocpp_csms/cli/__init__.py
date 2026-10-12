@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import sys
+from ocpp_csms.cli.auth import add_auth_command, run_auth
 from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, run_appliance
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
 from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, is_config_diff, run_config_download, run_configuration
@@ -51,6 +52,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["export"] = add_export_command(subcommands)
     commands["rfid"] = add_rfid_command(subcommands)
     commands["tls"] = add_tls_command(subcommands)
+    commands["auth"] = add_auth_command(subcommands)
     commands["mail"] = add_mail_command(subcommands)
     commands["report"] = add_report_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
@@ -113,6 +115,7 @@ def main() -> int:
         if args.command == "diagnostics": return run_diagnostics(args)
         if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
+        if args.command == "auth": return run_auth(args)
         if args.command == "mail": return run_mail(args)
         if args.command == "report": return run_report(args)
         if args.command == "recover": return run_recovery(args)

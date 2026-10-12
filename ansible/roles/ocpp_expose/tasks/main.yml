@@ -1,0 +1,237 @@
+---
+- name: Validate hostname and loopback-only WSS proxy deployment
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_expose is match('^[a-z0-9]+([.-][a-z0-9]+)*$')
+      - "'.' in ocpp_csms_expose"
+      - ocpp_csms_host == '127.0.0.1'
+      - ocpp_csms_port | int > 0
+    fail_msg: Expose requires valid FQDN and 127.0.0.1 CSMS backend.
+
+- name: Verify Basic credentials are configured
+  ansible.builtin.command:
+    argv: ["{{ ocpp_csms_runtime_command }}", auth, status]
+  register: ocpp_expose_auth
+  changed_when: false
+
+- name: Reject anonymous public CSMS
+  ansible.builtin.assert:
+    that:
+      - (ocpp_expose_auth.stdout | from_json).mode == 'basic'
+    fail_msg: Configure auth first with ocpp-csms auth basic --limit 3d.
+
+- name: Install nginx and Certbot
+  become: true
+  ansible.builtin.apt:
+    name: [nginx, certbot]
+    state: present
+    update_cache: true
+
+- name: Create restricted ACME challenge webroot
+  become: true
+  ansible.builtin.file:
+    path: /var/www/ocpp-csms-acme
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check existing fullchain certificate
+  become: true
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+  register: ocpp_expose_existing_cert
+
+- name: Require contact email for first certificate issue
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_certbot_email | default('') is match('^[^ @]+@[^ @]+\\.[^ @]+$')
+    fail_msg: First issuance requires --email valid@example.com (existing certs do not).
+  when:
+    - not (ocpp_expose_existing_cert.stat.exists | default(false))
+    - not (ocpp_csms_no_certbot | default(false) | bool)
+
+- name: Install HTTP-only ACME bootstrap nginx site
+  become: true
+  ansible.builtin.template:
+    src: ocpp-csms-acme.conf.j2
+    dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+    mode: "0644"
+  when: not (ocpp_expose_existing_cert.stat.exists | default(false))
+
+- name: Enable ACME bootstrap site
+  become: true
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+    dest: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+    state: link
+  when: not (ocpp_expose_existing_cert.stat.exists | default(false))
+
+- name: Validate bootstrap nginx
+  become: true
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Start nginx for HTTP-01 challenge
+  become: true
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: restarted
+    enabled: true
+  when: not (ocpp_expose_existing_cert.stat.exists | default(false))
+
+- name: Issue a certificate for the exact hostname using webroot
+  become: true
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - --webroot-path
+      - /var/www/ocpp-csms-acme
+      - --cert-name
+      - "{{ ocpp_csms_expose }}"
+      - -d
+      - "{{ ocpp_csms_expose }}"
+      - --email
+      - "{{ ocpp_csms_certbot_email }}"
+      - --agree-tos
+      - --non-interactive
+      - --keep-until-expiring
+  when:
+    - not (ocpp_expose_existing_cert.stat.exists | default(false))
+    - not (ocpp_csms_no_certbot | default(false) | bool)
+  no_log: false
+
+- name: Verify certificate files after issuance or external provisioning
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+    - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/privkey.pem"
+  register: ocpp_expose_cert_files
+
+- name: Stop safely when TLS certificate is unavailable
+  ansible.builtin.assert:
+    that:
+      - ocpp_expose_cert_files.results | map(attribute='stat.exists') | min
+    fail_msg: Valid hostname certificate required; public HTTPS/WSS site not installed.
+
+- name: Validate hostname and expiry of installed certificate
+  become: true
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+      - -noout
+      - -checkend
+      - "86400"
+  changed_when: false
+
+- name: Verify certificate matches the exact public DNS hostname
+  become: true
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+      - -noout
+      - -checkhost
+      - "{{ ocpp_csms_expose }}"
+  register: ocpp_expose_hostname_check
+  changed_when: false
+  failed_when: "'does match certificate' not in ocpp_expose_hostname_check.stdout"
+
+- name: Check previous nginx site for rollback
+  become: true
+  ansible.builtin.stat:
+    path: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+  register: ocpp_expose_previous_site
+
+- name: Snapshot existing nginx site before promotion
+  become: true
+  ansible.builtin.copy:
+    src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+    dest: "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
+    remote_src: true
+    mode: "0644"
+  when: ocpp_expose_previous_site.stat.exists | default(false)
+
+- name: Promote validated public WSS site with rollback
+  block:
+    - name: Render hostname-isolated WSS nginx site
+      become: true
+      ansible.builtin.template:
+        src: ocpp-csms-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        mode: "0644"
+
+    - name: Enable hostname-isolated WSS site
+      become: true
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        dest: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+        state: link
+
+    - name: Validate complete nginx configuration before reload
+      become: true
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Activate TLS-terminating nginx
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+        enabled: true
+  rescue:
+    - name: Restore previous nginx site
+      become: true
+      ansible.builtin.copy:
+        src: "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
+        dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        remote_src: true
+        mode: "0644"
+      when: ocpp_expose_previous_site.stat.exists | default(false)
+
+    - name: Disable unvalidated site when there was no predecessor
+      become: true
+      ansible.builtin.file:
+        path: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+        state: absent
+      when: not (ocpp_expose_previous_site.stat.exists | default(false))
+
+    - name: Check restored nginx configuration
+      become: true
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload restored nginx configuration
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+
+    - name: Stop after failed public WSS promotion
+      ansible.builtin.fail:
+        msg: WSS promotion failed; previous nginx site restored where available.
+
+- name: Configure certificate renewal nginx reload hook
+  become: true
+  ansible.builtin.template:
+    src: ocpp-csms-renew-hook.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/ocpp-csms-nginx.sh
+    mode: "0755"
+  when: not (ocpp_csms_no_certbot | default(false) | bool)
+
+- name: Enable automatic Certbot renewals when managed by this deployment
+  become: true
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    state: started
+    enabled: true
+  when: not (ocpp_csms_no_certbot | default(false) | bool)
