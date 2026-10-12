@@ -49,13 +49,16 @@ Bootstrap in this order:
    -i localhost, -c local` from the non-root checkout before exposing it.
 4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
    the service and verify `ocpp-csms auth status` reports `basic`.
-5. Obtain a publicly trusted certificate for the exact FQDN with an ACME
-   client, storing it at `/etc/letsencrypt/live/<FQDN>/fullchain.pem`
-   and `privkey.pem`; verify unattended renewal and nginx reload.
-6. Run `./deploy.sh --expose porsche-abb.gelectriic.com`. This chooses
-   the cloud playbook, configures the CSMS to loopback only, checks Basic
-   authentication and certificate presence, and creates the corresponding
-   nginx site. Deploy as a non-root user with sudo/become rights.
+5. Run `./deploy.sh --expose porsche-abb.gelectriic.com --email admin@gelectriic.com`
+   as a non-root operator with sudo/become rights. This installs nginx and
+   Certbot, creates a temporary port-80 HTTP-01 challenge site without a
+   plaintext OCPP proxy, issues the certificate for the exact hostname,
+   and enables the final port-443 WSS nginx site. The certificate is reused
+   on subsequent deploys. Replace the sample email with an inbox you manage.
+6. Verify `certbot.timer` is enabled and a `certbot renew --dry-run`
+   succeeds. A deploy renewal hook reloads nginx after certificate updates.
+   With externally managed Let's Encrypt-format certificate files, use
+   `--no-certbot`; the hostname certificate must already exist.
 7. Verify `sudo nginx -t`, `systemctl status nginx ocpp-csms`,
    correct public hostname/certificate and **401 for missing/wrong Basic**
    credentials on the WSS upgrade. Prove port 9000 is unreachable
