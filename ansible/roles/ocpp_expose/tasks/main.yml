@@ -146,19 +146,79 @@
   changed_when: false
   failed_when: "'does match certificate' not in ocpp_expose_hostname_check.stdout"
 
-- name: Install hostname-isolated WSS nginx site
+- name: Check previous nginx site for rollback
   become: true
-  ansible.builtin.template:
-    src: ocpp-csms-site.conf.j2
-    dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
-    mode: "0644"
+  ansible.builtin.stat:
+    path: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+  register: ocpp_expose_previous_site
 
-- name: Enable hostname-isolated WSS site
+- name: Snapshot existing nginx site before promotion
   become: true
-  ansible.builtin.file:
+  ansible.builtin.copy:
     src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
-    dest: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
-    state: link
+    dest: "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
+    remote_src: true
+    mode: "0644"
+  when: ocpp_expose_previous_site.stat.exists | default(false)
+
+- name: Promote validated public WSS site with rollback
+  block:
+    - name: Render hostname-isolated WSS nginx site
+      become: true
+      ansible.builtin.template:
+        src: ocpp-csms-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        mode: "0644"
+
+    - name: Enable hostname-isolated WSS site
+      become: true
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        dest: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+        state: link
+
+    - name: Validate complete nginx configuration before reload
+      become: true
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Activate TLS-terminating nginx
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+        enabled: true
+  rescue:
+    - name: Restore previous nginx site
+      become: true
+      ansible.builtin.copy:
+        src: "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
+        dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        remote_src: true
+        mode: "0644"
+      when: ocpp_expose_previous_site.stat.exists | default(false)
+
+    - name: Disable unvalidated site when there was no predecessor
+      become: true
+      ansible.builtin.file:
+        path: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+        state: absent
+      when: not (ocpp_expose_previous_site.stat.exists | default(false))
+
+    - name: Check restored nginx configuration
+      become: true
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload restored nginx configuration
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+
+    - name: Stop after failed public WSS promotion
+      ansible.builtin.fail:
+        msg: WSS promotion failed; previous nginx site restored where available.
 
 - name: Configure certificate renewal nginx reload hook
   become: true
@@ -167,18 +227,6 @@
     dest: /etc/letsencrypt/renewal-hooks/deploy/ocpp-csms-nginx.sh
     mode: "0755"
   when: not (ocpp_csms_no_certbot | default(false) | bool)
-
-- name: Validate complete nginx configuration before reload
-  become: true
-  ansible.builtin.command: nginx -t
-  changed_when: false
-
-- name: Activate TLS-terminating nginx
-  become: true
-  ansible.builtin.systemd_service:
-    name: nginx
-    state: reloaded
-    enabled: true
 
 - name: Enable automatic Certbot renewals when managed by this deployment
   become: true
