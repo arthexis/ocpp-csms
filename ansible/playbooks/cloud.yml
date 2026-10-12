@@ -1,9 +1,22 @@
 ---
-# A dedicated public CSMS endpoint: no Discover, forwarder, or interception.
+# CSMS-only public endpoint, with a fail-closed security preflight.
 - name: Deploy standalone OCPP CSMS cloud endpoint
   hosts: all
   gather_facts: true
+  pre_tasks:
+    - name: Verify Basic auth is configured before cloud deployment
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            import json, pathlib, sys;
+            p=pathlib.Path('/etc/ocpp-csms/auth.json');
+            cfg=json.loads(p.read_text());
+            sys.exit(0 if cfg.get('mode') == 'basic' and cfg.get('hash') and cfg.get('salt') else 1)
+      changed_when: false
+      when: ocpp_csms_expose | default('') | length > 0
   roles:
     - role: ocpp_csms
     - role: ocpp_expose
-      when: ocpp_csms_expose | default("") | length > 0
+      when: ocpp_csms_expose | default('') | length > 0
