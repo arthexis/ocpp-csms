@@ -111,7 +111,7 @@ validate_positive_seconds() {
 
 if [ -n "$expose" ]; then
     case "$expose" in
-        *[!a-z0-9.-]*|.*|*..*|*-*.*|"")
+        *[!a-z0-9.-]*|.*|*..*|"")
             printf 'Invalid public DNS hostname for --expose: %s\n' "$expose" >&2
             exit 2
             ;;
