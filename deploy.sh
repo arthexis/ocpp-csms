@@ -25,7 +25,7 @@ dev=0
 forwarder=0
 recover=0
 expose=""
-cloud=0
+delegate=0
 certbot_email=""
 no_certbot=0
 
@@ -74,8 +74,8 @@ while [ "$#" -gt 0 ]; do
             dev=1
             shift
             ;;
-        --cloud)
-            cloud=1
+        --delegate)
+            delegate=1
             shift
             ;;
         --expose)
@@ -129,11 +129,11 @@ validate_positive_seconds() {
     esac
 }
 
-if [ "$cloud" -eq 1 ] && [ -n "$expose" ]; then
-    printf '%s\\n' '--cloud and --expose select the same playbook; use one.' >&2
+if [ "$delegate" -eq 1 ] && [ -n "$expose" ]; then
+    printf '%s\\n' '--delegate and --expose select the same playbook; use one.' >&2
     exit 2
 fi
-if [ "$cloud" -eq 1 ]; then
+if [ "$delegate" -eq 1 ]; then
     PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
     set -- -e ocpp_csms_host=127.0.0.1 "$@"
 fi
