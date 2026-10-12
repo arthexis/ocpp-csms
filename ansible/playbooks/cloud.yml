@@ -1,0 +1,7 @@
+---
+# A dedicated public CSMS endpoint: no Discover, forwarder, or interception.
+- name: Deploy standalone OCPP CSMS cloud endpoint
+  hosts: all
+  gather_facts: true
+  roles:
+    - role: ocpp_csms
