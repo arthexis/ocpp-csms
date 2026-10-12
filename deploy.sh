@@ -183,6 +183,13 @@ no_certbot=$profile_no_certbot
 forwarder=$profile_forwarder
 interface=$profile_interface
 
+# Diagnostics inspect the installed profile but do not rerun exposure setup.
+if [ "$diagnose" -eq 1 ]; then
+    expose=""
+    certbot_email=""
+    no_certbot=0
+fi
+
 if [ "$uninstall" -eq 1 ]; then
     PLAYBOOK="$ROOT/ansible/playbooks/uninstall.yml"
     if ansible-playbook "$PLAYBOOK" -i localhost, -c local \\
@@ -216,8 +223,8 @@ if [ -n "$expose" ]; then
         *.*) ;;
         *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
     esac
-    if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then
-        printf '%s\n' '--expose cannot be combined with --diagnose, --forwarder or --recover.' >&2
+    if [ "$diagnose" -eq 1 ]; then
+        printf '%s\n' '--expose cannot be combined with --diagnose.' >&2
         exit 2
     fi
     PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
@@ -306,7 +313,7 @@ fi
 
 # Only successful normal deployments update durable intent. Recovery,
 # diagnostics, stage-only, development and tuning invocations never do.
-if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ] && [ -z "$observe_seconds" ] && [ -z "$reconnect_seconds" ]; then
+if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ]; then
     commit_delegate=$delegate
     if [ -n "$expose" ]; then
         commit_delegate=0
@@ -320,7 +327,7 @@ if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$s
         --expose "$expose" --email "$certbot_email" \\
         --no-certbot "$no_certbot" --forwarder "$forwarder" \\
         --no-forwarder "$commit_no_forwarder" --interface "$interface" \\
-        --adopt "$adopt" || exit 2
+        --adopt 1 || exit 2
 fi
 
 exit "$status"
