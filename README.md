@@ -30,10 +30,20 @@ For a public standalone endpoint, explicitly configure Basic auth **before
 opening TCP/443**:
 
 ```bash
-ocpp-csms auth basic --cp ABB-001
+ocpp-csms auth basic --limit 3d    # pending first-claim enrollment
+# OR: ocpp-csms auth basic --cp ABB-001  # pre-register a known identity
 ocpp-csms auth status
 sudo systemctl restart ocpp-csms.service
 ```
+
+With `--limit 3d`, the first successful WSS Basic authentication during the
+next 72 hours claims the supplied URL's final charge-point ID and permanently
+binds the stored credential to that identity. An unclaimed credential expires
+after 72 hours and is rejected; once claimed, normal authenticated reconnections
+do not expire. In pending mode the Basic username must equal the identity in the
+URL. The first-claim risk is intentional: keep the credential private until ABB
+commissions the charger. The known-ID `--cp` alternative needs no enrollment
+window.
 
 The command prompts twice for the password without exposing it on the command
 line; the persistent configuration is stored at `/etc/ocpp-csms/auth.json`
@@ -43,7 +53,7 @@ The password is not recoverable from the hash; repeat the command to rotate.
 Existing sessions are interrupted by restart, so schedule rotations.
 
 In Basic mode, the WSS WebSocket upgrade requires an HTTP Authorization Basic
-header. The username must equal both the configured charge-point ID and the
+header. Once enrolled, the username must equal both the bound charge-point ID and the
 last URL path segment; missing or wrong credentials return 401. Plaintext WS
 returns 403 in Basic mode regardless of credentials. Bad persisted auth
 configuration causes startup failure instead of anonymous fallback.
