@@ -1057,3 +1057,36 @@ ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 
 ```
 
 Unlike start/stop, firmware delivery uses the OCPP `retrieveDate` parameter: `--after` and `--at` send the request now **with a future retrieval date**, not a CSMS-side queued command. OCPP does not guarantee when installation starts or finishes. Omission of timing is an error; the charger only receives an immediate retrieval date with explicit `--now`. `--within` is intentionally unavailable because it would require a separate CSMS queue that waits for an idle charger.
+
+
+### Remembered deployment profile
+
+A successful normal `./deploy.sh` records its nonsecret installation
+profile at `~/.local/state/ocpp-csms/deployment.json` (mode 0600).
+Subsequent deployments without mode flags reuse the recorded satellite/delegate
+mode, public `--expose` hostname, Certbot email and management switch,
+Forwarder setting and interface. In particular, an exposed delegate never
+silently becomes a satellite when `./deploy.sh` is rerun.
+
+Only the original *deployment identity* can be retained: satellite versus
+delegate cannot change in place, and changing an exposed hostname also requires
+uninstallation. An unexposed delegate can acquire `--expose` without reinstalling.
+`--forwarder` and `--no-forwarder` toggle the optional Forwarder without
+changing installation type. Installed Forwarder credentials are reused from
+their protected configuration files, not copied into the profile.
+
+Temporary `--diagnose`, `--recover`, `--stage-only`, `--dev`,
+`--observe` and `--reconnect` do not persist as future defaults.
+Arbitrary Ansible extra variables (especially tokens/secrets) are never
+recorded. Failed deployments never update the profile.
+
+To remove the managed service and permit changing the installation mode, run
+`./deploy.sh --uninstall`. It stops and removes managed systemd units,
+removes the hostname-specific nginx site if installed, and removes replaceable
+code releases, then clears the saved profile only upon successful completion.
+Transaction archives, the database, credentials, and certificate archives are
+preserved; back them up or delete separately if appropriate. Installation
+from an older version with no saved profile requires explicit mode plus
+`--adopt` after verifying the installed role; it will not guess the role
+from an existing systemd unit.
+
