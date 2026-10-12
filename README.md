@@ -1093,3 +1093,18 @@ from an older version with no saved profile requires explicit mode plus
 `--adopt` after verifying the installed role; it will not guess the role
 from an existing systemd unit.
 
+
+
+### Gway-001 deployment and validation
+
+Gway-001 is **not** a GitHub Actions self-hosted runner for this repository.
+Hosted CI validates Python and Ansible changes without touching field equipment.
+To request deployment of `main` to Gway-001, manually run the
+[Deploy CSMS to Gway-001](https://github.com/arthexis/ocpp-csms/actions/workflows/deploy-gway-001.yml)
+workflow. It dispatches the checked-out commit SHA to `arthexis/gway-remote`
+via `ocpp-csms-deploy`; follow the remote system's outcome rather than
+assuming the request proves successful installation.
+
+Field simulator and external IP/DNS WSS acceptance tests are separate,
+operator-authorized tasks for the local agent (see #204). They must not run
+on ordinary PR CI or update production CSMS inadvertently.
