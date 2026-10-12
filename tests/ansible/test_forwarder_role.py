@@ -15,7 +15,10 @@ def test_forwarder_role_is_opt_in_in_satellite_composition():
     forwarder = roles[-1]
 
     assert forwarder["role"] == "ocpp_forwarder"
-    assert forwarder["when"] == "ocpp_forwarder_enabled | default(false) | bool"
+    assert forwarder["when"] == [
+        "ocpp_forwarder_enabled | default(false) | bool",
+        "not (ocpp_csms_stage_only | default(false) | bool)",
+    ]
 
 
 def test_forwarder_defaults_to_disabled():
