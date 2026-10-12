@@ -133,7 +133,7 @@ def claim_basic(config: dict, config_path: Path, identity: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             os.fchmod(stream.fileno(), 0o600)
             json.dump(record, stream)
-            stream.write("\\n")
+            stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, config_path)
