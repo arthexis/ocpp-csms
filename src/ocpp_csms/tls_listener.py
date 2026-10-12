@@ -45,6 +45,7 @@ class TLSListener:
         self._host = ""
         self._ws_port = 0
         self._subprotocol = ""
+        self._process_request = None
         self._draining: list[DrainingListener] = []
 
     def status(self) -> dict[str, object]:
@@ -62,9 +63,10 @@ class TLSListener:
             "error": self.error,
         }
 
-    async def start(self, handler: Callable[..., Any], *, host: str, ws_port: int, subprotocol: str) -> bool:
+    async def start(self, handler: Callable[..., Any], *, host: str, ws_port: int, subprotocol: str, process_request=None) -> bool:
         self._handler, self._host = handler, host
         self._ws_port, self._subprotocol = ws_port, subprotocol
+        self._process_request = process_request
         async with self._lock:
             try:
                 config = tls_config.read_config(self.config_path)
@@ -104,6 +106,7 @@ class TLSListener:
             new_server = await websockets.serve(
                 self._handler, self._host, config.port,
                 ssl=fresh_context, subprotocols=[self._subprotocol],
+                process_request=self._process_request,
             )
             previous_server, previous = self.server, self.active
             self.server, self.context = new_server, fresh_context
