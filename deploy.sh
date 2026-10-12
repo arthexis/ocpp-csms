@@ -313,7 +313,7 @@ fi
 
 # Only successful normal deployments update durable intent. Recovery,
 # diagnostics, stage-only, development and tuning invocations never do.
-if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ]; then
+if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
     commit_delegate=$delegate
     if [ -n "$expose" ]; then
         commit_delegate=0
