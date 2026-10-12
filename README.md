@@ -23,6 +23,37 @@ Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
 no Forwarder, and no traffic interception. It supports Debian-family ARM64
 and x86_64 machines, including Ubuntu 24.04.
 
+### HTTP Basic authentication (WSS)
+
+The default for existing local deployments is `none` (no `auth.json`).
+For a public standalone endpoint, explicitly configure Basic auth **before
+opening TCP/443**:
+
+```bash
+ocpp-csms auth basic --cp ABB-001
+ocpp-csms auth status
+sudo systemctl restart ocpp-csms.service
+```
+
+The command prompts twice for the password without exposing it on the command
+line; the persistent configuration is stored at `/etc/ocpp-csms/auth.json`
+with mode 0600 and a salted scrypt password hash. Run it as the CSMS service
+identity or a user permitted to write the persistent configuration directory.
+The password is not recoverable from the hash; repeat the command to rotate.
+Existing sessions are interrupted by restart, so schedule rotations.
+
+In Basic mode, the WSS WebSocket upgrade requires an HTTP Authorization Basic
+header. The username must equal both the configured charge-point ID and the
+last URL path segment; missing or wrong credentials return 401. Plaintext WS
+returns 403 in Basic mode regardless of credentials. Bad persisted auth
+configuration causes startup failure instead of anonymous fallback.
+If the auth file is absent the original anonymous-local behavior remains;
+therefore **never expose a cloud CSMS publicly before setting Basic auth**.
+
+This is Basic authentication, **not** mutual TLS/client certificates. mTLS
+remains a separate feature tracked in the Lightsail epic. An ABB charger
+must be configured to send Basic credentials during the WebSocket handshake.
+
 ### Canonical charger URL
 
 Give the charger operator the **full canonical** WSS URL:
