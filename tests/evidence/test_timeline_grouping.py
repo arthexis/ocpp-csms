@@ -81,7 +81,8 @@ def test_unusual_response_details_remain_visible():
         row(2, "Heartbeat", {"current_time": "2026-10-09T14:00:02Z"},
             direction="out"),
     ])
-    assert 'extra={"error": "unexpected"}' in output
+    assert "extra=1" in output
+    assert 'extra={"error": "unexpected"}' in format_events([row(1, "Heartbeat", {"current_time": "now", "error": "unexpected"}, direction="out")], detail=True)
     assert "×2" not in output
 
 
@@ -124,5 +125,17 @@ def test_anomalous_response_interrupts_pairs():
             row(2, "Heartbeat", {"currentTime": "now", "error": "unexpected"}, direction="out"),
             row(3, "Heartbeat"), row(4, "Heartbeat", {"currentTime": "now"}, direction="out")]
     output = format_events(rows)
-    assert "extra=" in output
+    assert "extra=1" in output
+    assert 'extra={"error": "unexpected"}' in format_events(rows, detail=True)
     assert output.count("Heartbeat ↔") == 1
+
+
+def test_configuration_response_extra_count_and_detail():
+    rows = [row(1, "GetConfiguration", {"key": ["LocalAuthListEnabled", "AuthorizationCacheEnabled"]}, direction="out")]
+    compact = format_events(rows)
+    assert "GetConfiguration response extra=1" in compact
+    assert "LocalAuthListEnabled" not in compact
+    detailed = format_events(rows, detail=True)
+    assert 'extra={"key": ["LocalAuthListEnabled", "AuthorizationCacheEnabled"]}' in detailed
+    assert "payload=" not in detailed
+    assert "payload=" in format_events(rows, verbose=True)
