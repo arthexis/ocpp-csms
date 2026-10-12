@@ -134,7 +134,7 @@ if [ "$delegate" -eq 1 ] && [ -n "$expose" ]; then
     exit 2
 fi
 if [ "$delegate" -eq 1 ]; then
-    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     set -- -e ocpp_csms_host=127.0.0.1 "$@"
 fi
 
@@ -153,7 +153,7 @@ if [ -n "$expose" ]; then
         printf '%s\n' '--expose cannot be combined with --diagnose, --forwarder or --recover.' >&2
         exit 2
     fi
-    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     if [ -n "$certbot_email" ]; then
         set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
     fi
