@@ -241,6 +241,17 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
     while index < len(rows):
         first = rows[index]
         if _group_key(first) == ("heartbeat-request", first["charger_id"]):
+            # Preserve unmatched leading requests, while allowing the final
+            # request to form an adjacent observed exchange with a response.
+            request_key = ("heartbeat-request", first["charger_id"])
+            response_key = ("heartbeat-response", first["charger_id"])
+            end = index
+            while end < len(rows) and _group_key(rows[end]) == request_key:
+                end += 1
+            if end - index > 1 and end < len(rows) and _group_key(rows[end]) == response_key:
+                append_group(rows[index:end - 1])
+                index = end - 1
+                first = rows[index]
             count = 0
             end_at = first["occurred_at"]
             while index + 1 < len(rows):
