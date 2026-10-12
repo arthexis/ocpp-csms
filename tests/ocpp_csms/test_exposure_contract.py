@@ -56,7 +56,8 @@ def test_forwarder_is_optional_for_both_delegate_and_satellite():
     assert "- role: ocpp_discover" not in delegate
     shell = (ROOT / "deploy.sh").read_text()
     assert 'if [ "$forwarder" -eq 1 ]; then' in shell
-    assert 'if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then' in shell
+    assert 'if [ "$diagnose" -eq 1 ]; then' in shell
+    assert 'ocpp_forwarder_enabled=true' in shell
 
 
 def test_explicit_satellite_flag_is_default_and_conflicts_with_other_modes():
