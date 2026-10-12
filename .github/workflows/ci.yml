@@ -179,7 +179,7 @@ jobs:
       - name: Ansible syntax check
         run: |
           ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
-          ansible-playbook ansible/playbooks/cloud.yml -i localhost, --syntax-check
+          ansible-playbook ansible/playbooks/delegate.yml -i localhost, --syntax-check
 
       - name: Ansible lint
         run: ansible-lint --profile basic ansible/
