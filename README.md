@@ -18,7 +18,7 @@ The design principle is: **observe aggressively; block reluctantly.**
 
 ## Standalone public CSMS (cloud)
 
-Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
+Use `ansible/playbooks/delegate.yml` for a delegate CSMS instance instead of
 `satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
 no Forwarder, and no traffic interception. It supports Debian-family ARM64
 and x86_64 machines, including Ubuntu 24.04.
