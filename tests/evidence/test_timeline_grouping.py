@@ -139,3 +139,26 @@ def test_configuration_response_extra_count_and_detail():
     assert 'extra={"key": ["LocalAuthListEnabled", "AuthorizationCacheEnabled"]}' in detailed
     assert "payload=" not in detailed
     assert "payload=" in format_events(rows, verbose=True)
+
+
+def test_repeated_requests_then_response_preserves_unmatched_evidence():
+    rows = [
+        row(1, "Heartbeat"),
+        row(2, "Heartbeat"),
+        row(3, "Heartbeat", {"currentTime": "now"}, direction="out"),
+        row(4, "Heartbeat"),
+        row(5, "Heartbeat", {"currentTime": "later"}, direction="out"),
+    ]
+    output = format_events(rows)
+    assert "Heartbeat requests (responses not established)" in output
+    assert output.count("Heartbeat ↔") == 1
+    assert "Heartbeat ↔ ×2" in output
+    assert "→ Heartbeat responses" not in output
+
+
+def test_orphan_heartbeat_response_is_not_assumed_paired():
+    rows = [row(1, "charger_connected", kind="runtime"),
+            row(2, "Heartbeat", {"currentTime": "now"}, direction="out")]
+    output = format_events(rows)
+    assert "→ Heartbeat responses" in output
+    assert "Heartbeat ↔" not in output
