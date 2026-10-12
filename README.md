@@ -68,6 +68,22 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
+The OCPP Forwarder is optional for **both satellites and delegates**. Pass
+`--forwarder` to either deployment mode, including an exposed delegate, after
+providing the existing required `ocpp_forwarder_satellite_id` (the forwarder
+source identifier, including for delegates) and `ocpp_forwarder_token` via
+Ansible configuration or extra variables. A delegate does not install Discover
+just because the forwarder is enabled. Without `--forwarder`, neither
+deployment enables the forwarder by default. For example:
+
+```bash
+./deploy.sh --delegate --forwarder \\
+  -e ocpp_forwarder_satellite_id=porsche-abb \\
+  -e ocpp_forwarder_token=REPLACE_WITH_SECURE_TOKEN
+```
+
+Supply real tokens securely, rather than placing them in shell history.
+
 The `--delegate` mode bootstraps a loopback-only CSMS for credential setup;
 `--expose` adds nginx/Certbot after credentials exist. The `--expose` path
 is opt-in; plain `./deploy.sh` continues to
