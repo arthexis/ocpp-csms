@@ -22,7 +22,7 @@ def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
 
 def args(**overrides):
     defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
-                    until=None, limit=100, json=False, raw=False, verbose=False)
+                    until=None, limit=100, json=False, raw=False, verbose=False, detail=False)
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
@@ -49,6 +49,7 @@ def test_parser_accepts_verbose():
     assert parsed.charger == "CP1"
     assert parsed.verbose is True
     assert parsed.limit == "2"
+    assert parser.parse_args(["events", "--detail"]).detail is True
 
 
 def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
@@ -92,7 +93,7 @@ def test_json_modes_keep_original_contract(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("options", [
-    {"json": True, "verbose": True}, {"raw": True},
+    {"json": True, "verbose": True}, {"json": True, "detail": True}, {"raw": True},
     {"limit": 0}, {"transaction": -1},
 ])
 def test_invalid_options_rejected_before_retrieval(monkeypatch, options):
@@ -273,3 +274,20 @@ def test_no_limit_without_time_filter_queries_all_events(captured_queries):
     assert query["limit"] is None
     assert query["since"] is None
     assert query["until"] is None
+
+
+def test_detail_expands_extras_without_changing_event_retrieval(monkeypatch, capsys):
+    observed = []
+    rows = [event(1, "GetConfiguration", {"key": ["LocalAuthListEnabled"]}, direction="out")]
+    def retrieve(*_args, **kwargs):
+        observed.append(kwargs)
+        return rows
+    monkeypatch.setattr(cli, "events_between", retrieve)
+    cli.run_events(args())
+    compact = capsys.readouterr().out
+    cli.run_events(args(detail=True))
+    detailed = capsys.readouterr().out
+    assert observed[0] == observed[1]
+    assert "extra=1" in compact
+    assert "LocalAuthListEnabled" not in compact
+    assert 'extra={"key": ["LocalAuthListEnabled"]}' in detailed
