@@ -86,4 +86,7 @@
 
     - name: Report preserved data
       ansible.builtin.debug:
-        msg: "CSMS application data, authorization credentials and certificate archive retained; deployment profile is cleared by deploy.sh after this playbook succeeds."
+        msg: >-
+          CSMS application data, authorization credentials and certificate
+          archive retained; deployment profile is cleared by deploy.sh after
+          this playbook succeeds.
