@@ -200,10 +200,6 @@ if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; the
     exit 2
 fi
 
-if [ "$delegate" -eq 1 ] && [ -n "$expose" ]; then
-    printf '%s\\n' '--delegate and --expose select the same playbook; use one.' >&2
-    exit 2
-fi
 if [ "$delegate" -eq 1 ]; then
     PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     set -- -e ocpp_csms_host=127.0.0.1 "$@"
