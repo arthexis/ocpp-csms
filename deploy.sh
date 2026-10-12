@@ -29,6 +29,9 @@ delegate=0
 satellite=0
 certbot_email=""
 no_certbot=0
+no_forwarder=0
+adopt=0
+uninstall=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -105,6 +108,18 @@ while [ "$#" -gt 0 ]; do
             no_certbot=1
             shift
             ;;
+        --no-forwarder)
+            no_forwarder=1
+            shift
+            ;;
+        --adopt)
+            adopt=1
+            shift
+            ;;
+        --uninstall)
+            uninstall=1
+            shift
+            ;;
         --forwarder)
             forwarder=1
             shift
@@ -133,6 +148,52 @@ validate_positive_seconds() {
             ;;
     esac
 }
+
+# Deployment identity is immutable until a successful uninstall.
+# Resolve it before choosing playbooks so even a flagless invocation is safe.
+profile_path="${OCPP_CSMS_DEPLOY_PROFILE_PATH:-$HOME/.local/state/ocpp-csms/deployment.json}"
+profile_helper="$ROOT/scripts/deployment_profile.py"
+if [ "$uninstall" -eq 1 ]; then
+    if [ ! -f "$profile_path" ]; then
+        printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
+        exit 2
+    fi
+    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$forwarder" -eq 1 ] || [ "$no_forwarder" -eq 1 ] || [ "$recover" -eq 1 ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+        printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
+        exit 2
+    fi
+fi
+profile_assignments=$(python3 "$profile_helper" resolve --path "$profile_path" \\
+    --satellite "$satellite" --delegate "$delegate" \\
+    --expose "$expose" --email "$certbot_email" \\
+    --no-certbot "$no_certbot" --forwarder "$forwarder" \\
+    --no-forwarder "$no_forwarder" --interface "$interface" \\
+    --adopt "$adopt") || exit 2
+eval "$profile_assignments"
+satellite=0
+delegate=0
+if [ "$profile_mode" = delegate ]; then
+    delegate=1
+else
+    satellite=1
+fi
+expose=$profile_expose
+certbot_email=$profile_email
+no_certbot=$profile_no_certbot
+forwarder=$profile_forwarder
+interface=$profile_interface
+
+if [ "$uninstall" -eq 1 ]; then
+    PLAYBOOK="$ROOT/ansible/playbooks/uninstall.yml"
+    if ansible-playbook "$PLAYBOOK" -i localhost, -c local \\
+      -e "ocpp_csms_expose=$expose"; then
+        python3 "$profile_helper" clear --path "$profile_path"
+        printf 'OCPP CSMS uninstalled; deployment profile cleared. Application data preserved.\\n'
+        exit 0
+    fi
+    printf '%s\\n' 'Uninstall failed; deployment profile preserved.' >&2
+    exit 1
+fi
 
 if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then
     printf '%s\n' '--satellite cannot be combined with --delegate or --expose.' >&2
@@ -245,6 +306,25 @@ if [ "$minutes" -gt 0 ]; then
     printf '\nOCPP CSMS deploy finished in %dm %02ds\n' "$minutes" "$seconds"
 else
     printf '\nOCPP CSMS deploy finished in %ds\n' "$seconds"
+fi
+
+# Only successful normal deployments update durable intent. Recovery,
+# diagnostics, stage-only, development and tuning invocations never do.
+if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ] && [ -z "$observe_seconds" ] && [ -z "$reconnect_seconds" ]; then
+    commit_delegate=$delegate
+    if [ -n "$expose" ]; then
+        commit_delegate=0
+    fi
+    commit_no_forwarder=0
+    if [ "$forwarder" -eq 0 ]; then
+        commit_no_forwarder=1
+    fi
+    python3 "$profile_helper" commit --path "$profile_path" \\
+        --satellite "$((1 - delegate))" --delegate "$commit_delegate" \\
+        --expose "$expose" --email "$certbot_email" \\
+        --no-certbot "$no_certbot" --forwarder "$forwarder" \\
+        --no-forwarder "$commit_no_forwarder" --interface "$interface" \\
+        --adopt "$adopt" || exit 2
 fi
 
 exit "$status"
