@@ -18,7 +18,7 @@ from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.archive import TransactionArchive
 from ocpp_csms.tls_listener import TLSListener
-from ocpp_csms.auth import load_auth, basic_upgrade_check
+from ocpp_csms.auth import load_auth, basic_upgrade_check, auth_path
 
 LOGGER = logging.getLogger(__name__)
 OCPP_16_SUBPROTOCOL = "ocpp1.6"
@@ -142,7 +142,7 @@ class CSMSServer:
                             host=self.host,
                             ws_port=self.port,
                             subprotocol=OCPP_16_SUBPROTOCOL,
-                            process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=True),
+                            process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=True, config_path=auth_path()),
                         )
                         LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
