@@ -68,6 +68,8 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
+`./deploy.sh --satellite` is identical to `./deploy.sh` with no deployment-mode flag. It cannot be combined with `--delegate` or `--expose`; `--forwarder` remains optional with any deployment mode.
+
 The OCPP Forwarder is optional for **both satellites and delegates**. Pass
 `--forwarder` to either deployment mode, including an exposed delegate, after
 providing the existing required `ocpp_forwarder_satellite_id` (the forwarder
