@@ -119,6 +119,46 @@ jobs:
         run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -vv tests/ocpp_discover
 
 
+  
+  ubuntu:
+    name: Ubuntu 24.04 / Python 3.13 / ${{ matrix.suite }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [CSMS tests, Discover tests]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Installed command smoke
+        if: matrix.suite == 'CSMS tests'
+        run: |
+          ocpp-csms --help >/dev/null
+          ocpp-discover --help >/dev/null
+          ocpp-forwarder --help >/dev/null
+
+      - name: CSMS tests
+        if: matrix.suite == 'CSMS tests'
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -n 2 -vv tests --ignore=tests/ocpp_discover --ignore=tests/ansible
+
+      - name: Discover tests
+        if: matrix.suite == 'Discover tests'
+        run: timeout --signal=TERM --kill-after=10s 300s python -m pytest -vv tests/ocpp_discover
+
+
   ansible:
     name: Ansible tests
     timeout-minutes: 10
@@ -183,6 +223,7 @@ jobs:
       - changes
       - docs
       - test
+      - ubuntu
       - ansible
       - simulator
     if: always()
@@ -196,6 +237,7 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           DOCS_RESULT: ${{ needs.docs.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
           SIMULATOR_RESULT: ${{ needs.simulator.result }}
           SIMULATOR_LABEL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'simulator') }}
@@ -227,6 +269,11 @@ jobs:
 
           if [[ "$TEST_RESULT" != "success" ]]; then
             echo "Test matrix did not succeed: $TEST_RESULT"
+            exit 1
+          fi
+
+          if [[ "$UBUNTU_RESULT" != "success" ]]; then
+            echo "Ubuntu 24.04 / Python 3.13 tests did not succeed: $UBUNTU_RESULT"
             exit 1
           fi
 
