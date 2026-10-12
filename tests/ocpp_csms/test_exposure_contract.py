@@ -57,3 +57,12 @@ def test_forwarder_is_optional_for_both_delegate_and_satellite():
     shell = (ROOT / "deploy.sh").read_text()
     assert 'if [ "$forwarder" -eq 1 ]; then' in shell
     assert '--expose cannot be combined with --diagnose or --recover' in shell
+
+
+def test_explicit_satellite_flag_is_default_and_conflicts_with_other_modes():
+    shell = (ROOT / "deploy.sh").read_text()
+    assert 'PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"' in shell
+    assert '        --satellite)' in shell
+    assert 'satellite=1' in shell
+    assert 'if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then' in shell
+    assert '--satellite cannot be combined with --delegate or --expose.' in shell
