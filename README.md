@@ -1084,8 +1084,11 @@ To remove the managed service and permit changing the installation mode, run
 `./deploy.sh --uninstall`. It stops and removes managed systemd units,
 removes the hostname-specific nginx site if installed, and removes replaceable
 code releases, then clears the saved profile only upon successful completion.
-Transaction archives, the database, credentials, and certificate archives are
-preserved; back them up or delete separately if appropriate. Installation
+Transaction archives, the database, and certificate archives are preserved.
+Basic authentication is deactivated and its protected file is archived at
+`/etc/ocpp-csms/auth.uninstalled.json`; Forwarder credentials and replay
+state are removed to avoid carrying a previous deployment identity into a new
+installation. Back up durable records before uninstalling. Installation
 from an older version with no saved profile requires explicit mode plus
 `--adopt` after verifying the installed role; it will not guess the role
 from an existing systemd unit.
