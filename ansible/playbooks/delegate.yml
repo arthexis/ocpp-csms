@@ -18,5 +18,7 @@
       when: ocpp_csms_expose | default('') | length > 0
   roles:
     - role: ocpp_csms
+    - role: ocpp_forwarder
+      when: ocpp_forwarder_enabled | default(false) | bool
     - role: ocpp_expose
       when: ocpp_csms_expose | default('') | length > 0
