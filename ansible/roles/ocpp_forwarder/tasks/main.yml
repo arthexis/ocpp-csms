@@ -1,4 +1,53 @@
 ---
+# Existing forwarder configuration survives ordinary no-flag redeploys.
+# Credentials remain in their protected files, never in deployment profiles.
+- name: Inspect previously deployed Forwarder environment
+  become: true
+  ansible.builtin.stat:
+    path: "{{ ocpp_forwarder_environment_path }}"
+  register: ocpp_forwarder_existing_environment
+
+- name: Read existing Forwarder identity
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ ocpp_forwarder_environment_path }}"
+  register: ocpp_forwarder_existing_environment_bytes
+  when:
+    - ocpp_forwarder_existing_environment.stat.exists | default(false)
+    - ocpp_forwarder_satellite_id | length == 0
+  no_log: true
+
+- name: Reuse installed Forwarder source identity
+  ansible.builtin.set_fact:
+    ocpp_forwarder_satellite_id: >-
+      {{ ((ocpp_forwarder_existing_environment_bytes.content | b64decode).splitlines()
+          | select('match', '^OCPP_FORWARDER_SATELLITE_ID=')
+          | first | default('')).split('=', 1)[1] | default('') }}
+  when: ocpp_forwarder_existing_environment_bytes.content is defined
+
+- name: Inspect installed Forwarder token
+  become: true
+  ansible.builtin.stat:
+    path: "{{ ocpp_forwarder_token_path }}"
+  register: ocpp_forwarder_existing_token_file
+  when: ocpp_forwarder_token | length == 0
+
+- name: Read existing secret Forwarder token for idempotent redeploy
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ ocpp_forwarder_token_path }}"
+  register: ocpp_forwarder_existing_token
+  when:
+    - ocpp_forwarder_token | length == 0
+    - ocpp_forwarder_existing_token_file.stat.exists | default(false)
+  no_log: true
+
+- name: Reuse installed secret Forwarder token
+  ansible.builtin.set_fact:
+    ocpp_forwarder_token: "{{ ocpp_forwarder_existing_token.content | b64decode | trim }}"
+  when: ocpp_forwarder_existing_token.content is defined
+  no_log: true
+
 - name: Validate OCPP Forwarder configuration
   ansible.builtin.assert:
     that:
