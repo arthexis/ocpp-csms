@@ -163,11 +163,11 @@ if [ "$uninstall" -eq 1 ]; then
         exit 2
     fi
 fi
-profile_assignments=$(python3 "$profile_helper" resolve --path "$profile_path" \\
-    --satellite "$satellite" --delegate "$delegate" \\
-    --expose "$expose" --email "$certbot_email" \\
-    --no-certbot "$no_certbot" --forwarder "$forwarder" \\
-    --no-forwarder "$no_forwarder" --interface "$interface" \\
+profile_assignments=$(python3 "$profile_helper" resolve --path "$profile_path" \
+    --satellite "$satellite" --delegate "$delegate" \
+    --expose "$expose" --email "$certbot_email" \
+    --no-certbot "$no_certbot" --forwarder "$forwarder" \
+    --no-forwarder "$no_forwarder" --interface "$interface" \
     --adopt "$adopt") || exit 2
 eval "$profile_assignments"
 satellite=0
@@ -192,7 +192,7 @@ fi
 
 if [ "$uninstall" -eq 1 ]; then
     PLAYBOOK="$ROOT/ansible/playbooks/uninstall.yml"
-    if ansible-playbook "$PLAYBOOK" -i localhost, -c local \\
+    if ansible-playbook "$PLAYBOOK" -i localhost, -c local \
       -e "ocpp_csms_expose=$expose"; then
         python3 "$profile_helper" clear --path "$profile_path"
         printf 'OCPP CSMS uninstalled; deployment profile cleared. Application data preserved.\\n'
@@ -322,11 +322,11 @@ if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$s
     if [ "$forwarder" -eq 0 ]; then
         commit_no_forwarder=1
     fi
-    python3 "$profile_helper" commit --path "$profile_path" \\
-        --satellite "$((1 - delegate))" --delegate "$commit_delegate" \\
-        --expose "$expose" --email "$certbot_email" \\
-        --no-certbot "$no_certbot" --forwarder "$forwarder" \\
-        --no-forwarder "$commit_no_forwarder" --interface "$interface" \\
+    python3 "$profile_helper" commit --path "$profile_path" \
+        --satellite "$((1 - delegate))" --delegate "$commit_delegate" \
+        --expose "$expose" --email "$certbot_email" \
+        --no-certbot "$no_certbot" --forwarder "$forwarder" \
+        --no-forwarder "$commit_no_forwarder" --interface "$interface" \
         --adopt 1 || exit 2
 fi
 
