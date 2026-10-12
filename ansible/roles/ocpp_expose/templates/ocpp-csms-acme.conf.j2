@@ -1,0 +1,10 @@
+# HTTP-only bootstrap for ACME HTTP-01; no OCPP proxy on plaintext HTTP.
+server {
+    listen 80;
+    server_name {{ ocpp_csms_expose }};
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/ocpp-csms-acme;
+        default_type text/plain;
+    }
+    location / { return 404; }
+}
