@@ -18,7 +18,7 @@ The design principle is: **observe aggressively; block reluctantly.**
 
 ## Standalone public CSMS (cloud)
 
-Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
+Use `ansible/playbooks/delegate.yml` for a delegate CSMS instance instead of
 `satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
 no Forwarder, and no traffic interception. It supports Debian-family ARM64
 and x86_64 machines, including Ubuntu 24.04.
@@ -45,7 +45,7 @@ Bootstrap in this order:
    **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
    Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
    traffic as required; do not assume ABB uses a fixed source IP.
-3. Bootstrap the CSMS CLI safely with `./deploy.sh --cloud`; this runs the
+3. Bootstrap the CSMS CLI safely with `./deploy.sh --delegate`; this runs the
    cloud playbook with the CSMS listener bound only to `127.0.0.1` and does
    not install nginx or expose an anonymous public OCPP service.
 4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
@@ -68,7 +68,25 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
-The `--cloud` mode bootstraps a loopback-only CSMS for credential setup;
+`./deploy.sh --satellite` is identical to `./deploy.sh` with no deployment-mode flag. It cannot be combined with `--delegate` or `--expose`; `--forwarder` remains optional with any deployment mode.
+
+The OCPP Forwarder is optional for **both satellites and delegates**. Pass
+`--forwarder` to either deployment mode, including an exposed delegate, after
+providing the existing required `ocpp_forwarder_satellite_id` (the forwarder
+source identifier, including for delegates) and `ocpp_forwarder_token` via
+Ansible configuration or extra variables. A delegate does not install Discover
+just because the forwarder is enabled. Without `--forwarder`, neither
+deployment enables the forwarder by default. For example:
+
+```bash
+./deploy.sh --delegate --forwarder \\
+  -e ocpp_forwarder_satellite_id=porsche-abb \\
+  -e ocpp_forwarder_token=REPLACE_WITH_SECURE_TOKEN
+```
+
+Supply real tokens securely, rather than placing them in shell history.
+
+The `--delegate` mode bootstraps a loopback-only CSMS for credential setup;
 `--expose` adds nginx/Certbot after credentials exist. The `--expose` path
 is opt-in; plain `./deploy.sh` continues to
 deploy a satellite as before. One cloud instance is intended to host

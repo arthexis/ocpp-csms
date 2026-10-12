@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "ansible/roles/ocpp_expose/templates/ocpp-csms-site.conf.j2"
 TASKS = ROOT / "ansible/roles/ocpp_expose/tasks/main.yml"
-CLOUD = ROOT / "ansible/playbooks/cloud.yml"
+CLOUD = ROOT / "ansible/playbooks/delegate.yml"
 
 
 def test_wss_site_forwards_auth_upgrade_and_ocpp_subprotocol():
@@ -45,3 +45,24 @@ def test_exposure_rollback_and_auth_gate():
     assert "mode == 'basic'" in tasks
     cloud = CLOUD.read_text()
     assert "Verify Basic auth is configured before cloud deployment" in cloud
+
+
+def test_forwarder_is_optional_for_both_delegate_and_satellite():
+    delegate = (ROOT / "ansible/playbooks/delegate.yml").read_text()
+    satellite = (ROOT / "ansible/playbooks/satellite.yml").read_text()
+    for playbook in (delegate, satellite):
+        assert "- role: ocpp_forwarder" in playbook
+        assert "when: ocpp_forwarder_enabled | default(false) | bool" in playbook
+    assert "- role: ocpp_discover" not in delegate
+    shell = (ROOT / "deploy.sh").read_text()
+    assert 'if [ "$forwarder" -eq 1 ]; then' in shell
+    assert 'if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then' in shell
+
+
+def test_explicit_satellite_flag_is_default_and_conflicts_with_other_modes():
+    shell = (ROOT / "deploy.sh").read_text()
+    assert 'PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"' in shell
+    assert '        --satellite)' in shell
+    assert 'satellite=1' in shell
+    assert 'if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then' in shell
+    assert '--satellite cannot be combined with --delegate or --expose.' in shell

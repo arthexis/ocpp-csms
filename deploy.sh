@@ -25,7 +25,8 @@ dev=0
 forwarder=0
 recover=0
 expose=""
-cloud=0
+delegate=0
+satellite=0
 certbot_email=""
 no_certbot=0
 
@@ -74,8 +75,12 @@ while [ "$#" -gt 0 ]; do
             dev=1
             shift
             ;;
-        --cloud)
-            cloud=1
+        --satellite)
+            satellite=1
+            shift
+            ;;
+        --delegate)
+            delegate=1
             shift
             ;;
         --expose)
@@ -129,12 +134,17 @@ validate_positive_seconds() {
     esac
 }
 
-if [ "$cloud" -eq 1 ] && [ -n "$expose" ]; then
-    printf '%s\\n' '--cloud and --expose select the same playbook; use one.' >&2
+if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then
+    printf '%s\n' '--satellite cannot be combined with --delegate or --expose.' >&2
     exit 2
 fi
-if [ "$cloud" -eq 1 ]; then
-    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+
+if [ "$delegate" -eq 1 ] && [ -n "$expose" ]; then
+    printf '%s\\n' '--delegate and --expose select the same playbook; use one.' >&2
+    exit 2
+fi
+if [ "$delegate" -eq 1 ]; then
+    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     set -- -e ocpp_csms_host=127.0.0.1 "$@"
 fi
 
@@ -149,11 +159,11 @@ if [ -n "$expose" ]; then
         *.*) ;;
         *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
     esac
-    if [ "$diagnose" -eq 1 ] || [ "$forwarder" -eq 1 ] || [ "$recover" -eq 1 ]; then
+    if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then
         printf '%s\n' '--expose cannot be combined with --diagnose, --forwarder or --recover.' >&2
         exit 2
     fi
-    PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     if [ -n "$certbot_email" ]; then
         set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
     fi
