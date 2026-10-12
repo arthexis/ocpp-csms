@@ -45,8 +45,9 @@ Bootstrap in this order:
    **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
    Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
    traffic as required; do not assume ABB uses a fixed source IP.
-3. Install `ocpp_csms` with `ansible-playbook ansible/playbooks/cloud.yml
-   -i localhost, -c local` from the non-root checkout before exposing it.
+3. Bootstrap the CSMS CLI safely with `./deploy.sh --cloud`; this runs the
+   cloud playbook with the CSMS listener bound only to `127.0.0.1` and does
+   not install nginx or expose an anonymous public OCPP service.
 4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
    the service and verify `ocpp-csms auth status` reports `basic`.
 5. Run `./deploy.sh --expose porsche-abb.gelectriic.com --email admin@gelectriic.com`
@@ -67,7 +68,9 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
-The `--expose` path is opt-in; plain `./deploy.sh` continues to
+The `--cloud` mode bootstraps a loopback-only CSMS for credential setup;
+`--expose` adds nginx/Certbot after credentials exist. The `--expose` path
+is opt-in; plain `./deploy.sh` continues to
 deploy a satellite as before. One cloud instance is intended to host
 one client-vendor's CSMS; separate hostnames on a shared nginx process
 alone do **not** isolate databases or credentials. Use a separate
