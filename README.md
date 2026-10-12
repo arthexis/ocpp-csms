@@ -16,6 +16,46 @@ The CSMS is permissive by default:
 
 The design principle is: **observe aggressively; block reluctantly.**
 
+## Standalone public CSMS (cloud)
+
+Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
+`satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
+no Forwarder, and no traffic interception. It supports Debian-family ARM64
+and x86_64 machines, including Ubuntu 24.04.
+
+### Canonical charger URL
+
+Give the charger operator the **full canonical** WSS URL:
+
+```text
+wss://<hostname>/<charge-point-id>
+```
+
+For example, if ABB identifies its charge point as `ABB-001`, the configured
+URL should be `wss://ocpp.example.com/ABB-001` (replace the example hostname
+with the actual DNS record). **Confirm whether the ABB charger appends its
+identity automatically**: if it does, enter only the documented base URL to
+avoid doubling the ID.
+
+The current CSMS takes the **last nonempty URL path segment** (before the
+query string) as its charge-point identity. Thus alternate paths can connect,
+but a different final segment creates a **different logical charger identity**.
+A wrong URL is not an alias of the canonical one. The same final segment
+on two concurrent connections represents a duplicate identity; do not treat
+this as independent chargers or rely on its session state. Use the exact
+canonical URL for every reconnection and rollback procedure.
+
+This convention is **not access control**. The CSMS currently allows unknown
+charge-point identities by default, so arbitrary paths do not establish
+authorization. Before exposing a public endpoint, establish a suitable
+identity/authentication policy and verify the actual ABB firmware requirements.
+
+The native WSS listener requires a readable certificate/key matching the DNS
+hostname. Verify certificate chain trust externally and test a full OCPP 1.6J
+session over public WSS before changing the real charger configuration.
+Binding public TCP/443 from an unprivileged process requires a deliberate
+privileged-port strategy; the default native TLS port is 9443.
+
 ## Commands
 
 Run `ocpp-csms --help` for the authoritative current surface.
