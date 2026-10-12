@@ -1,0 +1,74 @@
+---
+- name: Validate public hostname and safe local listener
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_expose is match('^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$')
+      - "'.' in ocpp_csms_expose"
+      - "'..' not in ocpp_csms_expose"
+      - ocpp_csms_host == '127.0.0.1'
+    fail_msg: Exposed CSMS requires valid FQDN and loopback-only upstream.
+
+- name: Verify Basic credentials are configured
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_runtime_command }}"
+      - auth
+      - status
+  register: ocpp_expose_auth
+  changed_when: false
+  failed_when: false
+
+- name: Require Basic auth before exposing
+  ansible.builtin.assert:
+    that:
+      - ocpp_expose_auth.rc == 0
+      - (ocpp_expose_auth.stdout | from_json).mode == 'basic'
+    fail_msg: Run ocpp-csms auth basic --limit 3d before --expose.
+
+- name: Verify public certificate and private key exist
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+    - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/privkey.pem"
+  register: ocpp_expose_cert_files
+
+- name: Require issued TLS certificate before exposing endpoint
+  ansible.builtin.assert:
+    that:
+      - ocpp_expose_cert_files.results | map(attribute='stat.exists') | min
+    fail_msg: Issue certificate for the exact --expose FQDN before exposing.
+
+- name: Install nginx
+  become: true
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+
+- name: Install isolated hostname nginx site
+  become: true
+  ansible.builtin.template:
+    src: ocpp-csms-site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+    mode: "0644"
+
+- name: Enable isolated hostname nginx site
+  become: true
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+    dest: "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+    state: link
+
+- name: Validate nginx configuration
+  become: true
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Enable and reload nginx
+  become: true
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded
+    enabled: true
