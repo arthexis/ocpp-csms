@@ -20,8 +20,9 @@ def test_heartbeat_requests_and_responses_not_paired():
         row(4, "Heartbeat", {"current_time": "2026-10-09T14:00:04Z"}, direction="out"),
     ]
     output = format_events(rows)
-    assert "Heartbeat requests (responses not established) ×2" in output
-    assert "→ Heartbeat responses ×2" in output
+    assert "Heartbeat requests (responses not established)" in output
+    assert "Heartbeat ↔ ×1" in output
+    assert "→ Heartbeat responses" in output
     assert "4 responses" not in output
 
 
@@ -81,7 +82,8 @@ def test_unusual_response_details_remain_visible():
         row(2, "Heartbeat", {"current_time": "2026-10-09T14:00:02Z"},
             direction="out"),
     ])
-    assert 'extra={"error": "unexpected"}' in output
+    assert "extra=1" in output
+    assert 'extra={"error": "unexpected"}' in format_events([row(1, "Heartbeat", {"current_time": "now", "error": "unexpected"}, direction="out")], detail=True)
     assert "×2" not in output
 
 
@@ -114,9 +116,9 @@ def test_missing_reply_breaks_observed_exchange_run():
             row(3, "Heartbeat"), row(4, "Heartbeat"),
             row(5, "Heartbeat", {"currentTime": "now"}, direction="out")]
     output = format_events(rows)
-    assert output.count("Heartbeat ↔") == 1
-    assert "Heartbeat requests (responses not established) ×2" in output
-    assert "→ Heartbeat responses" in output
+    assert output.count("Heartbeat ↔") == 2
+    assert "Heartbeat requests (responses not established)" in output
+    assert "→ Heartbeat responses" not in output
 
 
 def test_anomalous_response_interrupts_pairs():
@@ -124,5 +126,40 @@ def test_anomalous_response_interrupts_pairs():
             row(2, "Heartbeat", {"currentTime": "now", "error": "unexpected"}, direction="out"),
             row(3, "Heartbeat"), row(4, "Heartbeat", {"currentTime": "now"}, direction="out")]
     output = format_events(rows)
-    assert "extra=" in output
+    assert "extra=1" in output
+    assert 'extra={"error": "unexpected"}' in format_events(rows, detail=True)
     assert output.count("Heartbeat ↔") == 1
+
+
+def test_configuration_response_extra_count_and_detail():
+    rows = [row(1, "GetConfiguration", {"key": ["LocalAuthListEnabled", "AuthorizationCacheEnabled"]}, direction="out")]
+    compact = format_events(rows)
+    assert "GetConfiguration response extra=1" in compact
+    assert "LocalAuthListEnabled" not in compact
+    detailed = format_events(rows, detail=True)
+    assert 'extra={"key": ["LocalAuthListEnabled", "AuthorizationCacheEnabled"]}' in detailed
+    assert "payload=" not in detailed
+    assert "payload=" in format_events(rows, verbose=True)
+
+
+def test_repeated_requests_then_response_preserves_unmatched_evidence():
+    rows = [
+        row(1, "Heartbeat"),
+        row(2, "Heartbeat"),
+        row(3, "Heartbeat", {"currentTime": "now"}, direction="out"),
+        row(4, "Heartbeat"),
+        row(5, "Heartbeat", {"currentTime": "later"}, direction="out"),
+    ]
+    output = format_events(rows)
+    assert "Heartbeat requests (responses not established)" in output
+    assert output.count("Heartbeat ↔") == 1
+    assert "Heartbeat ↔ ×2" in output
+    assert "→ Heartbeat responses" not in output
+
+
+def test_orphan_heartbeat_response_is_not_assumed_paired():
+    rows = [row(1, "charger_connected", kind="runtime"),
+            row(2, "Heartbeat", {"currentTime": "now"}, direction="out")]
+    output = format_events(rows)
+    assert "→ Heartbeat responses" in output
+    assert "Heartbeat ↔" not in output

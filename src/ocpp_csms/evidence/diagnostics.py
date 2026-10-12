@@ -104,7 +104,7 @@ def transaction_events(
         connection.close()
 
 
-def _summary(row: sqlite3.Row) -> str:
+def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
     """Summarize one stored event without assuming frame correlation."""
     if row["kind"] == "runtime":
         return str(row["action"]).replace("_", " ")
@@ -149,7 +149,7 @@ def _summary(row: sqlite3.Row) -> str:
         known = {"status", "idTagInfo", "transaction_id", "current_time", "currentTime"}
         extras = {k: v for k, v in payload.items() if k not in known}
         if extras:
-            details.append(f"extra={json.dumps(extras, sort_keys=True, ensure_ascii=False)}")
+            details.append(f"extra={json.dumps(extras, sort_keys=True, ensure_ascii=False) if detail else len(extras)}")
         return "→ " + " ".join([action, *details])
     elif action in {"StartTransaction", "StopTransaction"}:
         for key in ("reason", "meter_start", "meter_stop"):
@@ -203,7 +203,7 @@ def _group_key(row: sqlite3.Row) -> tuple[object, ...] | None:
     return None
 
 
-def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False) -> str:
+def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False, detail: bool = False) -> str:
     if not rows:
         return "No matching events."
     lines = [heading, ""] if heading else []
@@ -222,7 +222,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
     def append_group(group: list[sqlite3.Row]) -> None:
         first, last = group[0], group[-1]
         charger = f" {first['charger_id']}" if first["charger_id"] else ""
-        summary = _summary(first)
+        summary = _summary(first, detail=detail)
         if _group_key(first) is not None and first["action"] == "Heartbeat":
             summary = ("Heartbeat requests (responses not established)"
                        if first["direction"] == "in" else "→ Heartbeat responses")
@@ -241,6 +241,17 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
     while index < len(rows):
         first = rows[index]
         if _group_key(first) == ("heartbeat-request", first["charger_id"]):
+            # Preserve unmatched leading requests, while allowing the final
+            # request to form an adjacent observed exchange with a response.
+            request_key = ("heartbeat-request", first["charger_id"])
+            response_key = ("heartbeat-response", first["charger_id"])
+            end = index
+            while end < len(rows) and _group_key(rows[end]) == request_key:
+                end += 1
+            if end - index > 1 and end < len(rows) and _group_key(rows[end]) == response_key:
+                append_group(rows[index:end - 1])
+                index = end - 1
+                first = rows[index]
             count = 0
             end_at = first["occurred_at"]
             while index + 1 < len(rows):
