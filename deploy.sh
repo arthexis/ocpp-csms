@@ -149,7 +149,7 @@ if [ -n "$expose" ]; then
         *.*) ;;
         *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
     esac
-    if [ "$diagnose" -eq 1 ] || [ "$forwarder" -eq 1 ] || [ "$recover" -eq 1 ]; then
+    if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then
         printf '%s\n' '--expose cannot be combined with --diagnose, --forwarder or --recover.' >&2
         exit 2
     fi
