@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "ansible/roles/ocpp_expose/templates/ocpp-csms-site.conf.j2"
 TASKS = ROOT / "ansible/roles/ocpp_expose/tasks/main.yml"
-CLOUD = ROOT / "ansible/playbooks/cloud.yml"
+CLOUD = ROOT / "ansible/playbooks/delegate.yml"
 
 
 def test_wss_site_forwards_auth_upgrade_and_ocpp_subprotocol():
@@ -56,7 +56,7 @@ def test_forwarder_is_optional_for_both_delegate_and_satellite():
     assert "- role: ocpp_discover" not in delegate
     shell = (ROOT / "deploy.sh").read_text()
     assert 'if [ "$forwarder" -eq 1 ]; then' in shell
-    assert '--expose cannot be combined with --diagnose or --recover' in shell
+    assert 'if [ "$diagnose" -eq 1 ] || [ "$recover" -eq 1 ]; then' in shell
 
 
 def test_explicit_satellite_flag_is_default_and_conflicts_with_other_modes():
