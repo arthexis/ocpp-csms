@@ -26,6 +26,7 @@ forwarder=0
 recover=0
 expose=""
 delegate=0
+satellite=0
 certbot_email=""
 no_certbot=0
 
@@ -72,6 +73,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --dev)
             dev=1
+            shift
+            ;;
+        --satellite)
+            satellite=1
             shift
             ;;
         --delegate)
@@ -128,6 +133,11 @@ validate_positive_seconds() {
             ;;
     esac
 }
+
+if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then
+    printf '%s\n' '--satellite cannot be combined with --delegate or --expose.' >&2
+    exit 2
+fi
 
 if [ "$delegate" -eq 1 ] && [ -n "$expose" ]; then
     printf '%s\\n' '--delegate and --expose select the same playbook; use one.' >&2
