@@ -20,8 +20,9 @@ def test_heartbeat_requests_and_responses_not_paired():
         row(4, "Heartbeat", {"current_time": "2026-10-09T14:00:04Z"}, direction="out"),
     ]
     output = format_events(rows)
-    assert "Heartbeat requests (responses not established) ×2" in output
-    assert "→ Heartbeat responses ×2" in output
+    assert "Heartbeat requests (responses not established)" in output
+    assert "Heartbeat ↔ ×1" in output
+    assert "→ Heartbeat responses" in output
     assert "4 responses" not in output
 
 
@@ -116,8 +117,9 @@ def test_missing_reply_breaks_observed_exchange_run():
             row(5, "Heartbeat", {"currentTime": "now"}, direction="out")]
     output = format_events(rows)
     assert output.count("Heartbeat ↔") == 1
-    assert "Heartbeat requests (responses not established) ×2" in output
-    assert "→ Heartbeat responses" in output
+    assert "Heartbeat requests (responses not established)" in output
+    assert output.count("Heartbeat ↔") == 2
+    assert "→ Heartbeat responses" not in output
 
 
 def test_anomalous_response_interrupts_pairs():
