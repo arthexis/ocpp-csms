@@ -23,6 +23,53 @@ Use `ansible/playbooks/cloud.yml` for a dedicated CSMS instance instead of
 no Forwarder, and no traffic interception. It supports Debian-family ARM64
 and x86_64 machines, including Ubuntu 24.04.
 
+### Expose one hostname through nginx (Lightsail)
+
+Use `--expose` for an isolated hostname such as
+`porsche-abb.gelectriic.com`; the nginx file and enabled site symlink
+are named **exactly** `porsche-abb.gelectriic.com`. This deployment uses
+nginx TLS termination on public 443 and a **loopback-only** CSMS WS backend
+on 127.0.0.1:9000, with the Authorization header passed through.
+The explicit trusted-loopback setting allows the backend to verify Basic
+credentials after nginx terminates TLS; it cannot be enabled on a publicly
+bound WS listener. Do not expose port 9000 externally.
+
+Bootstrap in this order:
+
+1. Provision Ubuntu 24.04 Lightsail with a static IPv4 address; point DNS A
+   for the desired hostname at that address.
+2. Configure Lightsail networking and UFW: allow inbound **TCP 443** from
+   ABB's egress addresses (or 0.0.0.0/0 if those are not known), inbound
+   **TCP 80** temporarily for ACME HTTP-01 issuance/renewal as needed,
+   and inbound **TCP 22** only from an operator-approved IP range.
+   **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
+   Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
+   traffic as required; do not assume ABB uses a fixed source IP.
+3. Install `ocpp_csms` with `ansible-playbook ansible/playbooks/cloud.yml
+   -i localhost, -c local` from the non-root checkout before exposing it.
+4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
+   the service and verify `ocpp-csms auth status` reports `basic`.
+5. Obtain a publicly trusted certificate for the exact FQDN with an ACME
+   client, storing it at `/etc/letsencrypt/live/<FQDN>/fullchain.pem`
+   and `privkey.pem`; verify unattended renewal and nginx reload.
+6. Run `./deploy.sh --expose porsche-abb.gelectriic.com`. This chooses
+   the cloud playbook, configures the CSMS to loopback only, checks Basic
+   authentication and certificate presence, and creates the corresponding
+   nginx site. Deploy as a non-root user with sudo/become rights.
+7. Verify `sudo nginx -t`, `systemctl status nginx ocpp-csms`,
+   correct public hostname/certificate and **401 for missing/wrong Basic**
+   credentials on the WSS upgrade. Prove port 9000 is unreachable
+   from outside the instance before ABB handover.
+8. Run a full authenticated public WSS simulator charge from Gway-001
+   and verify stored evidence on Lightsail. Do not hand ABB the URL until
+   this succeeds.
+
+The `--expose` path is opt-in; plain `./deploy.sh` continues to
+deploy a satellite as before. One cloud instance is intended to host
+one client-vendor's CSMS; separate hostnames on a shared nginx process
+alone do **not** isolate databases or credentials. Use a separate
+instance/configuration for a truly independent client deployment.
+
 ### HTTP Basic authentication (WSS)
 
 The default for existing local deployments is `none` (no `auth.json`).
