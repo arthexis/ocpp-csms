@@ -34,6 +34,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
     add(events, "-f", "--follow", action="store_true", help="Follow newly recorded events until Ctrl+C (JSON uses JSONL)")
+    add(events, "--detail", action="store_true", help="Expand additional event fields in the grouped timeline")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
     alerts = subcommands.add_parser("alerts", help="Show exceptional events without grouping")
@@ -89,6 +90,8 @@ def run_events(args: argparse.Namespace) -> int:
         raise ValueError("--raw requires --json")
     if args.verbose and args.json:
         raise ValueError("--verbose cannot be combined with --json")
+    if args.detail and args.json:
+        raise ValueError("--detail cannot be combined with --json")
     now = datetime.now(timezone.utc)
     since = resolve_time(args.since, now=now) if args.since else None
     until = resolve_time(args.until, now=now) if args.until else None
@@ -114,7 +117,7 @@ def run_events(args: argparse.Namespace) -> int:
     if args.json:
         emit_json(raw_events_contract(rows) if args.raw else events_contract(rows))
     else:
-        print(format_events(rows, verbose=args.verbose))
+        print(format_events(rows, verbose=args.verbose, detail=args.detail))
     return 0
 
 
