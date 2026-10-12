@@ -45,3 +45,15 @@ def test_exposure_rollback_and_auth_gate():
     assert "mode == 'basic'" in tasks
     cloud = CLOUD.read_text()
     assert "Verify Basic auth is configured before cloud deployment" in cloud
+
+
+def test_forwarder_is_optional_for_both_delegate_and_satellite():
+    delegate = (ROOT / "ansible/playbooks/delegate.yml").read_text()
+    satellite = (ROOT / "ansible/playbooks/satellite.yml").read_text()
+    for playbook in (delegate, satellite):
+        assert "- role: ocpp_forwarder" in playbook
+        assert "when: ocpp_forwarder_enabled | default(false) | bool" in playbook
+    assert "- role: ocpp_discover" not in delegate
+    shell = (ROOT / "deploy.sh").read_text()
+    assert 'if [ "$forwarder" -eq 1 ]; then' in shell
+    assert '--expose cannot be combined with --diagnose or --recover' in shell
