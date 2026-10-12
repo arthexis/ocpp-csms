@@ -7,3 +7,12 @@
     - role: ocpp_discover
     - role: ocpp_forwarder
       when: ocpp_forwarder_enabled | default(false) | bool
+
+  post_tasks:
+    - name: Disable Forwarder when not part of selected deployment profile
+      become: true
+      ansible.builtin.command:
+        argv: [systemctl, disable, --now, ocpp-forwarder.service]
+      changed_when: false
+      failed_when: false
+      when: not (ocpp_forwarder_enabled | default(false) | bool)
