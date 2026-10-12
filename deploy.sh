@@ -25,6 +25,8 @@ dev=0
 forwarder=0
 recover=0
 expose=""
+certbot_email=""
+no_certbot=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -80,6 +82,19 @@ while [ "$#" -gt 0 ]; do
             expose=${1#--expose=}
             shift
             ;;
+        --email)
+            [ "$#" -ge 2 ] || { printf 'Missing value for --email.\n' >&2; exit 2; }
+            certbot_email=$2
+            shift 2
+            ;;
+        --email=*)
+            certbot_email=${1#--email=}
+            shift
+            ;;
+        --no-certbot)
+            no_certbot=1
+            shift
+            ;;
         --forwarder)
             forwarder=1
             shift
@@ -125,7 +140,18 @@ if [ -n "$expose" ]; then
         exit 2
     fi
     PLAYBOOK="$ROOT/ansible/playbooks/cloud.yml"
+    if [ -n "$certbot_email" ]; then
+        set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
+    fi
+    if [ "$no_certbot" -eq 1 ]; then
+        set -- -e ocpp_csms_no_certbot=true "$@"
+    fi
     set -- -e "ocpp_csms_expose=$expose" -e ocpp_csms_host=127.0.0.1 "$@"
+fi
+
+if [ -z "$expose" ] && { [ -n "$certbot_email" ] || [ "$no_certbot" -eq 1 ]; }; then
+    printf '%s\n' '--email and --no-certbot require --expose.' >&2
+    exit 2
 fi
 
 if [ -n "$observe_seconds" ]; then
