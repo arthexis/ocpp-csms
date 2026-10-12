@@ -45,7 +45,7 @@ Bootstrap in this order:
    **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
    Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
    traffic as required; do not assume ABB uses a fixed source IP.
-3. Bootstrap the CSMS CLI safely with `./deploy.sh --cloud`; this runs the
+3. Bootstrap the CSMS CLI safely with `./deploy.sh --delegate`; this runs the
    cloud playbook with the CSMS listener bound only to `127.0.0.1` and does
    not install nginx or expose an anonymous public OCPP service.
 4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
@@ -68,7 +68,7 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
-The `--cloud` mode bootstraps a loopback-only CSMS for credential setup;
+The `--delegate` mode bootstraps a loopback-only CSMS for credential setup;
 `--expose` adds nginx/Certbot after credentials exist. The `--expose` path
 is opt-in; plain `./deploy.sh` continues to
 deploy a satellite as before. One cloud instance is intended to host
