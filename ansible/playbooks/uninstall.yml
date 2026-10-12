@@ -1,0 +1,137 @@
+---
+# Explicit uninstall: remove managed software and exposure, retain user data.
+- name: Uninstall managed OCPP CSMS appliance
+  hosts: all
+  gather_facts: true
+  vars:
+    ocpp_install_prefix: "{{ ansible_env.HOME }}/.local/share/ocpp-csms"
+  tasks:
+    - name: Ensure uninstall runs as non-root appliance operator
+      ansible.builtin.assert:
+        that:
+          - ansible_user_id != 'root'
+          - ansible_user_uid | int != 0
+
+    - name: Refuse uninstall while charging or persistence state is unsafe
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - ocpp_csms.install_preflight
+          - --data-dir
+          - "{{ ansible_env.HOME }}/ocpp-csms-data"
+          - --json
+      environment:
+        PYTHONPATH: "{{ playbook_dir }}/../../src"
+      changed_when: false
+
+    - name: Stop and disable OCPP managed services if present
+      become: true
+      ansible.builtin.command:
+        argv: [systemctl, disable, --now, "{{ item }}"]
+      loop:
+        - ocpp-forwarder.service
+        - ocpp-discover.service
+        - ocpp-csms.service
+      register: ocpp_uninstall_disable
+      changed_when: false
+      failed_when: false
+
+    - name: Remove managed systemd unit files
+      become: true
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop:
+        - ocpp-forwarder.service
+        - ocpp-discover.service
+        - ocpp-csms.service
+
+    - name: Reload systemd service registrations
+      become: true
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Remove managed service command symlinks
+      become: true
+      ansible.builtin.file:
+        path: "/usr/local/bin/{{ item }}"
+        state: absent
+      loop:
+        - ocpp-csms
+        - ocpp-discover
+
+    - name: Remove managed nginx site configuration
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
+        - "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+        - "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
+      when: ocpp_csms_expose | default('') | length > 0
+
+    - name: Remove dedicated nginx certificate renewal hook
+      become: true
+      ansible.builtin.file:
+        path: /etc/letsencrypt/renewal-hooks/deploy/ocpp-csms-nginx.sh
+        state: absent
+      when: ocpp_csms_expose | default('') | length > 0
+
+    - name: Validate nginx after removing endpoint
+      become: true
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      when: ocpp_csms_expose | default('') | length > 0
+
+    - name: Reload nginx after removing endpoint
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when: ocpp_csms_expose | default('') | length > 0
+
+    - name: Check delegate Basic authentication credentials
+      become: true
+      ansible.builtin.stat:
+        path: /etc/ocpp-csms/auth.json
+      register: ocpp_uninstall_auth
+
+    - name: Archive active Basic credentials before switching deployment type
+      become: true
+      ansible.builtin.copy:
+        src: /etc/ocpp-csms/auth.json
+        dest: /etc/ocpp-csms/auth.uninstalled.json
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      when: ocpp_uninstall_auth.stat.exists | default(false)
+
+    - name: Deactivate former Basic authentication configuration
+      become: true
+      ansible.builtin.file:
+        path: /etc/ocpp-csms/auth.json
+        state: absent
+
+    - name: Remove Forwarder identity and replay state for fresh installation
+      become: true
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/ocpp-forwarder
+        - /var/lib/ocpp-forwarder
+
+    - name: Remove replaceable program releases, not application data
+      ansible.builtin.file:
+        path: "{{ ocpp_install_prefix }}"
+        state: absent
+
+    - name: Report preserved data
+      ansible.builtin.debug:
+        msg: >-
+          CSMS application data, archived authorization credentials and certificate
+          archive retained; deployment profile is cleared by deploy.sh after
+          this playbook succeeds.
