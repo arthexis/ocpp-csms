@@ -131,6 +131,21 @@
       - "86400"
   changed_when: false
 
+- name: Verify certificate matches the exact public DNS hostname
+  become: true
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "/etc/letsencrypt/live/{{ ocpp_csms_expose }}/fullchain.pem"
+      - -noout
+      - -checkhost
+      - "{{ ocpp_csms_expose }}"
+  register: ocpp_expose_hostname_check
+  changed_when: false
+  failed_when: "'does match certificate' not in ocpp_expose_hostname_check.stdout"
+
 - name: Install hostname-isolated WSS nginx site
   become: true
   ansible.builtin.template:
