@@ -6,8 +6,9 @@ import asyncio
 import json
 
 from ocpp_csms.control import send_control
+from ocpp_csms.cli.options import add_cp, add_connector, add_json, require_nonnegative
 
-COMMANDS = ("trigger", "availability", "unlock")
+COMMANDS = ("trigger", "avail", "availability", "unlock")
 TRIGGERS = {
     "boot": "BootNotification",
     "heartbeat": "Heartbeat",
@@ -20,28 +21,30 @@ TRIGGERS = {
 
 def add_maintenance_commands(subcommands):
     commands = {}
-    for name in COMMANDS:
-        parser = subcommands.add_parser(name, help={
+    for name in ("trigger", "avail", "unlock"):
+        parser = subcommands.add_parser(name, aliases=["availability"] if name == "avail" else [], help={
             "trigger": "Request an OCPP message from a connected charge point",
-            "availability": "Set charge point or connector availability",
+            "avail": "Set charge point or connector availability",
             "unlock": "Request physical connector unlock",
         }[name])
-        parser.add_argument("--cp", "--charger", dest="charger", help="Charge point ID (optional with one connection)")
-        parser.add_argument("-j", "--json", action="store_true", help="Print OCPP response as JSON")
+        add_cp(parser, help="Charge point ID (optional with one connection)")
+        add_json(parser, help="Print OCPP response as JSON")
         if name == "trigger":
             parser.add_argument("message", choices=tuple(TRIGGERS))
-            parser.add_argument("-c", "--connector", type=int, help="Physical connector for status/meter triggers")
-        elif name == "availability":
+            add_connector(parser, help="Physical connector for status/meter triggers")
+        elif name == "avail":
             parser.add_argument("action", choices=("enable", "disable"))
-            parser.add_argument("-c", "--connector", type=int, default=0, help="Connector ID (0 = whole charge point)")
+            add_connector(parser, default=0, help="Connector ID (0 = whole charge point)")
         else:
-            parser.add_argument("-c", "--connector", type=int, required=True, help="Physical connector ID")
+            add_connector(parser, required=True, help="Physical connector ID")
         commands[name] = parser
+        if name == "avail":
+            commands["availability"] = parser
     return commands
 
 
 def maintenance_request(args):
-    request = {"command": args.command}
+    request = {"command": "availability" if args.command == "avail" else args.command}
     if args.charger is not None:
         request["charger"] = args.charger
     if args.command == "trigger":
@@ -52,9 +55,8 @@ def maintenance_request(args):
         request["message"] = TRIGGERS[args.message]
         if args.connector is not None:
             request["connector"] = args.connector
-    elif args.command == "availability":
-        if args.connector < 0:
-            raise ValueError("connector must be zero or greater")
+    elif args.command in {"avail", "availability"}:
+        require_nonnegative(args.connector, name="connector")
         request["connector"] = args.connector
         request["type"] = "Operative" if args.action == "enable" else "Inoperative"
     else:
