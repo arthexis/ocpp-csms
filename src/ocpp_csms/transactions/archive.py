@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -98,6 +97,8 @@ class TransactionArchive:
         self._recent_starts: dict[str, tuple[int, datetime]] = {}
         self._next_transaction_id = 1
         self._sqlite_reserved_ids: set[int] = set()
+        self.reservations_dir = self.data_dir / "transaction-id-reservations"
+        self.reservations_dir.mkdir(parents=True, exist_ok=True)
         self._scan_existing()
 
     def _scan_existing(self) -> None:
@@ -129,39 +130,46 @@ class TransactionArchive:
                     self._recent_starts[key] = (transaction_id, created_at)
         self._next_transaction_id = highest_local + 1
 
-    def _next_available_local_id(self) -> int:
-        reserved = set(self._paths) | self._sqlite_reserved_ids
-        locked = False
+    def _reserve_next_local_id(self) -> int:
+        """Reserve a unique ID on disk before publishing the transaction.
+
+        Bootstrap requires a readable SQLite snapshot. Once reconciled,
+        allocation never depends on acquiring a SQLite read lock.
+        """
         database = self.data_dir / DATABASE_FILENAME
-        if database.exists():
-            try:
+        marker = self.reservations_dir / ".reconciled"
+        if not marker.exists():
+            if database.exists():
                 with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=0) as connection:
-                    self._sqlite_reserved_ids.update(
-                        int(row[0]) for row in connection.execute(
-                            "SELECT transaction_id FROM transactions"
-                        )
-                    )
-            except sqlite3.OperationalError as exc:
-                if "locked" not in str(exc).lower():
-                    raise
-                # A locked database must not reject a charger start. Keep
-                # previously observed IDs and all durable archive reservations.
-                locked = True
-                LOGGER.warning("SQLite locked during transaction ID allocation; using collision-resistant fallback")
-            reserved.update(self._sqlite_reserved_ids)
-        if locked:
-            # A previously unseen SQLite-only ID cannot be proven absent
-            # while SQLite is exclusively locked. Avoid the sequential range
-            # and choose a positive OCPP-compatible 31-bit identifier.
-            for _ in range(128):
-                candidate = 1_073_741_824 + secrets.randbelow(1_073_741_823)
-                if candidate not in reserved:
-                    return candidate
-            raise RuntimeError("could not allocate a distinct transaction ID")
-        transaction_id = self._next_transaction_id
-        while transaction_id in reserved:
-            transaction_id += 1
-        return transaction_id
+                    ids = [int(row[0]) for row in connection.execute(
+                        "SELECT transaction_id FROM transactions"
+                    )]
+                for transaction_id in ids:
+                    (self.reservations_dir / str(transaction_id)).touch(exist_ok=True)
+            marker.touch(exist_ok=True)
+        candidate = self._next_transaction_id
+        while candidate <= 2_147_483_647:
+            if candidate in self._paths:
+                candidate += 1
+                continue
+            try:
+                fd = os.open(
+                    self.reservations_dir / str(candidate),
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
+                )
+            except FileExistsError:
+                candidate += 1
+                continue
+            os.close(fd)
+            return candidate
+        raise RuntimeError("OCPP transaction ID space exhausted")
+
+    def _next_available_local_id(self) -> int:
+        """Preview the next ID; only _reserve_next_local_id claims it."""
+        candidate = self._next_transaction_id
+        while candidate in self._paths or (self.reservations_dir / str(candidate)).exists():
+            candidate += 1
+        return candidate
 
     async def start(self, charge_point_id: str, payload: dict[str, Any]) -> int:
         async with self._lock:
@@ -170,7 +178,7 @@ class TransactionArchive:
             recent = self._recent_starts.get(key)
             if recent is not None and timedelta(0) <= now - recent[1] <= _START_RETRY_WINDOW:
                 return recent[0]
-            transaction_id = self._next_available_local_id()
+            transaction_id = self._reserve_next_local_id()
             received_at = utc_now_iso()
             record = {
                 "transaction_id": transaction_id,
