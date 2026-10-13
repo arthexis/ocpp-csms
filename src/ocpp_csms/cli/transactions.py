@@ -24,7 +24,7 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     selection.add_argument("--last", action="store_true", help="Show the most recent transaction, including active")
     add_cp(transactions, help="Filter by charge point ID")
     add_connector(transactions, help="Filter by connector ID")
-    add(transactions, "--id-tag", help="Filter by OCPP idTag")
+    add(transactions, "--rfid", dest="id_tag", help="Filter by OCPP idTag")
     add_time_bounds(transactions, since_help="Lower timestamp bound (ISO-8601 or relative, e.g. 7D)", until_help="Upper timestamp bound (ISO-8601 or relative, e.g. 2H)")
     add(transactions, "--between", nargs=2, metavar=("START", "END"), help="Activity between two ISO-8601 or relative times")
     add(transactions, "--at", help="Activity on the UTC day containing this ISO-8601 or relative time")
@@ -129,12 +129,11 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     start.add_argument("charger", nargs="?")
     start.add_argument("--cp", dest="charger_option")
     start.add_argument("-c", "--connector", type=int)
-    start.add_argument("--rfid", "--id-tag", dest="id_tag")
+    start.add_argument("--rfid", dest="id_tag")
     _add_timing_options(start)
 
     stop = operations.add_parser("stop", help="Request remote transaction stop")
-    stop.add_argument("transaction_id", nargs="?", type=int)
-    stop.add_argument("--txn", "--transaction", "-t", dest="transaction_option", type=int)
+    stop.add_argument("transaction_id", type=int)
     stop.add_argument("--cp", dest="charger_option")
     _add_timing_options(stop)
 

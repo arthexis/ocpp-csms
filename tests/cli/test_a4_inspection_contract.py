@@ -13,8 +13,8 @@ def test_capability_request_is_consistent_and_read_only():
     }
 
 
-def test_inspect_capabilities_reconcile_share_cp_aliases():
+def test_inspect_capabilities_reconcile_use_canonical_cp():
     parser, _ = build_parser()
     for command in ("inspect", "capabilities", "reconcile"):
-        assert parser.parse_args([command, "--charger", "CP1", "-j"]).charger == "CP1"
+        assert parser.parse_args([command, "--cp", "CP1", "-j"]).charger == "CP1"
         assert parser.parse_args([command, "--cp", "CP2", "--json"]).json

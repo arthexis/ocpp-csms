@@ -83,7 +83,7 @@ def test_download_show_sensitive_is_explicit(monkeypatch, parse_cli, tmp_path):
 
 
 def test_download_rejects_duplicate_charger_selectors(parse_cli):
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--charger", "charger-b")) == 2
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--cp", "charger-b")) == 2
 
 
 def test_download_is_recognized_by_unified_cli_parser(parse_cli):

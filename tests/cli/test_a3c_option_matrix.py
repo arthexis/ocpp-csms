@@ -5,11 +5,11 @@ from ocpp_csms.cli import build_parser
 
 
 @pytest.mark.parametrize("argv,expected", [
-    (["trigger", "heartbeat", "--charger", "CP1", "-j"], {"charger": "CP1", "json": True}),
+    (["trigger", "heartbeat", "--cp", "CP1", "-j"], {"charger": "CP1", "json": True}),
     (["avail", "disable", "--cp", "CP1", "-c", "0"], {"charger": "CP1", "connector": 0}),
     (["availability", "disable", "--cp", "CP1", "-c", "0"], {"charger": "CP1", "connector": 0}),
     (["unlock", "--cp", "CP1", "--connector", "2"], {"charger": "CP1", "connector": 2}),
-    (["capabilities", "--charger", "CP1", "-j"], {"charger": "CP1", "json": True}),
+    (["capabilities", "--cp", "CP1", "-j"], {"charger": "CP1", "json": True}),
     (["reconcile", "--cp", "CP1", "-c", "1"], {"charger": "CP1", "connector": 1}),
     (["energy", "--cp", "CP1", "-c", "1", "--since", "2026-01-01", "--until", "2026-02-01", "-j"],
      {"charger": "CP1", "connector": 1, "since": "2026-01-01", "until": "2026-02-01", "json": True}),

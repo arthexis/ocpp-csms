@@ -39,7 +39,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
 
     alerts = subcommands.add_parser("alerts", help="Show exceptional events without grouping")
     add(alerts, "charger", nargs="?", help="Optional charge point ID")
-    add(alerts, "--cp", "--charger", dest="cp", help="Filter by charge point ID")
+    add(alerts, "--cp", dest="cp", help="Filter by charge point ID")
     add(alerts, "--transaction", "--txn", dest="transaction", type=int)
     add(alerts, "--since", help="Lower timestamp bound")
     add(alerts, "--until", help="Upper timestamp bound")

@@ -2,10 +2,27 @@ import pytest
 
 import ocpp_csms.cli.control as control_module
 from ocpp_csms.cli.control import control_request, run_control
+from ocpp_csms.cli.transactions import build_txn_operations_parser
+
+
+@pytest.fixture
+def parse_cli(parse_cli):
+    """Keep control request assertions on the canonical transaction parser."""
+    def parse(*argv):
+        if argv[0] in {"start", "stop"}:
+            args = build_txn_operations_parser().parse_args(argv)
+            args.command = args.operation
+            if args.operation == "stop":
+                args.transaction = args.transaction_id
+                args.charger = None
+            return args
+        return parse_cli(*argv)
+    return parse
+
 
 
 def test_start_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("start", "--connector", "2", "--id-tag", "REMOTE", "--now")) == {
+    assert control_request(parse_cli("start", "--connector", "2", "--rfid", "REMOTE", "--now")) == {
         "command": "start",
         "timing": "now",
         "id_tag": "REMOTE",
@@ -19,13 +36,12 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
         "id_tag": "REMOTE",
         "connector": 2,
     }
-    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--id-tag", "REMOTE", "--now")) == expected
-    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
-    assert control_request(parse_cli("start", "--charger", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--rfid", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("stop", "--transaction", "42", "--now")) == {
+    assert control_request(parse_cli("stop", "42", "--now")) == {
         "command": "stop",
         "timing": "now",
         "transaction": 42,
@@ -37,8 +53,7 @@ def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
         "charger": "charger-a",
         "transaction": 42,
     }
-    assert control_request(parse_cli("stop", "charger-a", "--transaction", "42", "--now")) == expected
-    assert control_request(parse_cli("stop", "--cp", "charger-a", "--txn", "42", "--now")) == expected
+    assert control_request(parse_cli("stop", "42", "--cp", "charger-a", "--now")) == expected
 
 
 def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
@@ -86,10 +101,9 @@ def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
 @pytest.mark.parametrize(
     "args",
     [
-        ("start", "--connector", "-1", "--id-tag", "REMOTE", "--now"),
-        ("start", "-c", "-1", "--id-tag", "REMOTE", "--now"),
-        ("stop", "--transaction", "-1", "--now"),
-        ("stop", "--txn", "-1", "--now"),
+        ("start", "--connector", "-1", "--rfid", "REMOTE", "--now"),
+        ("start", "-c", "-1", "--rfid", "REMOTE", "--now"),
+        ("stop", "-1", "--now"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
@@ -97,23 +111,22 @@ def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_control_commands_default_to_now(cli_parser):
+def test_control_commands_default_to_now(parse_cli, cli_parser):
     for args in (
         ["start"],
-        ["stop", "--transaction", "42"],
+        ["stop", "42"],
         ["reset"],
     ):
-        parsed = cli_parser.parse_args(args)
+        parsed = parse_cli(*args)
         assert control_request(parsed)["timing"] == "now"
 
     with pytest.raises(SystemExit):
         cli_parser.parse_args(["reset", "--now", "--after", "5"])
 
 
-def test_start_optional_tag_and_rfid_alias(parse_cli):
+def test_start_optional_rfid(parse_cli):
     assert control_request(parse_cli("start"))["id_tag"] == "AUTO"
     assert control_request(parse_cli("start", "--rfid", "TEST001"))["id_tag"] == "TEST001"
-    assert control_request(parse_cli("start", "--id-tag", "TEST002"))["id_tag"] == "TEST002"
 
 
 @pytest.mark.parametrize(
@@ -144,6 +157,6 @@ def test_delayed_timing_requires_positive_seconds(parse_cli, args):
 
 
 def test_remote_start_uses_cp_for_charge_point(parse_cli):
-    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--id-tag", "REMOTE", "--now")
+    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")
     assert args.charger_option == "charger-a"
     assert args.connector == 2
