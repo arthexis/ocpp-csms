@@ -48,3 +48,25 @@ def test_retired_charge_point_spellings_rejected(parse_cli):
         with pytest.raises(SystemExit) as error:
             parse_cli(name)
         assert error.value.code == 2
+
+
+def test_main_dispatches_cp_and_cps_without_aliases(monkeypatch, capsys):
+    import sys
+    from ocpp_csms.cli import main
+
+    seen = []
+    monkeypatch.setattr("ocpp_csms.cli.run_chargers", lambda args: seen.append((args.command, getattr(args, "charger", None))) or 0)
+    for argv in (["cp", "charger-a"], ["cps", "--charging"]):
+        monkeypatch.setattr(sys, "argv", ["ocpp-csms", *argv])
+        assert main() == 0
+    assert seen == [("cp", "charger-a"), ("cps", None)]
+
+
+def test_cp_and_cps_json_contracts(parse_cli, tmp_path, capsys):
+    import json
+
+    for argv in (("cp", "charger-a", "-j"), ("cps", "-j")):
+        args = parse_cli("--data-dir", str(tmp_path), *argv)
+        assert run_chargers(args) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert isinstance(payload, dict)
