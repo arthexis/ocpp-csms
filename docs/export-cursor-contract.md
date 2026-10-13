@@ -39,3 +39,11 @@ Additive fields may remain in `export/v1` only when existing meanings are unchan
 ## Chunk B read-only boundary (implementation in progress)
 
 The export path reads the transaction-change SQLite journal with a read-only connection and never creates it or reconciles archives. If the journal has not been initialized, the change feed is empty. The producer archives each committed transaction mutation and reconciles unjournaled archive revisions during `TransactionArchive` initialization, not during export. A crash between the JSON replacement and journal insertion is recovered when the producer next initializes; until that recovery occurs, an export can temporarily lag the archive. This is not a cross-store atomic snapshot guarantee. This strategy does not reconstruct intermediate revisions lost in the crash window and needs explicit operational verification in chunk C.
+
+## Chunk B additive fields
+
+Export transaction snapshots include nullable `start_event_at`, `start_received_at`, `stop_event_at`, `stop_received_at`, per-meter-sample event/receive times, and a `quality` object. Transaction-change entries expose the same information under `metadata`, alongside the archived raw record. Timestamp provenance is UTC-normalized only when the original string has an explicit timezone; missing, invalid and timezone-naive event times remain null. The existing `started_at` and `stopped_at` meanings are unchanged.
+
+Quality indicators are evidence-based: `active` reflects an open/recovered record without a stop; `incomplete` means missing start or stop; `missing_meter` means missing start/stop or either boundary meter reading; `recovered` marks recovered origins/missing start; `inferred` marks an inferred stop; `corrected` currently means an inferred recovery later reconciled with an actual stop, **not** an arbitrary manual archive edit. Manual edits are detectable as change revisions but not yet classified as corrected by this flag.
+
+The transaction-change journal is a separate SQLite database. Export does not write it. Producer startup reconciles the archive/journal gap. No global cross-store atomic snapshot or replay of overwritten intermediate archive revisions is promised.
