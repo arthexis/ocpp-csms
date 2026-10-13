@@ -85,7 +85,9 @@ def _history(args):
 
 
 def run_diagnostics(args):
-    if not args.now:\n        if args.location or args.until or args.retries is not None or args.retry_interval is not None:\n            raise ValueError("--location, --until, --retries and --retry-interval require --now")
+    if not args.now:
+        if args.location or args.until or args.retries is not None or args.retry_interval is not None:
+            raise ValueError("--location, --until, --retries and --retry-interval require --now")
         result = _history(args)
         if args.json:
             print(json.dumps({"events": result}, ensure_ascii=False))
