@@ -16,7 +16,7 @@ from ocpp_csms.session.commands import SessionCommands
     (("reserve", "cancel", "1"), "reserve"),
     (("firmware", "status"), "firmware"),
     (("firmware", "history", "--limit", "7"), "firmware"),
-    (("diagnostics", "history", "--limit", "7"), "diagnostics"),
+    (("diagnose", "--list", "--limit", "7"), "diagnose"),
     (("data-transfer", "send", "--vendor", "example", "--data", '{"a":1}'), "data-transfer"),
     (("trigger", "heartbeat"), "trigger"),
     (("availability", "enable"), "availability"),
