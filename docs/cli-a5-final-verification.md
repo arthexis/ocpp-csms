@@ -22,6 +22,10 @@ Baseline: A5.3 merged as #234 (`4c1dd52`). This report is a read-only verificati
 4. **End-to-end physical integration:** full device/deployment verification is separate from CLI parser acceptance; no physical charger was exercised in A5.
 5. **#224/#226:** export transaction-change cursor and related PR remain separate; this report does not certify or modify that work.
 
+## A5.4 focused test refactor
+
+Refactored `tests/cli/test_a5_integration_contracts.py` to share an isolated `invoke_cli` fixture for actual entrypoint dispatch, global `--data-dir` setup, and argv patching. Existing parameterized control, error, reservation and JSON assertions remain intact. No runtime module or expected contract changed. Fresh CI is required on this refactored PR head before acceptance.
+
 ## Closure recommendation
 
 The repository-local CLI A1–A5 migration is **ready for acceptance review** if A5.4 CI is green. Close the CLI migration track only with explicit acknowledgment of external-caller and runtime integration boundaries above. Do not declare #224, #226, or live field tests complete by implication. Preserve all compatibility entry points until a separately justified removal.
