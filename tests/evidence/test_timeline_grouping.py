@@ -360,9 +360,9 @@ def test_meter_leading_missing_response_not_counted_as_exchange():
     rows = [meter(1), meter(2), meter(3, response=True),
             meter(4), meter(5, response=True)]
     output = format_events(rows)
-    assert "MeterValues C1 tx=42 ↔ ×1" in output
-    assert output.count("MeterValues C1 tx=42 ↔ ×1") == 2
-    assert "14:00:01Z" in output
+    assert output.count("MeterValues C1 tx=42 ↔ ×2") == 1
+    assert "2026-10-09T14:00:01Z CP1  MeterValues C1 tx=42" in output
+    assert len(output.splitlines()) == 2
     assert "↔ ×3" not in output
 
 
