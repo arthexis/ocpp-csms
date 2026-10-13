@@ -16,7 +16,7 @@ _ACTIONS = {"GetDiagnostics", "DiagnosticsStatusNotification"}
 
 
 def add_diagnostics_command(subcommands):
-    parent = subcommands.add_parser("diagnostics", help="Request charger-generated diagnostics and inspect upload evidence")
+    parent = subcommands.add_parser("diag", aliases=["diagnostics"], help="Request charger-generated diagnostics and inspect upload evidence")
     actions = parent.add_subparsers(dest="diagnostics_action", required=True)
     request = actions.add_parser("request", help="Request charger diagnostic upload to an external destination")
     request.add_argument("--location", required=True, help="Charger-reachable HTTP(S)/FTP(S) upload URL")
