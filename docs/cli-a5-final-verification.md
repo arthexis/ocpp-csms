@@ -7,7 +7,7 @@ Baseline: A5.3 merged as #234 (`4c1dd52`). This report is a read-only verificati
 | #216 requirement | Evidence and disposition |
 | --- | --- |
 | Canonical command families and operator capability mapping | A1 historical matrix in `docs/cli-a1-command-contract.md`; current root registration in `src/ocpp_csms/cli/__init__.py`. `cp`/`cps`, `txn` query and operations, `reserve` list/detail/create/cancel, maintenance, diagnostics, `export`, `mail`, and `report` remain represented. No unrepresented capability confirmed in this pass. |
-| Parser module / alias inventory | A1 matrix and A4d #227–#231 cover command organization; `src/ocpp_csms/cli/parser.py:add_transaction_command` remains exported but has no in-repository caller in code search. **Retain** until external consumers are assessed; do not infer safe removal. |
+| Parser module / alias inventory | A1 matrix and A4d #227–#231 cover command organization; `src/ocpp_csms/cli/parser.py:add_transaction_command` had no in-repository caller in code search; it was subsequently retired in PR #236 under the approved compatibility cleanup. External consumers were not independently audited. |
 | Repository invocation migration | A5.1 #232 guard scans shell/YAML executable surfaces; A5.2 #233 corrected confirmed README examples. Manual review of `scripts/pr_simulator_smoke.py` and `scripts/persistent_simulator_check.py` finds the former invokes `ocpp-csms serve` and both invoke `ocpp-simulator run` (not deprecated transaction/reservation CLI). These scripts do not require migration. Dynamic callers outside the repository are unverified. |
 | Stable machine integrations | `src/ocpp_forwarder/exporter.py:read_export` invokes `ocpp-csms --data-dir DIR export --after N --limit N --json`; schema remains `ocpp-csms/export/v1`. A5.3 #234 verifies schema registration and `ocpp-csms/transactions/v1` read schema. **Export cursor evolution belongs to #224/#226**, not A5. |
 | Output, exit, and safety semantics | A4d contracts and A5.3 #234 cover canonical transaction control payloads, invalid requests (exit 2), read-only reservation ID JSON, and query/operation parser boundary. Existing `reserve` tests cover no charger query and exact-ID filtering; existing control/recovery tests remain the safety authority. |
@@ -29,3 +29,10 @@ Refactored `tests/cli/test_a5_integration_contracts.py` to share an isolated `in
 ## Closure recommendation
 
 The repository-local CLI A1–A5 migration is **ready for acceptance review** if A5.4 CI is green. Close the CLI migration track only with explicit acknowledgment of external-caller and runtime integration boundaries above. Do not declare #224, #226, or live field tests complete by implication. Preserve all compatibility entry points until a separately justified removal.
+
+## Post-A5 final acceptance (PR #236)
+
+- PR #236 merged to main after the full CI matrix passed. The standalone `start`, `stop`, and `recover` entry points, `--charger`, transaction-stop option ID aliases, affected `--id-tag` spellings, and the unused Python parser facade were retired under explicit operator decisions.
+- Canonical `txn start`, `txn stop ID`, `txn recover`, `--cp`, and `--rfid` remain; distinct `reset`, diagnostics, `events --txn`, export, and forwarder contracts were preserved.
+- Intentional additional aliases remain, including `availability` for `avail`, and charger/cp naming where still registered. These are outside the six explicitly approved retirements and should not be silently removed.
+- The repository-local migration and CI acceptance requirements for issue #216 are satisfied. External downstream consumers and physical field validation remain separate deployment considerations; the CLI test suite does not certify either.
