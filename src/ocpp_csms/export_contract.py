@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
 from ocpp_csms.transactions.contracts import transaction_item
 from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.transactions.changes import changes_page
 
 SCHEMA = "ocpp-csms/export/v1"
 
@@ -122,6 +124,8 @@ def export_contract(
 
     status = status_contract(appliance_status(data_dir))["data"]
     data = {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "transaction_changes": changes_page(data_dir, after=0, limit=limit),
         "source_id": source_id(data_dir),
         "cursor": {
             "after": after,
