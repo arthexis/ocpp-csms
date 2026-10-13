@@ -100,6 +100,13 @@ class TransactionArchive:
         self.reservations_dir = self.data_dir / "transaction-id-reservations"
         self.reservations_dir.mkdir(parents=True, exist_ok=True)
         self._scan_existing()
+        # Establish the SQLite snapshot before an unrelated writer locks it.
+        if (self.data_dir / DATABASE_FILENAME).exists():
+            try:
+                self._reconcile_reservations()
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
 
     def _scan_existing(self) -> None:
         highest_local = 0
@@ -130,23 +137,23 @@ class TransactionArchive:
                     self._recent_starts[key] = (transaction_id, created_at)
         self._next_transaction_id = highest_local + 1
 
-    def _reserve_next_local_id(self) -> int:
-        """Reserve a unique ID on disk before publishing the transaction.
-
-        Bootstrap requires a readable SQLite snapshot. Once reconciled,
-        allocation never depends on acquiring a SQLite read lock.
-        """
-        database = self.data_dir / DATABASE_FILENAME
+    def _reconcile_reservations(self) -> None:
         marker = self.reservations_dir / ".reconciled"
-        if not marker.exists():
-            if database.exists():
-                with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=0) as connection:
-                    ids = [int(row[0]) for row in connection.execute(
-                        "SELECT transaction_id FROM transactions"
-                    )]
-                for transaction_id in ids:
-                    (self.reservations_dir / str(transaction_id)).touch(exist_ok=True)
-            marker.touch(exist_ok=True)
+        if marker.exists():
+            return
+        database = self.data_dir / DATABASE_FILENAME
+        if database.exists():
+            with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=0) as connection:
+                ids = [int(row[0]) for row in connection.execute(
+                    "SELECT transaction_id FROM transactions"
+                )]
+            for transaction_id in ids:
+                (self.reservations_dir / str(transaction_id)).touch(exist_ok=True)
+        marker.touch(exist_ok=True)
+
+    def _reserve_next_local_id(self) -> int:
+        """Atomically reserve IDs; SQLite must be reconciled before first use."""
+        self._reconcile_reservations()
         candidate = self._next_transaction_id
         while candidate <= 2_147_483_647:
             if candidate in self._paths:
