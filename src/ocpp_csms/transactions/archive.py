@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -124,6 +125,7 @@ class TransactionArchive:
 
     def _next_available_local_id(self) -> int:
         reserved = set(self._paths) | self._sqlite_reserved_ids
+        locked = False
         database = self.data_dir / DATABASE_FILENAME
         if database.exists():
             try:
@@ -138,8 +140,18 @@ class TransactionArchive:
                     raise
                 # A locked database must not reject a charger start. Keep
                 # previously observed IDs and all durable archive reservations.
-                LOGGER.warning("SQLite locked during transaction ID allocation; using cached reservations")
+                locked = True
+                LOGGER.warning("SQLite locked during transaction ID allocation; using collision-resistant fallback")
             reserved.update(self._sqlite_reserved_ids)
+        if locked:
+            # A previously unseen SQLite-only ID cannot be proven absent
+            # while SQLite is exclusively locked. Avoid the sequential range
+            # and choose a positive OCPP-compatible 31-bit identifier.
+            for _ in range(128):
+                candidate = 1_073_741_824 + secrets.randbelow(1_073_741_823)
+                if candidate not in reserved:
+                    return candidate
+            raise RuntimeError("could not allocate a distinct transaction ID")
         transaction_id = self._next_transaction_id
         while transaction_id in reserved:
             transaction_id += 1
@@ -178,7 +190,7 @@ class TransactionArchive:
             self._paths[transaction_id] = path
             self._origins[transaction_id] = _ORIGIN_LOCAL
             self._recent_starts[key] = (transaction_id, _parse_time(received_at) or now)
-            self._next_transaction_id = transaction_id + 1
+            self._next_transaction_id = max(self._next_transaction_id, transaction_id + 1) if transaction_id < 1_073_741_824 else self._next_transaction_id
             return transaction_id
 
     async def meter_values(self, charge_point_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
