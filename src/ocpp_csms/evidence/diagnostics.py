@@ -294,16 +294,11 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
         first = rows[index]
         meter = _meter_key(first)
         if meter is not None and meter[0] == "meter-request":
-            count = 0
-            end_at = first["occurred_at"]
-            while index + 1 < len(rows):
-                request, response = rows[index], rows[index + 1]
-                if (_meter_key(request) != meter
-                        or _meter_key(response) != ("meter-response", first["charger_id"])):
-                    break
-                count += 1
-                end_at = response["occurred_at"]
-                index += 2
+            paired_end, count = _consume_exchanges(
+                rows, index, meter, ("meter-response", first["charger_id"]), _meter_key
+            )
+            end_at = rows[paired_end - 1]["occurred_at"] if count else first["occurred_at"]
+            index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 span = (f"{first['occurred_at']}–{end_at}" if count > 1
@@ -337,16 +332,11 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 append_group(rows[index:end - 1])
                 index = end - 1
                 first = rows[index]
-            count = 0
-            end_at = first["occurred_at"]
-            while index + 1 < len(rows):
-                request, response = rows[index], rows[index + 1]
-                if (_group_key(request) != ("heartbeat-request", first["charger_id"])
-                        or _group_key(response) != ("heartbeat-response", first["charger_id"])):
-                    break
-                count += 1
-                end_at = response["occurred_at"]
-                index += 2
+            paired_end, count = _consume_exchanges(
+                rows, index, request_key, response_key, _group_key
+            )
+            end_at = rows[paired_end - 1]["occurred_at"] if count else first["occurred_at"]
+            index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 span = (f"{first['occurred_at']}–{end_at}" if count > 1
