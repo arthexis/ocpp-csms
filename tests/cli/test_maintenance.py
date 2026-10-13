@@ -73,7 +73,7 @@ async def test_dispatch_rejects_invalid_request(command, error):
 def test_scheduled_is_reported_as_pending(monkeypatch, capsys):
     async def send(*_args, **_kwargs):
         return {"ok": True, "response": {"status": "Scheduled"}}
-    monkeypatch.setattr("ocpp_csms.cli.maintenance.send_control", send)
+    monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", send)
     args = SimpleNamespace(command="availability", charger=None, action="disable", connector=1, json=False, data_dir="/tmp")
     assert run_maintenance(args) == 0
     assert "Pending" in capsys.readouterr().out
