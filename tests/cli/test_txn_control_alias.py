@@ -37,3 +37,31 @@ def test_txn_query_still_works(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ocpp-csms", "txn", "42"])
     monkeypatch.setattr("ocpp_csms.cli.run_transactions", lambda args: str(args.transaction_id))
     assert main() == 0
+
+
+@pytest.mark.parametrize(("argv", "expected"), [
+    (["txn", "start", "-c", "2", "--rfid", "ABC"], {"command": "start", "timing": "now", "connector": 2, "id_tag": "ABC"}),
+    (["txn", "stop", "42", "--after", "10"], {"command": "stop", "timing": "after", "seconds": 10, "transaction": 42}),
+])
+def test_txn_operation_subparser_dispatch(monkeypatch, argv, expected):
+    seen = []
+    monkeypatch.setattr("ocpp_csms.cli.run_control", lambda args: seen.append(control_request(args)) or 0)
+    monkeypatch.setattr(sys, "argv", ["ocpp-csms", *argv])
+    assert main() == 0
+    assert seen == [expected]
+
+
+def test_txn_explain_subparser_dispatch(monkeypatch):
+    seen = []
+    monkeypatch.setattr("ocpp_csms.cli.run_txn_explain", lambda args: seen.append((args.transaction_id, args.context)) or 0)
+    monkeypatch.setattr(sys, "argv", ["ocpp-csms", "txn", "explain", "42", "--context", "5"])
+    assert main() == 0
+    assert seen == [(42, 5)]
+
+
+def test_txn_recover_subparser_dispatch(monkeypatch):
+    seen = []
+    monkeypatch.setattr("ocpp_csms.cli.run_recovery", lambda args: seen.append((args.dry_run, args.charger)) or 0)
+    monkeypatch.setattr(sys, "argv", ["ocpp-csms", "txn", "recover", "--dry-run", "--cp", "CP1"])
+    assert main() == 0
+    assert seen == [(True, "CP1")]
