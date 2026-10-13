@@ -44,3 +44,19 @@ async def test_allocator_preserves_sqlite_reservation_after_restart(tmp_path):
     restarted = TransactionArchive(tmp_path)
     next_start = {**START, "meter_start": 300, "timestamp": "2026-10-13T14:00:00Z"}
     assert await restarted.start("cp-a", next_start) == 3
+
+
+@pytest.mark.asyncio
+async def test_allocator_uses_cached_sqlite_reservations_when_locked(tmp_path):
+    events = EventStore(tmp_path)
+    events.record_transaction_start(1, "cp-a", START)
+    archive = TransactionArchive(tmp_path)
+    # Prime the reservation cache while SQLite is readable.
+    assert archive._next_available_local_id() == 2
+    lock = sqlite3.connect(events.path)
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        assert await archive.start("cp-a", START) == 2
+    finally:
+        lock.rollback()
+        lock.close()
