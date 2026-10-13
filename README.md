@@ -209,6 +209,12 @@ privileged-port strategy; the default native TLS port is 9443.
 
 Run `ocpp-csms --help` for the authoritative current surface.
 
+The A1–A5 CLI migration is complete (issue #216). Use the commands below and
+`--help` as the maintained operator reference. Historical migration plans and
+verification ledgers were retired; safety, JSON, retired-command rejection,
+and deployment invocation regression tests remain maintained in `tests/`.
+
+
 CLI compatibility contract (A4d): `diagnose` is the canonical charger-diagnostics
 command; `diag` and `diagnostics` are not registered aliases. `avail` is
 canonical and `availability` remains an intentional alias. Maintenance
