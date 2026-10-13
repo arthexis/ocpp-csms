@@ -14,7 +14,6 @@ from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
 from ocpp_csms.transactions.contracts import transaction_item
 from ocpp_csms.transactions.query import TransactionQuery
-from ocpp_csms.transactions.changes import changes_page
 from ocpp_csms.transactions.export_metadata import transaction_export_metadata
 
 SCHEMA = "ocpp-csms/export/v1"
@@ -99,7 +98,6 @@ def export_contract(
     *,
     after: int = 0,
     limit: int = 500,
-    changes_after: int = 0,
 ) -> dict[str, Any]:
     """Build one cursor-addressed replication page from local CSMS state."""
     if after < 0:
@@ -125,12 +123,8 @@ def export_contract(
             transactions.append({**transaction_item(view, local_time=True), **transaction_export_metadata(view.record)})
 
     status = status_contract(appliance_status(data_dir))["data"]
-    change_feed = changes_page(data_dir, after=changes_after, limit=limit)
-    for item in change_feed["items"]:
-        item["metadata"] = transaction_export_metadata(item["record"])
     data = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
-        "transaction_changes": change_feed,
         "source_id": source_id(data_dir),
         "cursor": {
             "after": after,
