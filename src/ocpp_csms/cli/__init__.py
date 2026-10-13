@@ -22,7 +22,7 @@ from ocpp_csms.cli.maintenance import COMMANDS as MAINTENANCE_COMMANDS, add_main
 from ocpp_csms.cli.mail import add_mail_command, run_mail
 from ocpp_csms.cli.report import add_report_command, run_report
 from ocpp_csms.cli.reservation import add_reservation_commands, run_reservation
-from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
+from ocpp_csms.cli.recovery import run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
@@ -49,7 +49,6 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["diagnose"] = add_diagnostics_command(subcommands)
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
-    commands["recover"] = add_recovery_parser(subcommands)
     commands["energy"] = add_energy_command(subcommands)
     commands["export"] = add_export_command(subcommands)
     commands["rfid"] = add_rfid_command(subcommands)
@@ -99,9 +98,7 @@ def main() -> int:
         if args.operation == "start" and args.charger and args.charger_option:
             operations.error("charge point may be specified positionally or with --cp, not both")
         if args.operation == "stop":
-            if args.transaction_id is not None and args.transaction_option is not None:
-                operations.error("provide transaction ID either positionally or via --txn")
-            args.transaction = args.transaction_id if args.transaction_id is not None else args.transaction_option
+            args.transaction = args.transaction_id
             if args.transaction is None:
                 operations.error("txn stop requires a transaction ID")
             args.charger = None
@@ -138,7 +135,6 @@ def main() -> int:
         if args.command == "auth": return run_auth(args)
         if args.command == "mail": return run_mail(args)
         if args.command == "report": return run_report(args)
-        if args.command == "recover": return run_recovery(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
