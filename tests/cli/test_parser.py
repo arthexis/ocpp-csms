@@ -14,10 +14,7 @@ from ocpp_csms.cli import build_parser
         (["config"], "config"),
         (["profile", "templates"], "profile"),
         (["status"], "status"),
-        (["transactions"], "transactions"),
-        (["transaction"], "transactions"),
-        (["txns"], "transactions"),
-        (["txn"], "transactions"),
+        (["txn"], "txn"),
         (["events"], "events"),
         (["explain", "charger-a"], "explain"),
         (["help"], "help"),
@@ -28,8 +25,8 @@ def test_public_command_matrix(argv, command):
     assert parser.parse_args(argv).command == command
 
 
-@pytest.mark.parametrize("topic", ["transactions", "transaction", "txns", "txn"])
-def test_help_topic_accepts_transaction_aliases(topic):
+@pytest.mark.parametrize("topic", ["txn"])
+def test_help_topic_accepts_txn(topic):
     parser, _ = build_parser()
     args = parser.parse_args(["help", topic])
     assert args.command == "help"

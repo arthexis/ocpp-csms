@@ -26,8 +26,8 @@ from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
-from ocpp_csms.cli.txn_explain import parse_explain, run_txn_explain
-from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
+from ocpp_csms.cli.txn_explain import run_txn_explain
+from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, build_txn_operations_parser, run_transactions
 from ocpp_csms.transactions.archive import default_data_dir
 
 
@@ -60,6 +60,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
     transactions.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable transaction contract")
+    transactions.epilog = "Operations: txn start, txn stop ID, txn explain ID, txn recover. Use txn OP --help for details."
     for name in TRANSACTION_COMMANDS:
         commands[name] = transactions
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
@@ -79,29 +80,35 @@ def print_help(parser, commands, topic=None) -> None:
 
 def main() -> int:
     argv = list(sys.argv[1:])
-    # Route transaction explanation before integer transaction parsing.
-    txn_explain_index = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS
-                              and i + 1 < len(argv) and argv[i + 1] == "explain"), -1)
-    if txn_explain_index >= 0:
-        # Parse the global --data-dir without consuming transaction arguments.
+    # Transaction operations use their own real subparsers; txn [ID] remains
+    # the historical read-only query grammar without any argv rewriting.
+    txn_offset = next((i for i, word in enumerate(argv) if word == "txn"), -1)
+    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop", "explain", "recover"}:
         global_parser = argparse.ArgumentParser(add_help=False)
         global_parser.add_argument("--data-dir", default=str(default_data_dir()))
-        global_args, _ = global_parser.parse_known_args(argv[:txn_explain_index])
-        return run_txn_explain(parse_explain(argv[txn_explain_index + 2:], data_dir=global_args.data_dir))
-    # Route txn/transactions start and stop through the existing OCPP control CLI.
-    # The control parser already defaults omitted timing options to --now.
-    txn_offset = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS), -1)
-    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop"}:
-        operation = argv[txn_offset + 1]
-        argv[txn_offset:txn_offset + 2] = [operation]
-        # "txn stop 42" is shorthand for "stop --txn 42".
-        if operation == "stop" and len(argv) > txn_offset + 1 and argv[txn_offset + 1].isdecimal():
-            argv[txn_offset + 1:txn_offset + 2] = ["--txn", argv[txn_offset + 1]]
-    # Support the natural "transactions recover" syntax without breaking
-    # the existing integer transaction selector.
-    offset = argv.index("transactions") if "transactions" in argv else -1
-    if offset >= 0 and len(argv) > offset + 1 and argv[offset + 1] == "recover":
-        argv[offset:offset + 2] = ["recover"]
+        global_args = global_parser.parse_args(argv[:txn_offset])
+        operations = build_txn_operations_parser()
+        args = operations.parse_args(argv[txn_offset + 1:])
+        args.data_dir = global_args.data_dir
+        if args.operation in {"explain", "recover"}:
+            try:
+                return run_txn_explain(args) if args.operation == "explain" else run_recovery(args)
+            except ValueError as exc:
+                operations.error(str(exc))
+        args.command = args.operation
+        if args.operation == "start" and args.charger and args.charger_option:
+            operations.error("charge point may be specified positionally or with --cp, not both")
+        if args.operation == "stop":
+            if args.transaction_id is not None and args.transaction_option is not None:
+                operations.error("provide transaction ID either positionally or via --txn")
+            args.transaction = args.transaction_id if args.transaction_id is not None else args.transaction_option
+            if args.transaction is None:
+                operations.error("txn stop requires a transaction ID")
+            args.charger = None
+        try:
+            return run_control(args)
+        except ValueError as exc:
+            operations.error(str(exc))
     parser, commands = build_parser(); args = parser.parse_args(argv)
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
@@ -110,7 +117,7 @@ def main() -> int:
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
         if args.command == 'inspect': return run_inspect(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
-        if args.command in ("charger", "chargers"): return run_chargers(args)
+        if args.command in CHARGER_COMMANDS: return run_chargers(args)
         if args.command in ("reserve", "reservation"): return run_reservation(args)
         if args.command == "data": return run_data(args)
         if args.command == "data-transfer": return run_data_transfer(args)
@@ -133,7 +140,7 @@ def main() -> int:
                 print(run_rfid(args)); return 0
             return run_rfid_action(args)
         if args.command in DIAGNOSTIC_COMMANDS: return run_diagnostic(args)
-        if args.command == "transactions":
+        if args.command == "txn":
             if args.json: return run_transactions_json(args)
             print(run_transactions(args)); return 0
     except ValueError as exc:
