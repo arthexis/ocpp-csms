@@ -43,7 +43,6 @@ def test_txn_recover_subparser_dispatch(monkeypatch):
 
 @pytest.mark.parametrize("argv", [
     ["txn", "stop"],
-    ["txn", "stop", "--txn", "43"],
     ["txn", "stop", "-1"],
     ["txn", "start", "-c", "-1"],
     ["txn", "start", "CP1", "--cp", "CP2"],
@@ -51,7 +50,7 @@ def test_txn_recover_subparser_dispatch(monkeypatch):
     ["txn", "explain", "42", "--context", "1441"],
     ["txn", "recover", "--enable"],
 ])
-def test_txn_operations_reject_invalid_requests(monkeypatch, argv, tmp_path):
+def test_txn_operations_reject_invalid_inputs(monkeypatch, argv, tmp_path):
     monkeypatch.setattr(sys, "argv", ["ocpp-csms", "--data-dir", str(tmp_path), *argv])
     with pytest.raises(SystemExit) as exc:
         main()

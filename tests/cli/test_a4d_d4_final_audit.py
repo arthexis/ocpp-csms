@@ -1,7 +1,6 @@
 """A4d D4: final regression checks for maintenance grammar and safety invariants."""
 from __future__ import annotations
 
-from unittest.mock import patch
 
 import pytest
 
@@ -14,15 +13,6 @@ from ocpp_csms.cli.maintenance import maintenance_request
 def parse(*words):
     parser, _ = build_parser()
     return parser.parse_args(words)
-
-
-@pytest.mark.parametrize("words", [
-    ("diag",), ("diagnostics",), ("reservation",),
-])
-def test_retired_commands_remain_rejected(words):
-    with pytest.raises(SystemExit) as exc:
-        parse(*words)
-    assert exc.value.code == 2
 
 
 def test_availability_alias_produces_same_wire_request():

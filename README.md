@@ -209,11 +209,8 @@ privileged-port strategy; the default native TLS port is 9443.
 
 Run `ocpp-csms --help` for the authoritative current surface.
 
-CLI compatibility contract (A4d): `diagnose` is the canonical charger-diagnostics
-command; `diag` and `diagnostics` are not registered aliases. `avail` is
-canonical and `availability` remains an intentional alias. Maintenance
-commands use `--cp`, and their `-j`/`--json`
-mode emits a machine-readable response. An accepted OCPP request acknowledges
+
+Use `diagnose` for charger diagnostics and `avail` or `availability` for availability control. Maintenance commands accept `--cp`; `-j`/`--json` emits a machine-readable response. An accepted OCPP request acknowledges
 submission, **not** physical completion. `Scheduled` availability means the
 requested change is pending. Firmware update requires explicit `--confirm`;
 `diagnose --now` requires a charger-reachable upload URL. Transfer URLs must
@@ -244,8 +241,6 @@ ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration
 ocpp-csms profile clear ...
 ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
 ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn start [-c N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
@@ -269,7 +264,7 @@ ocpp-csms avail disable  # connector 0: whole charge point
 ocpp-csms unlock -c 1
 ```
 
-Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. The shorter `avail` command is canonical; `availability` remains a compatibility alias. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
+Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. Both `avail` and `availability` select availability control. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
 
 ### Capability inspection and reconciliation
 
@@ -481,8 +476,7 @@ ocpp-csms mail history --json
 ```
 
 `mail status` includes notification delivery counts when the outbox exists.
-Email processing never blocks OCPP handlers. Scheduled digest reports are
-planned for later chunks.
+Email processing never blocks OCPP handlers.
 
 ### Configuration
 
@@ -803,11 +797,10 @@ nftables
 iproute2
 ```
 
-## TLS configuration (Chunk 2A)
+## TLS configuration
 
-TLS configuration is optional and remains disabled by default. Registration does not
-start a WSS listener; that is planned for Chunk 2B. No deployment flag or
-CSMS service restart is needed for these read-only/configuration operations.
+TLS configuration is optional and disabled by default. `tls config` records the
+certificate, key, hostname and port without enabling the WSS listener.
 
 ```sh
 sudo ocpp-csms tls config --cert /etc/ocpp-csms/tls/server.crt --key /etc/ocpp-csms/tls/server.key --hostname csms.example.com --port 9443
@@ -822,23 +815,20 @@ The `check` command checks local certificate/key loadability, expiration,
 DNS Subject Alternative Name matching, and port conflict with the default WS
 port. It requires OpenSSL to inspect certificate extensions. This cannot
 establish whether any particular charger trusts the certificate. Run checks
-under the CSMS service account to verify effective readability. Future chunks
-will supply listener management, enable/disable, and hot reload.
+under the CSMS service account to verify effective readability.
 
-### Optional WSS listener (Chunk 2B)
+### Optional WSS listener
 
-The existing `ocpp-csms.service` starts plaintext WS as before. If the persistent
+The `ocpp-csms.service` starts plaintext WS. If the persistent
 `/etc/ocpp-csms/tls.json` configuration has `"enabled": true` and passes
 certificate/key checks, the same process also starts WSS on the configured
 port. Both listeners dispatch to the existing OCPP handler and share session
 and transaction state. TLS readiness and bind failures are logged without
-bringing down WS. `tls config` continues to leave TLS disabled by default;
-`tls enable` and live activation arrive in Chunk 2C. For field use, do not
-manually enable WSS until the service account can read the private key and
-the certificate has been validated. A service restart is required to apply
-changes in this chunk; hot reload arrives in 2C.
+bringing down WS. `tls config` leaves TLS disabled by default. Before enabling WSS, verify
+that the service account can read the private key and that the certificate
+passes validation. Use `tls enable` to activate the listener.
 
-### Live TLS management (Chunk 2C)
+### Live TLS management
 
 With the CSMS running, `ocpp-csms tls enable` activates the configured WSS
 listener immediately, while `ocpp-csms tls reload` validates new credentials
@@ -860,7 +850,7 @@ stops accepting connections. Existing sessions survive both operations.
 Normal CSMS shutdown still closes all connections. A charger using a retired
 port cannot reconnect until its endpoint configuration is updated.
 
-### Persistent TLS provisioning (Chunk 2E)
+### Persistent TLS provisioning
 
 Ansible creates `/etc/ocpp-csms` (0750) and `/etc/ocpp-csms/tls`
 (0700), owned by the existing non-root CSMS service user. On upgrade it
@@ -927,7 +917,7 @@ Debian 12 / Python 3.11 / ARM64   primary appliance target
 Debian 13 / Python 3.13 / ARM64   compatibility target
 ```
 
-Tests favor behavioral/state invariants over human-readable strings, historical tombstones, and deprecated compatibility surfaces.
+Tests cover current behavior, request validation, safety constraints, and machine-readable output contracts.
 
 ## Source layout
 
@@ -986,10 +976,6 @@ Local forwarding state can be inspected without contacting the Collector:
 ```bash
 ocpp-forwarder --satellite-id gway-004 status
 ```
-
-Deployment as `ocpp-forwarder.service` is intentionally handled in the next
-implementation chunk so the Forwarder program can be tested independently of
-satellite provisioning.
 
 
 ### Deploying OCPP Forwarder
