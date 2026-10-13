@@ -16,7 +16,14 @@ Refs #244. This chunk deliberately does not remove the recovery worker or change
 2. Decouple StartTransaction ID allocation from old active-state checks, and ensure archive IDs cannot be reused when SQLite knows an ID or another archive already holds it.
 3. Make MeterValues and StopTransaction ingestion tolerate missing/legacy records while preserving raw events, and keep unresolved conflicts separate.
 4. Verify no projection mutation for a conflicting transaction; keep response semantics and idempotence explicit.
-5. Run Python 3.11, Python 3.13 and general CI; stop for review before Chunk B.
+5. Consolidate cross-restart ingestion regression tests; run Python 3.11, Python 3.13 and general CI; stop for review before Chunk B.
 
 ## Exclusions
 Live connector control guards, recovery-loop removal, CLI/report status redesign, schema migration, exporter compatibility.
+
+## A1–A5 verification coverage
+- New starts remain accepted with incomplete older transactions; SQLite-only IDs are reserved when readable. Locked SQLite uses a collision-resistant fallback, not an absolute uniqueness guarantee against unknown SQLite-only IDs.
+- MeterValues without a start are retained without creating a synthetic start; connector-only readings remain raw events.
+- Cross-charge-point, cross-connector and earlier-than-start conflicts are preserved separately and do not change the original transaction's derived state.
+- A genuine late StopTransaction completes only the matching transaction; identical retries do not rewrite its archive, and conflicting later stops remain unresolved.
+- Integrated regression tests cover orphan evidence, a restart, subsequent starts and late stops without inferred transitions.
