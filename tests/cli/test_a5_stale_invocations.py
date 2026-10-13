@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RETIRED = re.compile(
-    r"(?<![\w-])ocpp-csms\s+(?:reservation|transactions|transaction|txns|diag|diagnostics)(?=\s|$|[;&|])"
+    r"(?<![\w-])ocpp-csms\s+(?:reservation|transactions|transaction|txns|diag|diagnostics|start|stop|recover)(?=\s|$|[;&|])"
 )
 SURFACES = ("scripts", "ansible", ".github/workflows")
 SUFFIXES = {".sh", ".bash", ".yml", ".yaml"}
@@ -29,6 +29,9 @@ def stale_invocations(text: str) -> list[str]:
     "ocpp-csms txns",
     "ocpp-csms diag",
     "ocpp-csms diagnostics --now",
+    "ocpp-csms start --cp CP1",
+    "ocpp-csms stop",
+    "ocpp-csms recover --dry-run",
 ])
 def test_retired_executable_names_are_detected(command):
     assert stale_invocations(command)
