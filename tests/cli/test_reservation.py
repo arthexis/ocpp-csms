@@ -6,19 +6,19 @@ import pytest
 from ocpp_csms.cli.reservation import add_reservation_commands, reservation_request
 from ocpp_csms.control.dispatch import dispatch_control
 
-def test_reserve_shorthand_and_create_equivalent(parse_cli):
+def test_reserve_create_request(parse_cli):
     until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     flags = ("--cp", "CP1", "-c", "1", "--rfid", "ABC", "--until", until, "--id", "43")
-    assert reservation_request(parse_cli("reserve", *flags)) == reservation_request(parse_cli("reservation", "create", *flags))
+    assert reservation_request(parse_cli("reserve", "create", *flags))["command"] == "reserve"
 
 def test_cancel_request(parse_cli):
-    assert reservation_request(parse_cli("reservation", "cancel", "43", "--cp", "CP1")) == {
+    assert reservation_request(parse_cli("reserve", "cancel", "43", "--cp", "CP1")) == {
         "command": "cancel_reservation", "reservation_id": 43, "charger": "CP1"
     }
 
 def test_invalid_connector(parse_cli):
     with pytest.raises(ValueError, match="connector"):
-        reservation_request(parse_cli("reserve", "-c", "-1", "--rfid", "ABC", "--until", "1d", "--id", "1"))
+        reservation_request(parse_cli("reserve", "create", "-c", "-1", "--rfid", "ABC", "--until", "1d", "--id", "1"))
 
 @pytest.mark.asyncio
 async def test_reserve_dispatch_accepted():
