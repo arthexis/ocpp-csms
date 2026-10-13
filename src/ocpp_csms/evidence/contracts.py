@@ -38,6 +38,8 @@ def event_record(row: sqlite3.Row) -> dict[str, object]:
     }
 
     if row["kind"] == "recovery":
+        if row["transaction_id"] is not None:
+            base["transaction_id"] = int(row["transaction_id"])
         base["kind"] = "recovery"
         base["reason"] = payload.get("reason")
         base["previous_state"] = payload.get("previous_state")
