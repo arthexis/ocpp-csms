@@ -42,3 +42,21 @@ def test_status_ending_appends_correlated_event_once(tmp_path):
     assert events[0]["kind"] == "recovery"
     assert events[0]["transaction_id"] == 17
     assert events[0]["reason"] == "connector_status"
+
+
+def test_late_stop_reconciliation_emits_once(tmp_path):
+    store = EventStore(tmp_path)
+    _transaction(store)
+    assert store.infer_transaction_stop(17)
+    cursor = export_contract(tmp_path)["data"]["cursor"]["next"]
+    payload = {"transaction_id": 17, "meter_stop": 150, "timestamp": "2026-01-01T00:05:00Z"}
+    store.record_transaction_stop("cp-a", payload)
+    next_page = export_contract(tmp_path, after=cursor)["data"]
+    assert len(next_page["events"]) == 1
+    event = next_page["events"][0]
+    assert event["kind"] == "recovery"
+    assert event["reason"] == "late_stop_reconciled"
+    assert event["previous_state"] == "inferred_stopped"
+    assert event["new_state"] == "stopped"
+    store.record_transaction_stop("cp-a", payload)
+    assert export_contract(tmp_path, after=next_page["cursor"]["next"])["data"]["events"] == []
