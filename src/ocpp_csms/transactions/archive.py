@@ -305,6 +305,16 @@ class TransactionArchive:
             return "charge_point_mismatch"
         start = record.get("start")
         if not isinstance(start, dict):
+            # Recovered transactions have no StartTransaction. A connector
+            # established by earlier MeterValues is still evidence of origin.
+            incoming_connector = payload.get("connector_id")
+            known_connectors = {
+                int(item["connector_id"])
+                for item in record.get("meter_values", [])
+                if isinstance(item, dict) and item.get("connector_id") is not None
+            }
+            if incoming_connector is not None and known_connectors and int(incoming_connector) not in known_connectors:
+                return "connector_mismatch"
             return None
         existing_connector = start.get("connector_id")
         incoming_connector = payload.get("connector_id")
