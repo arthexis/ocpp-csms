@@ -114,3 +114,38 @@ def run_transactions(args: argparse.Namespace) -> str:
     else:
         views = query.list(limit=None if getattr(args, "no_limit", False) else (20 if args.limit is None else args.limit), **filters)
     return format_transactions(views, local_time=args.local_time)
+
+
+def build_txn_operations_parser() -> argparse.ArgumentParser:
+    """Register transaction operations in one place, independent of dispatch.
+
+    The query grammar retains 'txn [ID]' and therefore cannot use argparse's
+    normal subparser positional slot simultaneously. The entry point selects
+    this parser only when the token following 'txn' names an operation.
+    """
+    from ocpp_csms.cli.control import _add_timing_options
+    from ocpp_csms.cli.recovery import add_recovery_parser
+
+    parser = argparse.ArgumentParser(prog="ocpp-csms txn", description="Transaction operations")
+    operations = parser.add_subparsers(dest="operation", required=True)
+    start = operations.add_parser("start", help="Request remote transaction start")
+    start.add_argument("charger", nargs="?")
+    start.add_argument("--cp", dest="charger_option")
+    start.add_argument("-c", "--connector", type=int)
+    start.add_argument("--rfid", "--id-tag", dest="id_tag")
+    _add_timing_options(start)
+
+    stop = operations.add_parser("stop", help="Request remote transaction stop")
+    stop.add_argument("transaction_id", nargs="?", type=int)
+    stop.add_argument("--txn", "--transaction", "-t", dest="transaction_option", type=int)
+    stop.add_argument("--cp", dest="charger_option")
+    _add_timing_options(stop)
+
+    explain = operations.add_parser("explain", help="Explain archived transaction evidence")
+    explain.add_argument("transaction_id", type=int)
+    explain.add_argument("--context", type=int, default=0)
+    explain.add_argument("--verbose", action="store_true")
+    explain.add_argument("-j", "--json", action="store_true")
+
+    add_recovery_parser(operations)
+    return parser
