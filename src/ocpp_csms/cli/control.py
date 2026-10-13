@@ -6,7 +6,7 @@ import asyncio
 from ocpp_csms.control import send_control
 
 
-CONTROL_COMMANDS = ("start", "stop", "reset")
+CONTROL_COMMANDS = ("reset",)
 
 
 def add_control_commands(
@@ -15,26 +15,13 @@ def add_control_commands(
     """Register charger control commands with the root CLI parser."""
     add = argparse.ArgumentParser.add_argument
 
-    start = subcommands.add_parser("start", help="Request remote transaction start")
-    add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(start, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(start, "-c", "--connector", dest="connector", type=int, help="Connector ID")
-    add(start, "--id-tag", "--rfid", dest="id_tag", help="OCPP idTag (defaults to AUTO when omitted)")
-    _add_timing_options(start)
-
-    stop = subcommands.add_parser("stop", help="Request remote transaction stop")
-    add(stop, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(stop, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
-    add(stop, "-t", "--transaction", "--txn", dest="transaction", type=int, required=True, help="OCPP transaction ID")
-    _add_timing_options(stop)
-
     reset = subcommands.add_parser("reset", help="Request charger reset")
     add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(reset, "--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
+    add(reset, "--cp", dest="charger_option", help="Explicit charge point ID")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
     _add_timing_options(reset)
 
-    return {"start": start, "stop": stop, "reset": reset}
+    return {"reset": reset}
 
 
 def _add_timing_options(parser: argparse.ArgumentParser) -> None:
