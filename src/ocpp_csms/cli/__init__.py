@@ -9,6 +9,7 @@ from ocpp_csms.cli.config import add_config_command, configuration_request, is_c
 from ocpp_csms.cli.config_diff import run_config_diff
 from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
+from ocpp_csms.cli.data import add_data_command, run_data
 from ocpp_csms.cli.data_transfer import add_data_transfer_command, run_data_transfer
 from ocpp_csms.cli.diagnostics import DIAGNOSTIC_COMMANDS, add_diagnostic_commands, run_diagnostic
 from ocpp_csms.cli.energy import add_energy_command, run_energy
@@ -42,6 +43,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands['inspect'] = add_inspect_command(subcommands)
     commands.update(add_charger_commands(subcommands))
     commands.update(add_reservation_commands(subcommands))
+    commands["data"] = add_data_command(subcommands)
     commands["data-transfer"] = add_data_transfer_command(subcommands)
     commands["firmware"] = add_firmware_command(subcommands)
     commands["diagnostics"] = add_diagnostics_command(subcommands)
@@ -110,6 +112,7 @@ def main() -> int:
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in ("charger", "chargers"): return run_chargers(args)
         if args.command in ("reserve", "reservation"): return run_reservation(args)
+        if args.command == "data": return run_data(args)
         if args.command == "data-transfer": return run_data_transfer(args)
         if args.command == "firmware": return run_firmware(args)
         if args.command == "diagnostics": return run_diagnostics(args)
