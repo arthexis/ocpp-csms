@@ -1,5 +1,5 @@
 ---
-- name: Diagnose OCPP CSMS satellite deployment
+- name: Diagnose OCPP CSMS appliance deployment
   hosts: all
   gather_facts: true
   tasks:
