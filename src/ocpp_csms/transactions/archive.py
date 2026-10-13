@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.time import utc_now_iso
+from ocpp_csms.transactions.changes import reconcile_transaction_changes
 
 LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -95,6 +96,7 @@ class TransactionArchive:
         self._recent_starts: dict[str, tuple[int, datetime]] = {}
         self._next_transaction_id = 1
         self._scan_existing()
+        reconcile_transaction_changes(self.data_dir)
 
     def _scan_existing(self) -> None:
         highest_local = 0
@@ -299,3 +301,5 @@ class TransactionArchive:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(temporary, path)
+        if path.is_relative_to(self.transactions_dir):
+            reconcile_transaction_changes(self.data_dir)
