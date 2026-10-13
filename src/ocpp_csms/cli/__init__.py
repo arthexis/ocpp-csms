@@ -104,14 +104,15 @@ def main() -> int:
         explain.add_argument("--context", type=int, default=0)
         explain.add_argument("--verbose", action="store_true")
         explain.add_argument("-j", "--json", action="store_true")
-        recover = add_recovery_parser(ops)
+        add_recovery_parser(ops)
         # Recovery's parser is registered as 'recover'; no root rewrite needed.
         args = operations.parse_args(argv[txn_offset + 1:])
         args.data_dir = global_args.data_dir
-        if args.operation == "explain":
-            return run_txn_explain(args)
-        if args.operation == "recover":
-            return run_recovery(args)
+        if args.operation in {"explain", "recover"}:
+            try:
+                return run_txn_explain(args) if args.operation == "explain" else run_recovery(args)
+            except ValueError as exc:
+                operations.error(str(exc))
         args.command = args.operation
         if args.operation == "stop":
             if args.transaction_id is not None and args.transaction_option is not None:
@@ -120,7 +121,10 @@ def main() -> int:
             if args.transaction is None:
                 operations.error("txn stop requires a transaction ID")
             args.charger = None
-        return run_control(args)
+        try:
+            return run_control(args)
+        except ValueError as exc:
+            operations.error(str(exc))
     parser, commands = build_parser(); args = parser.parse_args(argv)
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
