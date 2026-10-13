@@ -64,9 +64,11 @@ def test_excluded_forwarder_is_stopped_and_verified():
     assert stop["ansible.builtin.systemd_service"] == {
         "name": "ocpp-forwarder.service", "enabled": False, "state": "stopped",
     }
-    verify = next(task for task in shutdown if task["name"] == "Verify excluded Forwarder is not active")
+    verify = next(task for task in shutdown if task["name"] == "Verify excluded Forwarder unit state")
     assert verify["changed_when"] is False
-    assert verify["failed_when"] == "ocpp_forwarder_active_check.rc == 0"
+    assert "ocpp_forwarder_active_check.rc != 0" in verify["failed_when"]
+    assert "ActiveState=inactive" in verify["failed_when"]
+    assert "UnitFileState=disabled" in verify["failed_when"]
 
 
 def test_stage_only_stops_before_cutover_and_side_effect_roles():
