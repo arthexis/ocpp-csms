@@ -7,7 +7,7 @@ from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, 
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
 from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, is_config_diff, run_config_download, run_configuration
 from ocpp_csms.cli.config_diff import run_config_diff
-from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
+from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control, _add_timing_options
 from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
 from ocpp_csms.cli.data import add_data_command, run_data
 from ocpp_csms.cli.data_transfer import add_data_transfer_command, run_data_transfer
@@ -26,7 +26,7 @@ from ocpp_csms.cli.recovery import add_recovery_parser, run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
-from ocpp_csms.cli.txn_explain import parse_explain, run_txn_explain
+from ocpp_csms.cli.txn_explain import run_txn_explain
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
 from ocpp_csms.transactions.archive import default_data_dir
 
@@ -79,29 +79,48 @@ def print_help(parser, commands, topic=None) -> None:
 
 def main() -> int:
     argv = list(sys.argv[1:])
-    # Route transaction explanation before integer transaction parsing.
-    txn_explain_index = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS
-                              and i + 1 < len(argv) and argv[i + 1] == "explain"), -1)
-    if txn_explain_index >= 0:
-        # Parse the global --data-dir without consuming transaction arguments.
+    # Transaction operations use their own real subparsers; txn [ID] remains
+    # the historical read-only query grammar without any argv rewriting.
+    txn_offset = next((i for i, word in enumerate(argv) if word == "txn"), -1)
+    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop", "explain", "recover"}:
         global_parser = argparse.ArgumentParser(add_help=False)
         global_parser.add_argument("--data-dir", default=str(default_data_dir()))
-        global_args, _ = global_parser.parse_known_args(argv[:txn_explain_index])
-        return run_txn_explain(parse_explain(argv[txn_explain_index + 2:], data_dir=global_args.data_dir))
-    # Route txn/transactions start and stop through the existing OCPP control CLI.
-    # The control parser already defaults omitted timing options to --now.
-    txn_offset = next((i for i, word in enumerate(argv) if word in TRANSACTION_COMMANDS), -1)
-    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop"}:
-        operation = argv[txn_offset + 1]
-        argv[txn_offset:txn_offset + 2] = [operation]
-        # "txn stop 42" is shorthand for "stop --txn 42".
-        if operation == "stop" and len(argv) > txn_offset + 1 and argv[txn_offset + 1].isdecimal():
-            argv[txn_offset + 1:txn_offset + 2] = ["--txn", argv[txn_offset + 1]]
-    # Support the natural "txn recover" syntax without breaking
-    # the existing integer transaction selector.
-    offset = argv.index("txn") if "txn" in argv else -1
-    if offset >= 0 and len(argv) > offset + 1 and argv[offset + 1] == "recover":
-        argv[offset:offset + 2] = ["recover"]
+        global_args = global_parser.parse_args(argv[:txn_offset])
+        operations = argparse.ArgumentParser(prog="ocpp-csms txn")
+        ops = operations.add_subparsers(dest="operation", required=True)
+        start = ops.add_parser("start", help="Request a remote transaction start")
+        start.add_argument("charger", nargs="?")
+        start.add_argument("--cp", dest="charger_option")
+        start.add_argument("-c", "--connector", type=int)
+        start.add_argument("--rfid", "--id-tag", dest="id_tag")
+        _add_timing_options(start)
+        stop = ops.add_parser("stop", help="Request a remote transaction stop")
+        stop.add_argument("transaction_id", nargs="?", type=int)
+        stop.add_argument("--txn", "--transaction", "-t", dest="transaction_option", type=int)
+        stop.add_argument("--cp", dest="charger_option")
+        _add_timing_options(stop)
+        explain = ops.add_parser("explain", help="Explain archived transaction evidence")
+        explain.add_argument("transaction_id", type=int)
+        explain.add_argument("--context", type=int, default=0)
+        explain.add_argument("--verbose", action="store_true")
+        explain.add_argument("-j", "--json", action="store_true")
+        recover = add_recovery_parser(ops)
+        # Recovery's parser is registered as 'recover'; no root rewrite needed.
+        args = operations.parse_args(argv[txn_offset + 1:])
+        args.data_dir = global_args.data_dir
+        if args.operation == "explain":
+            return run_txn_explain(args)
+        if args.operation == "recover":
+            return run_recovery(args)
+        args.command = args.operation
+        if args.operation == "stop":
+            if args.transaction_id is not None and args.transaction_option is not None:
+                operations.error("provide transaction ID either positionally or via --txn")
+            args.transaction = args.transaction_id if args.transaction_id is not None else args.transaction_option
+            if args.transaction is None:
+                operations.error("txn stop requires a transaction ID")
+            args.charger = None
+        return run_control(args)
     parser, commands = build_parser(); args = parser.parse_args(argv)
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
