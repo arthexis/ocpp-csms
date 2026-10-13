@@ -332,13 +332,13 @@ The CLI also supports `--retries`, `--retry-interval`, and `--json`. The OCPP `U
 
 ### Charger diagnostic upload requests
 
-`ocpp-csms diagnostics request --location URL` sends OCPP 1.6 `GetDiagnostics` to a connected charge point. The explicit URL must be reachable by the **charger**, and uploads are handled by an external server in this first version.
+`diag` is canonical; `diagnostics` remains a compatibility alias. `ocpp-csms diag request --location URL` sends OCPP 1.6 `GetDiagnostics` to a connected charge point. The explicit URL must be reachable by the **charger**, and uploads are handled by an external server in this first version.
 
 ```bash
-ocpp-csms diagnostics request --location https://uploads.example.org/charger
-ocpp-csms diagnostics request --cp CP001 --location https://uploads.example.org/charger --since 1d --until now --retries 2 --retry-interval 30
-ocpp-csms diagnostics history --cp CP001 --limit 100
-ocpp-csms diagnostics history --json
+ocpp-csms diag request --location https://uploads.example.org/charger
+ocpp-csms diag request --cp CP001 --location https://uploads.example.org/charger --since 1d --until now --retries 2 --retry-interval 30
+ocpp-csms diag history --cp CP001 --limit 100
+ocpp-csms diag history --json
 ```
 
 Request evidence redacts upload credentials, path, and query strings. The `history` command reads the existing event store for GetDiagnostics requests/responses and DiagnosticsStatusNotification events. It does **not** establish strict request-to-notification correlation because the persisted event schema does not include OCPP message IDs, and an `Uploaded` notification is not proof that the destination received the file. A future optional CSMS-managed diagnostic receiver, provisioned by Ansible, will supply default upload URLs and manage stored files; that receiver is intentionally outside this PR.
