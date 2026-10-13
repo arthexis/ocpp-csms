@@ -40,7 +40,9 @@ def _iso(value, *, now):
 
 
 def _request(args):
-    if not args.location:\n        raise ValueError("--location is required with --now")\n    parsed = urlsplit(args.location)
+    if not args.location:
+        raise ValueError("--location is required with --now")
+    parsed = urlsplit(args.location)
     if parsed.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parsed.hostname or parsed.fragment:
         raise ValueError("--location must be an absolute HTTP(S) or FTP(S) URL without a fragment")
     if args.retries is not None and args.retries < 0:
