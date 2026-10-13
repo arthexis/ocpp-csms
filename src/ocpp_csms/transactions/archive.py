@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.time import utc_now_iso
+from ocpp_csms.transactions.changes import record_change
 
 LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -299,3 +300,5 @@ class TransactionArchive:
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(temporary, path)
+        if path.is_relative_to(self.transactions_dir) and "transaction_id" in record:
+            record_change(self.data_dir, record)
