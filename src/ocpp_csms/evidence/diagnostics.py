@@ -203,6 +203,58 @@ def _group_key(row: sqlite3.Row) -> tuple[object, ...] | None:
     return None
 
 
+def _meter_key(row: sqlite3.Row) -> tuple[object, ...] | None:
+    """Identify routine MeterValues frames; adjacency is not OCPP correlation."""
+    if row["kind"] != "ocpp" or row["action"] != "MeterValues" or row["id_tag"] is not None:
+        return None
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if row["direction"] == "out":
+        # MeterValues.conf is empty in OCPP 1.6. A response has no
+        # connector/transaction identifier of its own.
+        if not payload and row["transaction_id"] is None:
+            return ("meter-response", row["charger_id"])
+        return None
+    if row["direction"] != "in":
+        return None
+    if set(payload) - {"connector_id", "transaction_id", "meter_value"}:
+        return None
+    connector = payload.get("connector_id")
+    samples = payload.get("meter_value")
+    if (not isinstance(connector, int) or isinstance(connector, bool)
+            or connector < 0 or not isinstance(samples, list) or not samples
+            or not all(isinstance(sample, dict) and sample for sample in samples)):
+        return None
+    tx_payload = payload.get("transaction_id")
+    tx_row = row["transaction_id"]
+    if tx_payload is not None and (not isinstance(tx_payload, int) or isinstance(tx_payload, bool)):
+        return None
+    if tx_row is not None and (not isinstance(tx_row, int) or isinstance(tx_row, bool)):
+        return None
+    if tx_payload is not None and tx_row is not None and tx_payload != tx_row:
+        return None
+    return ("meter-request", row["charger_id"], connector, tx_payload if tx_payload is not None else tx_row)
+
+
+def _consume_exchanges(
+    rows: list[sqlite3.Row], start: int, request_key: tuple[object, ...],
+    response_key: tuple[object, ...], key_fn: Any,
+) -> tuple[int, int]:
+    """Count only observed adjacent requests followed by ordinary replies."""
+    index = start
+    count = 0
+    while index + 1 < len(rows):
+        if key_fn(rows[index]) != request_key or key_fn(rows[index + 1]) != response_key:
+            break
+        index += 2
+        count += 1
+    return index, count
+
+
 def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False, detail: bool = False) -> str:
     if not rows:
         return "No matching events."
@@ -240,6 +292,34 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
     index = 0
     while index < len(rows):
         first = rows[index]
+        meter = _meter_key(first)
+        if meter is not None and meter[0] == "meter-request":
+            paired_end, count = _consume_exchanges(
+                rows, index, meter, ("meter-response", first["charger_id"]), _meter_key
+            )
+            end_at = rows[paired_end - 1]["occurred_at"] if count else first["occurred_at"]
+            index = paired_end
+            if count:
+                charger = f" {first['charger_id']}" if first["charger_id"] else ""
+                span = (f"{first['occurred_at']}–{end_at}" if count > 1
+                        else first["occurred_at"])
+                tx = f" tx={meter[3]}" if meter[3] is not None else ""
+                lines.append(f"{span}{charger}  MeterValues C{meter[2]}{tx} ↔ ×{count}")
+                continue
+        if meter is not None and meter[0] == "meter-request":
+            end = index
+            while end < len(rows) and _meter_key(rows[end]) == meter:
+                end += 1
+            if end > index + 1 and (end == len(rows) or
+                    _meter_key(rows[end]) != ("meter-response", first["charger_id"])):
+                charger = f" {first['charger_id']}" if first["charger_id"] else ""
+                tx = f" tx={meter[3]}" if meter[3] is not None else ""
+                lines.append(
+                    f"{first['occurred_at']}–{rows[end - 1]['occurred_at']}{charger}  "
+                    f"MeterValues C{meter[2]}{tx} requests (responses not established) ×{end - index}"
+                )
+                index = end
+                continue
         if _group_key(first) == ("heartbeat-request", first["charger_id"]):
             # Preserve unmatched leading requests, while allowing the final
             # request to form an adjacent observed exchange with a response.
@@ -252,16 +332,11 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 append_group(rows[index:end - 1])
                 index = end - 1
                 first = rows[index]
-            count = 0
-            end_at = first["occurred_at"]
-            while index + 1 < len(rows):
-                request, response = rows[index], rows[index + 1]
-                if (_group_key(request) != ("heartbeat-request", first["charger_id"])
-                        or _group_key(response) != ("heartbeat-response", first["charger_id"])):
-                    break
-                count += 1
-                end_at = response["occurred_at"]
-                index += 2
+            paired_end, count = _consume_exchanges(
+                rows, index, request_key, response_key, _group_key
+            )
+            end_at = rows[paired_end - 1]["occurred_at"] if count else first["occurred_at"]
+            index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 span = (f"{first['occurred_at']}–{end_at}" if count > 1
