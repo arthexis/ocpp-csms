@@ -1108,3 +1108,27 @@ assuming the request proves successful installation.
 Field simulator and external IP/DNS WSS acceptance tests are separate,
 operator-authorized tasks for the local agent (see #204). They must not run
 on ordinary PR CI or update production CSMS inadvertently.
+
+
+### Resetting a dedicated test delegate before ABB commissioning
+
+After the remote simulator acceptance tests, reset **only a confirmed
+test-only data directory**, and only after stopping the CSMS service and
+confirming no real ABB charger or active transaction is present:
+
+```bash
+sudo systemctl stop ocpp-csms
+ocpp-csms data reset --test-only --dry-run
+ocpp-csms data reset --test-only --now
+sudo systemctl start ocpp-csms
+ocpp-csms status
+```
+
+The default is a non-mutating dry run. The `--now` operation atomically moves
+the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
+initializes fresh SQLite/transaction storage. It rejects active services,
+recorded active charges, or inconsistent persistence state. **It does not**
+change deployment identity, nginx, certificates, firewall or Basic-auth
+credentials stored outside the data directory. Rotate/re-enroll test
+credentials separately before real ABB commissioning. Do not run this command
+on a production data directory or use it to conceal genuine charge history.
