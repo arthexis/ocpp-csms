@@ -334,3 +334,62 @@ def test_explain_uses_shared_meter_formatter(monkeypatch):
     assert output.startswith("CP1 around")
     assert output.count("MeterValues") == 1
     assert "MeterValues C1 tx=42 ↔ ×2" in output
+
+
+def test_transaction_only_meter_requests_are_grouped_without_inferred_replies():
+    rows = [meter(1), meter(2), meter(3)]
+    output = format_events(rows, heading="Transaction 42 OCPP events")
+    assert "MeterValues C1 tx=42 requests (responses not established) ×3" in output
+    assert "↔" not in output
+    assert "14:00:01Z–2026-10-09T14:00:03Z" in output
+
+
+def test_meter_unpaired_runs_respect_fault_connector_and_transaction_boundaries():
+    rows = [meter(1), meter(2),
+            row(3, "StatusNotification", {"connector_id": 1, "status": "Faulted",
+                                          "error_code": "ReaderFailure"}),
+            meter(4), meter(5), meter(6, connector=2), meter(7, connector=2),
+            meter(8, connector=2, tx=44), meter(9, connector=2, tx=44)]
+    output = format_events(rows)
+    assert output.count("requests (responses not established) ×2") == 4
+    assert "Faulted ReaderFailure" in output
+    assert "↔" not in output
+
+
+def test_meter_leading_missing_response_not_counted_as_exchange():
+    rows = [meter(1), meter(2), meter(3, response=True),
+            meter(4), meter(5, response=True)]
+    output = format_events(rows)
+    assert "MeterValues C1 tx=42 ↔ ×1" in output
+    assert output.count("MeterValues C1 tx=42 ↔ ×1") == 2
+    assert "14:00:01Z" in output
+    assert "↔ ×3" not in output
+
+
+def test_transaction_cli_events_uses_request_only_compaction(monkeypatch):
+    from ocpp_csms.cli import transactions
+    class FakeQuery:
+        def __init__(self, data_dir):
+            pass
+        def get(self, transaction_id):
+            return object()
+    monkeypatch.setattr(transactions, "TransactionQuery", FakeQuery)
+    monkeypatch.setattr(transactions, "format_transaction", lambda view, **kw: "Transaction detail")
+    monkeypatch.setattr(transactions, "transaction_events", lambda *a: [meter(1), meter(2), meter(3)])
+    args = Namespace(data_dir="/unused", transaction_id=42, active=False, last=False,
+                     charger=None, connector=None, id_tag=None, since=None, until=None,
+                     between=None, at=None, today=False, limit=None, no_limit=False,
+                     events=True, local_time=False)
+    result = transactions.run_transactions(args)
+    assert "Transaction detail" in result
+    assert "requests (responses not established) ×3" in result
+    assert "↔" not in result
+
+
+def test_explain_and_events_share_unpaired_meter_format(monkeypatch, capsys):
+    rows = [meter(1), meter(2), meter(3)]
+    monkeypatch.setattr(diagnostics, "events_between", lambda *a, **kw: rows)
+    explained = diagnostics.explain("/unused", "CP1", at="2026-10-09T14:00:02Z")
+    assert "requests (responses not established) ×3" in explained
+    assert "requests (responses not established) ×3" in format_events(rows)
+    assert format_events(rows, verbose=True).count("MeterValues") == 3
