@@ -135,21 +135,9 @@ def run_config_download(args: argparse.Namespace) -> int:
         request["charger"] = charger
 
     try:
-        response = asyncio.run(send_control(args.data_dir, request))
-    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
-        print(f"error: control unavailable: {exc}")
-        return 1
-
-    error = response.get("error")
-    if error:
-        detail = response.get("detail") or response.get("charger")
-        suffix = f": {detail}" if detail is not None else ""
-        print(f"error: {error}{suffix}")
-        return 1
-
-    payload = response.get("response")
-    if not isinstance(payload, dict):
-        print("error: invalid configuration response")
+        payload = maintenance_control(args.data_dir, request, malformed="invalid configuration response")
+    except MaintenanceControlError as exc:
+        print(f"error: {exc}")
         return 1
 
     if charger is None:
