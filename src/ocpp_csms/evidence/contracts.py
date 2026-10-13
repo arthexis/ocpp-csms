@@ -37,6 +37,16 @@ def event_record(row: sqlite3.Row) -> dict[str, object]:
         "action": action,
     }
 
+    if row["kind"] == "recovery":
+        base["kind"] = "recovery"
+        base["reason"] = payload.get("reason")
+        base["previous_state"] = payload.get("previous_state")
+        base["new_state"] = payload.get("new_state")
+        base["observed_at"] = payload.get("observed_at")
+        if "connector_id" in payload:
+            base["connector_id"] = _connector_id(payload)
+        return base
+
     if row["kind"] == "runtime":
         if action == "charger_connected":
             base["kind"] = "charger_connected"
