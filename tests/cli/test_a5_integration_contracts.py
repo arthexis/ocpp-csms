@@ -72,7 +72,8 @@ def test_export_command_stays_registered_and_schema_constant():
     parser, commands = build_parser()
     assert "export" in commands
     assert parser.parse_args(["export", "--after", "12", "--limit", "20", "-j"]).command == "export"
-    assert "ocpp-csms/export/v1" in __import__("inspect").getsource(__import__("ocpp_csms.cli.export", fromlist=[""]).run_export)
+    from ocpp_csms.export_contract import SCHEMA
+    assert SCHEMA == "ocpp-csms/export/v1"
 
 
 def test_txn_operation_parser_is_independent_of_read_only_query():
