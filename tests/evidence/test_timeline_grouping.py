@@ -163,3 +163,86 @@ def test_orphan_heartbeat_response_is_not_assumed_paired():
     output = format_events(rows)
     assert "→ Heartbeat responses" in output
     assert "Heartbeat ↔" not in output
+
+
+def meter(n, connector=1, tx=42, *, response=False, charger="CP1", payload=None):
+    if payload is None:
+        payload = {} if response else {
+            "connector_id": connector, "transaction_id": tx,
+            "meter_value": [{"timestamp": "2026-10-09T14:00:00Z",
+                             "sampled_value": [{"value": str(n)}]}],
+        }
+    result = row(n, "MeterValues", payload, direction="out" if response else "in",
+                 charger=charger)
+    if not response:
+        result["transaction_id"] = tx
+    return result
+
+
+def test_meter_exchange_grouping_and_unmodified_verbose():
+    rows = [meter(1), meter(2, response=True), meter(3), meter(4, response=True)]
+    compact = format_events(rows)
+    assert "MeterValues C1 tx=42 ↔ ×2" in compact
+    assert compact.count("MeterValues") == 1
+    verbose = format_events(rows, verbose=True)
+    assert verbose.count("MeterValues") == 4
+    assert verbose.count("payload=") == 4
+    assert [r["payload"] for r in rows] == [
+        r["payload"] for r in rows
+    ]  # formatter must not alter underlying evidence
+
+
+def test_meter_connector_transaction_and_charger_boundaries():
+    rows = [meter(1), meter(2, response=True),
+            meter(3, connector=2), meter(4, response=True),
+            meter(5, connector=2, tx=43), meter(6, response=True),
+            meter(7, connector=2, tx=43, charger="CP2"),
+            meter(8, response=True, charger="CP2")]
+    output = format_events(rows)
+    assert output.count("↔ ×1") == 4
+    assert "C1 tx=42" in output and "C2 tx=43" in output
+
+
+def test_meter_interruptions_and_missing_responses():
+    rows = [meter(1), meter(2, response=True),
+            meter(3), row(4, "StatusNotification",
+                          {"connector_id": 1, "status": "Faulted", "error_code": "ReaderFailure"}),
+            meter(5, response=True), meter(6), meter(7, response=True)]
+    output = format_events(rows)
+    assert output.count("MeterValues C1 tx=42 ↔ ×1") == 2
+    assert "Faulted ReaderFailure" in output
+    assert "→ MeterValues response" in output
+    assert output.count("MeterValues C1 tx=42") == 3
+
+
+def test_meter_anomalous_and_malformed_frames_not_grouped():
+    invalid = meter(3, response=True, payload={"unexpected": "bad"})
+    malformed = meter(5)
+    malformed["payload"] = "not-json"
+    rows = [meter(1), meter(2, response=True), invalid,
+            meter(4), malformed, meter(6, response=True)]
+    output = format_events(rows)
+    assert output.count("↔ ×1") == 1
+    assert "extra=1" in output
+    assert "[invalid payload]" in output
+    assert "→ MeterValues response" in output
+
+
+def test_meter_window_edges_do_not_infer_unseen_pairs():
+    rows = [meter(2, response=True), meter(3), meter(4, response=True), meter(5)]
+    output = format_events(rows)
+    assert output.count("↔ ×1") == 1
+    assert output.count("→ MeterValues response") == 1
+    assert output.count("MeterValues C1 tx=42") == 2
+    assert "14:00:02Z" in output and "14:00:05Z" in output
+
+
+def test_meter_extra_fields_or_mismatched_transaction_are_not_grouped():
+    extra = meter(1, payload={"connector_id": 1, "transaction_id": 42,
+                              "meter_value": [{"timestamp": "now"}], "vendor": 1})
+    mismatch = meter(3, payload={"connector_id": 1, "transaction_id": 43,
+                                 "meter_value": [{"timestamp": "now"}]})
+    output = format_events([extra, meter(2, response=True),
+                            mismatch, meter(4, response=True)])
+    assert "↔" not in output
+    assert output.count("→ MeterValues response") == 2
