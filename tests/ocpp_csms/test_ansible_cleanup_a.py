@@ -11,7 +11,9 @@ def test_forwarder_disable_is_shared_and_fail_closed():
     assert "systemd_service:" in shared
     assert "state: stopped" in shared
     assert "enabled: false" in shared
-    assert "failed_when: ocpp_forwarder_active_check.rc == 0" in shared
+    assert "ActiveState=inactive" in shared
+    assert "UnitFileState=disabled" in shared
+    assert "ocpp_forwarder_active_check.rc != 0" in shared
     for name in ("satellite.yml", "delegate.yml"):
         source = (PLAYBOOKS / name).read_text()
         assert "import_tasks: tasks/disable-forwarder.yml" in source
