@@ -2,8 +2,6 @@
 
 These are static regressions: they never operate on appliances.
 """
-import pytest
-
 from .helpers import ROOT, TASKS, read, task_by_name, assert_task_order, load_yaml
 
 PLAYBOOKS = ROOT / "ansible/playbooks"
