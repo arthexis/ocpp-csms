@@ -90,7 +90,7 @@ async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
         lock.rollback()
         lock.close()
 
-    assert 1_073_741_824 <= first.transaction_id <= 2_147_483_646
+    assert first.transaction_id == 1
     assert retry.transaction_id == first.transaction_id
     assert len(transaction_records(tmp_path)) == 1
 
