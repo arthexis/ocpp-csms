@@ -4,10 +4,9 @@ from __future__ import annotations
 import argparse
 
 
-def add_cp(parser: argparse.ArgumentParser, *, legacy_alias: bool = True, **kwargs):
+def add_cp(parser: argparse.ArgumentParser, **kwargs):
     """Register the charge-point selector with a stable namespace destination."""
-    flags = ("--cp", "--charger") if legacy_alias else ("--cp",)
-    return parser.add_argument(*flags, dest="charger", **kwargs)
+    return parser.add_argument("--cp", dest="charger", **kwargs)
 
 
 def add_connector(parser: argparse.ArgumentParser, **kwargs):
