@@ -175,6 +175,21 @@ class EventStore:
                     ),
                 )
 
+    @staticmethod
+    def _append_recovery_event(connection: sqlite3.Connection, *, charger_id: str,
+                               transaction_id: int, previous_state: str,
+                               new_state: str, reason: str, observed_at: str,
+                               details: dict[str, Any] | None = None) -> None:
+        payload = {"transaction_id": transaction_id, "previous_state": previous_state,
+                   "new_state": new_state, "reason": reason, "observed_at": observed_at,
+                   **(details or {})}
+        connection.execute(
+            """INSERT INTO events (received_at, charger_id, action, direction,
+               transaction_id, payload_json) VALUES (?, ?, ?, ?, ?, ?)""",
+            (observed_at, charger_id, "RecoveryTransition", "internal",
+             transaction_id, json.dumps(payload, sort_keys=True, ensure_ascii=False)),
+        )
+
     def infer_transaction_stop(
         self, transaction_id: int, *, reason: str = "disconnected_timeout",
         last_meter_wh: int | None = None,
@@ -185,7 +200,7 @@ class EventStore:
         now = utc_now_iso()
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT state, last_activity_at FROM transactions WHERE transaction_id = ?",
+                "SELECT state, last_activity_at, charger_id FROM transactions WHERE transaction_id = ?",
                 (int(transaction_id),),
             ).fetchone()
             if row is None or row[0] not in {"open", "recovered"}:
@@ -193,6 +208,12 @@ class EventStore:
             connection.execute(
                 "UPDATE transactions SET state = 'inferred_stopped' WHERE transaction_id = ? AND state IN ('open', 'recovered')",
                 (int(transaction_id),),
+            )
+            self._append_recovery_event(
+                connection, charger_id=str(row[2]), transaction_id=int(transaction_id),
+                previous_state=str(row[0]), new_state="inferred_stopped",
+                reason=reason, observed_at=now,
+                details={"last_activity_at": row[1], "last_meter_wh": last_meter_wh},
             )
             connection.execute(
                 """INSERT INTO transaction_recoveries (
@@ -253,6 +274,13 @@ class EventStore:
                     if charger_timestamp is not None and transaction[1] is not None:
                         belongs_to_session = _timestamp(str(charger_timestamp)) >= _timestamp(str(transaction[1]))
                     if belongs_to_session:
+                        self._append_recovery_event(
+                            connection, charger_id=charger_id,
+                            transaction_id=int(transaction[0]), previous_state="open",
+                            new_state="ended", reason="connector_status",
+                            observed_at=received_at,
+                            details={"connector_id": connector_id, "status": status},
+                        )
                         connection.execute(
                             """
                             UPDATE transactions SET state = 'ended', last_activity_at = ?
