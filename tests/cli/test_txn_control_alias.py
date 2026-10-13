@@ -22,7 +22,7 @@ def test_control_request_defaults_to_now(argv, expected):
     (["txn", "start", "-c", "1"], ["start", "-c", "1"]),
     (["txn", "stop", "42"], ["stop", "--txn", "42"]),
     (["txn", "stop", "--txn", "42", "--within", "5"], ["stop", "--txn", "42", "--within", "5"]),
-    (["transactions", "start"], ["start"]),
+    (["txn", "start"], ["start"]),
 ])
 def test_alias_dispatch(monkeypatch, shortcut, canonical):
     seen = []
