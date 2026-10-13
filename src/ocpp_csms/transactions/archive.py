@@ -251,6 +251,20 @@ class TransactionArchive:
             if loaded[0] is None:
                 return loaded[2]
             path, record, decision = loaded
+            existing_stop = record.get("stop")
+            if isinstance(existing_stop, dict):
+                if existing_stop == payload:
+                    return _decision("historical_transaction_stop_retry", transaction_id, "StopTransaction", payload, decision="deduplicated")
+                unresolved_path = self._preserve_unresolved(
+                    transaction_id, charge_point_id, payload,
+                    message_type="StopTransaction", reason="conflicting_stop",
+                )
+                return _decision(
+                    "historical_transaction_id_collision", transaction_id,
+                    "StopTransaction", payload, decision="preserved_unresolved",
+                    reason="conflicting_stop",
+                    unresolved_path=str(unresolved_path.relative_to(self.data_dir)),
+                )
             received_at = utc_now_iso()
             record["stop"] = payload
             record["stop_received_at"] = received_at
