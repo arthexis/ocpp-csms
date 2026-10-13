@@ -2,7 +2,9 @@
 
 These are static regressions: they never operate on appliances.
 """
-from .helpers import ROOT, TASKS, load_yaml, read, task_by_name, assert_task_order
+import pytest
+
+from .helpers import ROOT, TASKS, read, task_by_name, assert_task_order, load_yaml
 
 PLAYBOOKS = ROOT / "ansible/playbooks"
 
@@ -44,17 +46,27 @@ def test_failed_cutover_restores_previous_release_only_when_safe():
     assert "Report handoff failure without automatic rollback" in cutover
 
 
-def test_forwarder_profiles_converge_without_silent_failure():
-    shared = read(PLAYBOOKS / "tasks/disable-forwarder.yml")
-    assert "state: stopped" in shared
-    assert "enabled: false" in shared
-    assert "failed_when: ocpp_forwarder_active_check.rc == 0" in shared
-    for filename in ("satellite.yml", "delegate.yml"):
-        body = read(PLAYBOOKS / filename)
-        assert "role: ocpp_forwarder" in body
-        assert "ocpp_forwarder_enabled | default(false) | bool" in body
-        assert "import_tasks: tasks/disable-forwarder.yml" in body
-        assert "not (ocpp_csms_stage_only | default(false) | bool)" in body
+@pytest.mark.parametrize("profile", ("satellite", "delegate"))
+def test_forwarder_profile_convergence_is_guarded(profile):
+    tasks = load_yaml(PLAYBOOKS / f"{profile}.yml")[0]
+    forwarder = next(role for role in tasks["roles"] if role["role"] == "ocpp_forwarder")
+    assert "ocpp_forwarder_enabled | default(false) | bool" in forwarder["when"]
+    assert "not (ocpp_csms_stage_only | default(false) | bool)" in forwarder["when"]
+    shutdown = next(task for task in tasks["post_tasks"]
+                    if task.get("ansible.builtin.import_tasks") == "tasks/disable-forwarder.yml")
+    assert "not (ocpp_forwarder_enabled | default(false) | bool)" in shutdown["when"]
+    assert "not (ocpp_csms_stage_only | default(false) | bool)" in shutdown["when"]
+
+
+def test_excluded_forwarder_is_stopped_and_verified():
+    shutdown = load_yaml(PLAYBOOKS / "tasks/disable-forwarder.yml")
+    stop = next(task for task in shutdown if task["name"] == "Disable excluded Forwarder service")
+    assert stop["ansible.builtin.systemd_service"] == {
+        "name": "ocpp-forwarder.service", "enabled": False, "state": "stopped",
+    }
+    verify = next(task for task in shutdown if task["name"] == "Verify excluded Forwarder is not active")
+    assert verify["changed_when"] is False
+    assert verify["failed_when"] == "ocpp_forwarder_active_check.rc == 0"
 
 
 def test_stage_only_stops_before_cutover_and_side_effect_roles():
@@ -64,9 +76,9 @@ def test_stage_only_stops_before_cutover_and_side_effect_roles():
                       "End host after safe staging",
                       "Perform controlled OCPP CSMS handoff")
     assert task_by_name(TASKS / "main.yml", "End host after safe staging")["when"] == "ocpp_csms_stage_only | bool"
-    delegate = read(PLAYBOOKS / "delegate.yml")
-    assert "role: ocpp_expose" in delegate
-    assert "not (ocpp_csms_stage_only | default(false) | bool)" in delegate
+    delegate = load_yaml(PLAYBOOKS / "delegate.yml")[0]
+    exposure = next(role for role in delegate["roles"] if role["role"] == "ocpp_expose")
+    assert "not (ocpp_csms_stage_only | default(false) | bool)" in exposure["when"]
 
 
 def test_public_delegate_checks_basic_auth_and_loopback_before_exposure():
