@@ -56,3 +56,26 @@ async def test_corrupt_archive_is_not_replaced_by_recovered_evidence(tmp_path):
     decision = await archive.stop("cp-a", payload)
     assert decision["reason"] == "archive_unreadable"
     assert path.read_text() == "{broken"
+
+
+@pytest.mark.asyncio
+async def test_corrupt_archive_identity_survives_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    start = {"connector_id": 1, "id_tag": "card", "meter_start": 100,
+             "timestamp": "2026-10-13T12:00:00Z"}
+    tx = await archive.start("cp-a", start)
+    path = archive._paths[tx]
+    path.write_text("{broken", encoding="utf-8")
+    restarted = TransactionArchive(tmp_path)
+    assert restarted._paths[tx] == path
+    decision = await restarted.stop(
+        "cp-a", {"transaction_id": tx, "meter_stop": 180,
+                 "timestamp": "2026-10-13T12:30:00Z"}
+    )
+    assert decision["reason"] == "archive_unreadable"
+    assert path.read_text() == "{broken"
+    next_id = await restarted.start(
+        "cp-a", {**start, "meter_start": 200,
+                 "timestamp": "2026-10-13T13:00:00Z"}
+    )
+    assert next_id != tx
