@@ -10,7 +10,7 @@ def install_control_response(monkeypatch, response):
         install_control_response.request = request
         return response
 
-    monkeypatch.setattr(config_cli, "send_control", fake_send)
+    monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", fake_send)
 
 
 def test_download_uses_full_guarded_configuration_query(monkeypatch, parse_cli):

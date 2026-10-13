@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from ocpp_csms.config_report import configuration_snapshot, format_configuration_snapshot
-from ocpp_csms.control import send_control
+from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.output import emit_json
 from ocpp_csms.status import appliance_status
 
@@ -83,18 +83,9 @@ def _format_configuration(payload: dict[str, object]) -> str:
 def run_configuration(args: argparse.Namespace) -> int:
     try:
         request = configuration_request(args)
-        response = asyncio.run(send_control(args.data_dir, request))
-    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
-        print(f"error: control unavailable: {exc}")
-        return 1
-    error = response.get("error")
-    if error:
-        detail = response.get("detail") or response.get("charger")
-        suffix = f": {detail}" if detail is not None else ""
-        print(f"error: {error}{suffix}")
-        return 1
-    payload = response.get("response")
-    if not isinstance(payload, dict):
+        payload = maintenance_control(args.data_dir, request, malformed="invalid configuration response")
+    except (MaintenanceControlError, ValueError) as exc:
+        print(f"error: {exc}")
         return 1
     if request["command"] == "config_set":
         change = payload.get("change")
@@ -144,21 +135,9 @@ def run_config_download(args: argparse.Namespace) -> int:
         request["charger"] = charger
 
     try:
-        response = asyncio.run(send_control(args.data_dir, request))
-    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
-        print(f"error: control unavailable: {exc}")
-        return 1
-
-    error = response.get("error")
-    if error:
-        detail = response.get("detail") or response.get("charger")
-        suffix = f": {detail}" if detail is not None else ""
-        print(f"error: {error}{suffix}")
-        return 1
-
-    payload = response.get("response")
-    if not isinstance(payload, dict):
-        print("error: invalid configuration response")
+        payload = maintenance_control(args.data_dir, request, malformed="invalid configuration response")
+    except MaintenanceControlError as exc:
+        print(f"error: {exc}")
         return 1
 
     if charger is None:
