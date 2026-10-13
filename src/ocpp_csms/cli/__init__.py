@@ -7,7 +7,7 @@ from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, 
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
 from ocpp_csms.cli.config import add_config_command, configuration_request, is_config_download, is_config_diff, run_config_download, run_configuration
 from ocpp_csms.cli.config_diff import run_config_diff
-from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control, _add_timing_options
+from ocpp_csms.cli.control import CONTROL_COMMANDS, add_control_commands, control_request, run_control
 from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, run_diagnostics
 from ocpp_csms.cli.data import add_data_command, run_data
 from ocpp_csms.cli.data_transfer import add_data_transfer_command, run_data_transfer
@@ -27,7 +27,7 @@ from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
 from ocpp_csms.cli.txn_explain import run_txn_explain
-from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, run_transactions
+from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, build_txn_operations_parser, run_transactions
 from ocpp_csms.transactions.archive import default_data_dir
 
 
@@ -60,6 +60,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
     transactions.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable transaction contract")
+    transactions.epilog = "Operations: txn start, txn stop ID, txn explain ID, txn recover. Use txn OP --help for details."
     for name in TRANSACTION_COMMANDS:
         commands[name] = transactions
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
@@ -86,26 +87,7 @@ def main() -> int:
         global_parser = argparse.ArgumentParser(add_help=False)
         global_parser.add_argument("--data-dir", default=str(default_data_dir()))
         global_args = global_parser.parse_args(argv[:txn_offset])
-        operations = argparse.ArgumentParser(prog="ocpp-csms txn")
-        ops = operations.add_subparsers(dest="operation", required=True)
-        start = ops.add_parser("start", help="Request a remote transaction start")
-        start.add_argument("charger", nargs="?")
-        start.add_argument("--cp", dest="charger_option")
-        start.add_argument("-c", "--connector", type=int)
-        start.add_argument("--rfid", "--id-tag", dest="id_tag")
-        _add_timing_options(start)
-        stop = ops.add_parser("stop", help="Request a remote transaction stop")
-        stop.add_argument("transaction_id", nargs="?", type=int)
-        stop.add_argument("--txn", "--transaction", "-t", dest="transaction_option", type=int)
-        stop.add_argument("--cp", dest="charger_option")
-        _add_timing_options(stop)
-        explain = ops.add_parser("explain", help="Explain archived transaction evidence")
-        explain.add_argument("transaction_id", type=int)
-        explain.add_argument("--context", type=int, default=0)
-        explain.add_argument("--verbose", action="store_true")
-        explain.add_argument("-j", "--json", action="store_true")
-        add_recovery_parser(ops)
-        # Recovery's parser is registered as 'recover'; no root rewrite needed.
+        operations = build_txn_operations_parser()
         args = operations.parse_args(argv[txn_offset + 1:])
         args.data_dir = global_args.data_dir
         if args.operation in {"explain", "recover"}:
