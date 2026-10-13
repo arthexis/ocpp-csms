@@ -11,7 +11,7 @@ def test_profile_clear_without_filters_requests_clear_all(cli_parser, profile_co
 
 
 def test_profile_clear_maps_protocol_filters(cli_parser, profile_control):
-    args = cli_parser.parse_args(["profile", "clear", "--charger", "charger-a", "--id", "7", "--connector", "1", "--purpose", "ChargePointMaxProfile", "--stack-level", "2"])
+    args = cli_parser.parse_args(["profile", "clear", "--cp", "charger-a", "--id", "7", "--connector", "1", "--purpose", "ChargePointMaxProfile", "--stack-level", "2"])
     assert run_profile(args) == 0
     assert profile_control.calls == [(args.data_dir, {"command": "clear_charging_profile", "charger": "charger-a", "id": 7, "connector": 1, "purpose": "ChargePointMaxProfile", "stack_level": 2})]
 
