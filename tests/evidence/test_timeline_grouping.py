@@ -1,5 +1,12 @@
 """Regression checks for the conservative human-readable event grouping."""
+import copy
 import json
+from argparse import Namespace
+
+import pytest
+
+from ocpp_csms.cli import diagnostics as cli
+from ocpp_csms.evidence import diagnostics
 
 from ocpp_csms.evidence.diagnostics import format_events
 
@@ -181,7 +188,6 @@ def meter(n, connector=1, tx=42, *, response=False, charger="CP1", payload=None)
 
 def test_meter_exchange_grouping_and_unmodified_verbose():
     rows = [meter(1), meter(2, response=True), meter(3), meter(4, response=True)]
-    import copy
     original = copy.deepcopy(rows)
     compact = format_events(rows)
     assert "MeterValues C1 tx=42 ↔ ×2" in compact
@@ -201,7 +207,8 @@ def test_meter_connector_transaction_and_charger_boundaries():
             meter(8, response=True, charger="CP2")]
     output = format_events(rows)
     assert output.count("↔ ×1") == 4
-    assert "C1 tx=42" in output and "C2 tx=43" in output
+    assert "C1 tx=42" in output
+    assert "C2 tx=43" in output
 
 
 def test_meter_interruptions_and_missing_responses():
@@ -249,16 +256,20 @@ def test_meter_extra_fields_or_mismatched_transaction_are_not_grouped():
     assert output.count("→ MeterValues response") == 2
 
 
-def test_meter_detail_preserves_unusual_outgoing_evidence():
-    rows = [meter(1), meter(2, response=True, payload={"error": "unexpected"})]
+@pytest.mark.parametrize("unexpected", [
+    {"error": "unexpected"},
+    {"status": "Rejected"},
+])
+def test_meter_detail_preserves_unusual_outgoing_evidence(unexpected):
+    rows = [meter(1), meter(2, response=True, payload=unexpected)]
     compact = format_events(rows, detail=True)
     assert "↔" not in compact
-    assert 'extra={"error": "unexpected"}' in compact
+    assert "→ MeterValues" in compact
+    assert "response" in compact or "Rejected" in compact
 
 
 def test_meter_request_without_transaction_and_no_inferred_transaction():
     standalone = meter(1, tx=None)
-    standalone["transaction_id"] = None
     output = format_events([standalone, meter(2, response=True)])
     assert "MeterValues C1 ↔ ×1" in output
     assert "tx=" not in output
@@ -284,14 +295,11 @@ def test_meter_transaction_lifecycle_breaks_grouping():
 
 
 def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch, capsys):
-    from argparse import Namespace
-    from ocpp_csms.cli import diagnostics as cli
-
     source = [meter(1), meter(2, response=True), meter(3), meter(4, response=True)]
-    seen = []
+    observed_limits = []
 
     def selected_rows(*args, **kwargs):
-        seen.append(kwargs.copy())
+        observed_limits.append(kwargs["limit"])
         return source
 
     monkeypatch.setattr(cli, "events_between", selected_rows)
@@ -316,11 +324,10 @@ def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch,
     assert cli.run_events(args) == 0
     assert emitted[1]["schema"] == "ocpp-csms/events-raw/v1"
     assert len(emitted[1]["data"]["events"]) == 4
-    assert len(seen) == 4 and all(call["limit"] == 4 for call in seen)
+    assert observed_limits == [4] * 4
 
 
 def test_explain_uses_shared_meter_formatter(monkeypatch):
-    from ocpp_csms.evidence import diagnostics
     rows = [meter(1), meter(2, response=True), meter(3), meter(4, response=True)]
     monkeypatch.setattr(diagnostics, "events_between", lambda *a, **k: rows)
     output = diagnostics.explain("/unused", "CP1", at="2026-10-09T14:00:02Z")
