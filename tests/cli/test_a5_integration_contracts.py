@@ -10,6 +10,7 @@ import pytest
 from ocpp_csms.cli import build_parser, main
 from ocpp_csms.cli.control import control_request
 from ocpp_csms.cli.transactions import build_txn_operations_parser
+from ocpp_csms.export_contract import SCHEMA as EXPORT_SCHEMA
 
 
 @pytest.fixture
@@ -68,12 +69,15 @@ def test_txn_json_schema_stays_stable(invoke_cli, capsys):
     assert isinstance(payload["data"]["transactions"], list)
 
 
-def test_export_command_stays_registered_and_schema_constant():
+def test_export_command_preserves_json_contract(invoke_cli, capsys):
     parser, commands = build_parser()
     assert "export" in commands
-    assert parser.parse_args(["export", "--after", "12", "--limit", "20", "-j"]).command == "export"
-    from ocpp_csms.export_contract import SCHEMA
-    assert SCHEMA == "ocpp-csms/export/v1"
+    args = parser.parse_args(["export", "--after", "12", "--limit", "20", "-j"])
+    assert (args.after, args.limit, args.json) == (12, 20, True)
+    assert invoke_cli("export", "--after", "12", "--limit", "20", "-j") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert EXPORT_SCHEMA == "ocpp-csms/export/v1"
+    assert payload["schema"] == EXPORT_SCHEMA
 
 
 def test_txn_operation_parser_is_independent_of_read_only_query():
