@@ -107,6 +107,12 @@ class TransactionArchive:
                 record = json.loads(path.read_text(encoding="utf-8"))
                 transaction_id = int(record["transaction_id"])
             except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                # Reserve the identity of a damaged archive across restarts.
+                # The filename is authoritative only for locating unreadable
+                # evidence; never synthesize its contents.
+                match = re.search(r"-(\\d+)\\.json$", path.name)
+                if match:
+                    self._paths.setdefault(int(match.group(1)), path)
                 continue
             origin = _record_origin(record)
             self._paths[transaction_id] = path
