@@ -70,6 +70,7 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
         details = {key: value for key, value in decision.items() if key != "event"}
         try:
             self.events.record_runtime(event, charger_id=self.id, details=details)
+            self.events.record_recovery_decision(self.id, decision)
             if event == "historical_transaction_id_collision":
                 self.events.record_runtime(
                     "unresolved_queued_message_preserved",
