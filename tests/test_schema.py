@@ -27,11 +27,11 @@ def test_missing_database_inspection_is_read_only(tmp_path):
     assert not data_dir.exists()
 
 
-def test_current_schema_is_created_directly_at_version_six(tmp_path):
+def test_current_schema_is_created_directly_at_version_seven(tmp_path):
     info = create_current_schema(tmp_path)
 
     assert info.exists is True
-    assert info.version == CURRENT_SCHEMA_VERSION == 6
+    assert info.version == CURRENT_SCHEMA_VERSION == 7
     with sqlite3.connect(info.path) as connection:
         objects = {
             (kind, name)
@@ -41,7 +41,7 @@ def test_current_schema_is_created_directly_at_version_six(tmp_path):
         }
         version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-    assert version == 6
+    assert version == 7
     assert ("table", "events") in objects
     assert ("table", "runtime_events") in objects
     assert ("table", "transactions") in objects
@@ -49,6 +49,7 @@ def test_current_schema_is_created_directly_at_version_six(tmp_path):
     assert ("table", "rfid_lists") in objects
     assert ("table", "rfid_list_entries") in objects
     assert ("table", "appliance_metadata") in objects
+    assert ("table", "transaction_changes") in objects
     assert ("view", "transaction_summary") in objects
 
 
@@ -68,7 +69,7 @@ def test_inspection_reports_newer_schema_without_modifying_it(tmp_path):
     info = inspect_schema(tmp_path)
 
     assert info.version == 99
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 6"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 7"):
         require_supported_schema(info)
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 99
@@ -79,12 +80,12 @@ def test_event_store_refuses_newer_schema(tmp_path):
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA user_version = 99")
 
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 6"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 7"):
         EventStore(tmp_path)
 
 
 def test_event_store_refuses_older_schema_without_mutating_it(tmp_path, schema_one):
-    with pytest.raises(RuntimeError, match="schema 1 is older than required 6; explicit upgrade required"):
+    with pytest.raises(RuntimeError, match="schema 1 is older than required 7; explicit upgrade required"):
         EventStore(tmp_path)
 
     with sqlite3.connect(schema_one) as connection:
@@ -105,16 +106,16 @@ def test_schema_one_has_explicit_upgrade_path(tmp_path, schema_one):
     assert schema_backup_path(info).name == f"{DATABASE_FILENAME}.schema-1.bak"
 
 
-def test_upgrade_schema_one_to_six_preserves_evidence_and_creates_backup(tmp_path, schema_one):
+def test_upgrade_schema_one_to_seven_preserves_evidence_and_creates_backup(tmp_path, schema_one):
     info = inspect_schema(tmp_path)
     backup = schema_backup_path(info)
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 6
+    assert upgraded.version == 7
     assert backup.exists()
     with sqlite3.connect(schema_one) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
         assert connection.execute(
             "SELECT event, charger_id FROM runtime_events"
         ).fetchone() == ("legacy_evidence", "charger-a")
@@ -148,7 +149,7 @@ def test_upgrade_refuses_unversioned_database(tmp_path):
     info = inspect_schema(tmp_path)
     assert info.version == 0
     assert can_upgrade_schema(info) is False
-    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 6"):
+    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 7"):
         upgrade_schema(tmp_path)
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='legacy'").fetchone() == ("legacy",)
@@ -174,7 +175,7 @@ def test_current_schema_creation_refuses_existing_database(tmp_path):
         create_current_schema(tmp_path)
 
 
-def test_schema_two_upgrades_to_six_with_rfid_history_and_metadata(tmp_path):
+def test_schema_two_upgrades_to_seven_with_rfid_history_and_metadata(tmp_path):
     path = tmp_path / DATABASE_FILENAME
     with sqlite3.connect(path) as connection:
         connection.executescript(
@@ -226,7 +227,7 @@ def test_schema_two_upgrades_to_six_with_rfid_history_and_metadata(tmp_path):
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 6
+    assert upgraded.version == 7
     with sqlite3.connect(path) as connection:
         tables = {
             row[0]
