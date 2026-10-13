@@ -1,0 +1,23 @@
+---
+# Both deployment profiles share this convergence guard.
+- name: Inspect whether Forwarder unit exists
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, --no-legend, --plain, ocpp-forwarder.service]
+  register: ocpp_forwarder_unit_presence
+  changed_when: false
+  failed_when: false
+
+- name: Disable excluded Forwarder service
+  become: true
+  ansible.builtin.systemd_service:
+    name: ocpp-forwarder.service
+    enabled: false
+    state: stopped
+  when: "'ocpp-forwarder.service' in ocpp_forwarder_unit_presence.stdout"
+
+- name: Verify excluded Forwarder is not active
+  ansible.builtin.command:
+    argv: [systemctl, is-active, --quiet, ocpp-forwarder.service]
+  register: ocpp_forwarder_active_check
+  changed_when: false
+  failed_when: ocpp_forwarder_active_check.rc == 0
