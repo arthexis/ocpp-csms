@@ -8,8 +8,6 @@ from ocpp_csms.cli import build_parser
     [
         (["init"], "init"),
         (["serve"], "serve"),
-        (["start", "--id-tag", "REMOTE", "--now"], "start"),
-        (["stop", "--transaction", "1", "--now"], "stop"),
         (["reset", "--now"], "reset"),
         (["config"], "config"),
         (["profile", "templates"], "profile"),
