@@ -5,29 +5,30 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from ocpp_csms.cli.transactions import resolve_time
+from ocpp_csms.cli.options import add_cp, add_connector, add_json
 from ocpp_csms.control import send_control
 from ocpp_csms.reservations import list_reservations
 
 def _create_args(parser):
-    parser.add_argument("--cp", "--charger", dest="charger")
-    parser.add_argument("-c", "--connector", type=int, required=True, help="Connector ID (0 = any connector)")
+    add_cp(parser)
+    add_connector(parser, required=True, help="Connector ID (0 = any connector)")
     parser.add_argument("--rfid", required=True, help="RFID / OCPP idTag")
     parser.add_argument("--until", required=True, help="Reservation expiry (ISO-8601 with timezone, or relative e.g. 1h)")
     parser.add_argument("--id", "--reservation-id", dest="reservation_id", required=True, type=int, help="Unique OCPP reservation ID")
     parser.add_argument("--parent-rfid", dest="parent_id_tag")
-    parser.add_argument("-j", "--json", action="store_true")
+    add_json(parser)
 
 def _cancel_args(parser):
     parser.add_argument("reservation_id", type=int)
-    parser.add_argument("--cp", "--charger", dest="charger")
-    parser.add_argument("-j", "--json", action="store_true")
+    add_cp(parser)
+    add_json(parser)
 
 def add_reservation_commands(subcommands):
     reserve = subcommands.add_parser("reserve", help="List, inspect, create or cancel reservations")
-    reserve.add_argument("--cp", dest="charger", help="Filter recorded reservations by charge point")
+    add_cp(reserve, legacy_alias=False, help="Filter recorded reservations by charge point")
     reserve.add_argument("--all", action="store_true", help="Include historical reservations")
     reserve.add_argument("--since", help="Requests since timestamp (ISO-8601 or relative)")
-    reserve.add_argument("-j", "--json", action="store_true")
+    add_json(reserve)
     sub = reserve.add_subparsers(dest="reservation_action")
     create = sub.add_parser("create", help="Send OCPP ReserveNow")
     _create_args(create)

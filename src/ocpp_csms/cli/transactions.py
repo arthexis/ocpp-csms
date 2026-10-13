@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from ocpp_csms.evidence.diagnostics import format_events, transaction_events
+from ocpp_csms.cli.options import add_cp, add_connector, add_time_bounds
 from ocpp_csms.transactions.formatting import format_transaction, format_transactions
 from ocpp_csms.transactions.query import TransactionQuery
 
@@ -21,11 +22,10 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     selection = transactions.add_mutually_exclusive_group()
     selection.add_argument("--active", action="store_true", help="Show only active transactions")
     selection.add_argument("--last", action="store_true", help="Show the most recent transaction, including active")
-    add(transactions, "--cp", "--charger", dest="charger", help="Filter by charge point ID")
-    add(transactions, "-c", "--connector", dest="connector", type=int, help="Filter by connector ID")
+    add_cp(transactions, help="Filter by charge point ID")
+    add_connector(transactions, help="Filter by connector ID")
     add(transactions, "--id-tag", help="Filter by OCPP idTag")
-    add(transactions, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 7D)")
-    add(transactions, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 2H)")
+    add_time_bounds(transactions, since_help="Lower timestamp bound (ISO-8601 or relative, e.g. 7D)", until_help="Upper timestamp bound (ISO-8601 or relative, e.g. 2H)")
     add(transactions, "--between", nargs=2, metavar=("START", "END"), help="Activity between two ISO-8601 or relative times")
     add(transactions, "--at", help="Activity on the UTC day containing this ISO-8601 or relative time")
     add(transactions, "--today", action="store_true", help="Activity during the current UTC day")
