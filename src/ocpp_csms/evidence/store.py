@@ -238,6 +238,22 @@ class EventStore:
             )
         return True
 
+    def record_recovery_decision(self, charger_id: str, decision: dict[str, Any]) -> None:
+        """Expose archive adoption and unresolved collisions on the export cursor."""
+        event = str(decision["event"])
+        if event not in {"historical_transaction_recovered", "historical_transaction_id_collision"}:
+            return
+        transaction_id = int(decision["transaction_id"])
+        now = utc_now_iso()
+        with self._connect() as connection:
+            self._append_recovery_event(
+                connection, charger_id=charger_id, transaction_id=transaction_id,
+                previous_state="unknown",
+                new_state="recovered" if event == "historical_transaction_recovered" else "unresolved",
+                reason=event, observed_at=now,
+                details={key: value for key, value in decision.items() if key != "event"},
+            )
+
     def record_connector_status(self, charger_id: str, payload: dict[str, Any]) -> bool:
         connector_id = int(payload["connector_id"])
         status = str(payload["status"])
