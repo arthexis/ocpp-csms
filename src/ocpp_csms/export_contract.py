@@ -98,6 +98,7 @@ def export_contract(
     *,
     after: int = 0,
     limit: int = 500,
+    changes_after: int = 0,
 ) -> dict[str, Any]:
     """Build one cursor-addressed replication page from local CSMS state."""
     if after < 0:
@@ -125,7 +126,7 @@ def export_contract(
     status = status_contract(appliance_status(data_dir))["data"]
     data = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
-        "transaction_changes": changes_page(data_dir, after=0, limit=limit),
+        "transaction_changes": changes_page(data_dir, after=changes_after, limit=limit),
         "source_id": source_id(data_dir),
         "cursor": {
             "after": after,
