@@ -215,7 +215,8 @@ def test_diagnose_tasks_are_read_only_and_report_takeover_preflight():
     assert "ocpp_discover.incumbent" in diagnose
     assert "ocpp_csms.install_preflight" in diagnose
     assert "diagnostics" in diagnose
-    assert "takeover_preflight_passed" in diagnose
+    assert "safety_preflight_passed" in diagnose
+    assert "incumbent_observation_succeeded" in diagnose
     for mutating_module in (
         "ansible.builtin.apt:",
         "ansible.builtin.copy:",
