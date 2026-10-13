@@ -10,7 +10,7 @@ def test_parser_accepts_rfid_local_list_commands():
 
     export = parser.parse_args(["rfid", "export", "charger-a"])
     version = parser.parse_args(["rfid", "version"])
-    clear = parser.parse_args(["rfid", "clear", "--charger", "charger-a"])
+    clear = parser.parse_args(["rfid", "clear", "--cp", "charger-a"])
 
     assert export.rfid_command == "export"
     assert export.charger == "charger-a"
