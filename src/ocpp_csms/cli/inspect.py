@@ -5,7 +5,7 @@ import argparse
 import asyncio
 import json
 
-from ocpp_csms.cli.inspection import _features, _reconciliation
+from ocpp_csms.cli.inspection import _features, _reconciliation, capability_request
 from ocpp_csms.cli.options import add_cp, add_json
 from ocpp_csms.control import send_control
 from ocpp_csms.status import appliance_status
@@ -72,7 +72,9 @@ async def _inspect(data_dir, cp, snapshot, *, offline, deep, timeout):
             findings.append({"severity": "unknown", "check": "connection", "message": "Charger not connected; active queries skipped"})
         return report
 
-    configuration = await _safe_query(data_dir, cp, "config", timeout, keys=["SupportedFeatureProfiles"], force=True)
+    capability = capability_request(cp)
+    configuration = await _safe_query(data_dir, cp, capability["command"], timeout,
+                                      keys=capability["keys"], force=capability["force"])
     report["queries"]["configuration"] = configuration
     if configuration["state"] == "observed":
         report["features"] = _features(configuration["response"])
