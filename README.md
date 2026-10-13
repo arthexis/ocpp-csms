@@ -1118,13 +1118,13 @@ confirming no real ABB charger or active transaction is present:
 
 ```bash
 sudo systemctl stop ocpp-csms
-ocpp-csms data reset --test-only --dry-run
-ocpp-csms data reset --test-only --now
+ocpp-csms data reset --all --dry-run
+ocpp-csms data reset --all --now
 sudo systemctl start ocpp-csms
 ocpp-csms status
 ```
 
-The default is a non-mutating dry run. The `--now` operation atomically moves
+For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review\nthe operation, then `ocpp-csms data reset --cp NAME --now` to remove its\nSQLite records and matching JSON archives while preserving other charge points.\nBoth modes back up the original dataset and require the CSMS to be stopped.\nThe charge-point identity is matched exactly, and ambiguous archives abort the\noperation rather than risking an unrelated deletion.\n\nThe default is a non-mutating dry run. The `--all --now` operation moves
 the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
 initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
