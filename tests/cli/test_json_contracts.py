@@ -37,7 +37,7 @@ def test_events_transaction_alias_and_raw_mode_are_registered():
 @pytest.mark.parametrize("argv,field,expected", [
     (("events", "--follow", "--json"), "follow", True),
     (("events", "-f", "-j"), "follow", True),
-    (("reservation", "list", "--cp", "CP1", "--all", "-j"), "reservation_action", "list"),
+    (("reserve", "--cp", "CP1", "--all", "-j"), "command", "reserve"),
     (("firmware", "check", "--cp", "CP1", "--offline", "-j"), "firmware_action", "check"),
     (("firmware", "update", "--location", "https://example.org/fw.bin", "--after", "60", "--confirm"), "after", 60),
 ])

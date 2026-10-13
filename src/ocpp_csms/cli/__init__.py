@@ -109,7 +109,17 @@ def main() -> int:
             return run_control(args)
         except ValueError as exc:
             operations.error(str(exc))
+    # argparse cannot combine an optional numeric ID with named subcommands in
+    # one positional slot. Extract only the numeric detail selector before parse.
+    reserve_offset = next((i for i, word in enumerate(argv) if word == "reserve"), -1)
+    reserve_id = None
+    if reserve_offset >= 0 and len(argv) > reserve_offset + 1:
+        selector = argv[reserve_offset + 1]
+        if selector.lstrip("-").isdecimal():
+            reserve_id = int(argv.pop(reserve_offset + 1))
     parser, commands = build_parser(); args = parser.parse_args(argv)
+    if reserve_id is not None:
+        args.reservation_id = reserve_id
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
         if args.command in APPLIANCE_COMMANDS: return run_appliance(args)
@@ -118,7 +128,7 @@ def main() -> int:
         if args.command == 'inspect': return run_inspect(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
         if args.command in CHARGER_COMMANDS: return run_chargers(args)
-        if args.command in ("reserve", "reservation"): return run_reservation(args)
+        if args.command == "reserve": return run_reservation(args)
         if args.command == "data": return run_data(args)
         if args.command == "data-transfer": return run_data_transfer(args)
         if args.command == "firmware": return run_firmware(args)

@@ -57,6 +57,6 @@ def test_expired_and_used_are_historical(reservation_events):
     assert rows[0]["status"] == "Used"
 
 def test_reservation_list_cli_parses(parse_cli):
-    args = parse_cli("reservation", "list", "--cp", "CP1", "--all", "--since", "7d", "--json")
-    assert args.reservation_action == "list"
+    args = parse_cli("reserve", "--cp", "CP1", "--all", "--since", "7d", "--json")
+    assert args.reservation_action is None
     assert args.charger == "CP1" and args.all and args.json

@@ -23,21 +23,20 @@ def _cancel_args(parser):
     parser.add_argument("-j", "--json", action="store_true")
 
 def add_reservation_commands(subcommands):
-    reserve = subcommands.add_parser("reserve", help="Reserve a connector via OCPP ReserveNow")
-    _create_args(reserve)
-    reservation = subcommands.add_parser("reservation", help="Manage OCPP reservations")
-    sub = reservation.add_subparsers(dest="reservation_action", required=True)
-    _create_args(sub.add_parser("create", help="Alias for reserve"))
-    _cancel_args(sub.add_parser("cancel", help="Cancel a charger reservation"))
-    listing = sub.add_parser("list", help="List recorded reservation requests and outcomes")
-    listing.add_argument("--cp", "--charger", dest="charger")
-    listing.add_argument("--all", action="store_true", help="Include expired, used, canceled and rejected reservations")
-    listing.add_argument("--since", help="Show requests since timestamp (ISO-8601 or relative, e.g. 7d)")
-    listing.add_argument("-j", "--json", action="store_true")
-    return {"reserve": reserve, "reservation": reservation}
+    reserve = subcommands.add_parser("reserve", help="List, inspect, create or cancel reservations")
+    reserve.add_argument("--cp", dest="charger", help="Filter recorded reservations by charge point")
+    reserve.add_argument("--all", action="store_true", help="Include historical reservations")
+    reserve.add_argument("--since", help="Requests since timestamp (ISO-8601 or relative)")
+    reserve.add_argument("-j", "--json", action="store_true")
+    sub = reserve.add_subparsers(dest="reservation_action")
+    create = sub.add_parser("create", help="Send OCPP ReserveNow")
+    _create_args(create)
+    cancel = sub.add_parser("cancel", help="Send OCPP CancelReservation")
+    _cancel_args(cancel)
+    return {"reserve": reserve}
 
 def reservation_request(args):
-    action = getattr(args, "reservation_action", "create")
+    action = getattr(args, "reservation_action", None)
     if action == "cancel":
         if args.reservation_id <= 0:
             raise ValueError("reservation ID must be positive")
@@ -63,10 +62,15 @@ def reservation_request(args):
     return result
 
 def run_reservation(args):
-    if getattr(args, "reservation_action", None) == "list":
+    if getattr(args, "reservation_action", None) is None:
         since = resolve_time(args.since).isoformat() if args.since else None
+        reservation_id = getattr(args, "reservation_id", None)
+        if reservation_id is not None and reservation_id <= 0:
+            raise ValueError("reservation ID must be positive")
         rows = list_reservations(args.data_dir, charger=args.charger,
-                                 include_all=args.all, since=since)
+                                 include_all=args.all or reservation_id is not None, since=since)
+        if reservation_id is not None:
+            rows = [row for row in rows if row["id"] == reservation_id]
         if args.json:
             print(json.dumps(rows, ensure_ascii=False))
         elif not rows:

@@ -11,9 +11,9 @@ from ocpp_csms.session.commands import SessionCommands
 
 
 @pytest.mark.parametrize(("argv", "command"), [
-    (("reserve", "-c", "1", "--rfid", "ABC", "--id", "1", "--until", "1d"), "reserve"),
-    (("reservation", "create", "-c", "1", "--rfid", "ABC", "--id", "1", "--until", "1d"), "reservation"),
-    (("reservation", "cancel", "1"), "reservation"),
+    (("reserve",), "reserve"),
+    (("reserve", "create", "-c", "1", "--rfid", "ABC", "--id", "1", "--until", "1d"), "reserve"),
+    (("reserve", "cancel", "1"), "reserve"),
     (("firmware", "status"), "firmware"),
     (("firmware", "history", "--limit", "7"), "firmware"),
     (("diagnostics", "history", "--limit", "7"), "diagnostics"),
@@ -33,7 +33,7 @@ def test_maintenance_commands_registered_on_root_parser(parse_cli, argv, command
     ("firmware", "status", "--limit", "1"),
     ("firmware", "update", "--location", "https://host/fw", "--now", "--at", "2026-10-12T00:00:00Z", "--confirm"),
     ("data-transfer", "send", "--data", "payload"),
-    ("reservation", "cancel"),
+    ("reserve", "cancel"),
 ])
 def test_invalid_or_inapplicable_cli_options_are_rejected(parse_cli, argv):
     with pytest.raises(SystemExit) as error:
