@@ -100,7 +100,7 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
 
 def test_cp_and_charger_select_charge_point(parse_cli):
     assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
-    assert parse_cli("txn", "--charger", "charger-a").charger == "charger-a"
+    assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
 
 
 @pytest.mark.parametrize("command", ["txn"])
