@@ -11,7 +11,7 @@ from ocpp_csms.session.commands import SessionCommands
 
 
 @pytest.mark.parametrize(("argv", "command"), [
-    (("reserve", "create", "-c", "1", "--rfid", "ABC", "--id", "1", "--until", "1d"), "reserve"),
+    (("reserve",), "reserve"),
     (("reserve", "create", "-c", "1", "--rfid", "ABC", "--id", "1", "--until", "1d"), "reserve"),
     (("reserve", "cancel", "1"), "reserve"),
     (("firmware", "status"), "firmware"),
