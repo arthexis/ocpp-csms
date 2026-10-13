@@ -28,7 +28,7 @@ def test_profile_help_unknown_template_fails(cli_parser, capsys):
 
 
 def test_profile_send_sends_built_profile_and_reports_acceptance(cli_parser, profile_control, capsys):
-    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "send", "max-power", "--watts", "60000", "--charger", "charger-a"])
+    args = cli_parser.parse_args(["--data-dir", "/tmp/csms", "profile", "send", "max-power", "--watts", "60000", "--cp", "charger-a"])
     assert run_profile(args) == 0
     assert capsys.readouterr().out.strip() == "Accepted"
     data_dir, request = profile_control.calls[0]
@@ -74,7 +74,7 @@ def test_profile_composite_uses_bounded_defaults_and_renders_schedule(cli_parser
 
 def test_profile_composite_preserves_multiple_periods_and_overrides(cli_parser, profile_control, capsys):
     profile_control.response = composite_response([{"startPeriod": 0, "limit": 60000}, {"startPeriod": 1800, "limit": 40000, "numberPhases": 3}])
-    args = cli_parser.parse_args(["profile", "composite", "--charger", "charger-a", "--connector", "1", "--duration", "7200"])
+    args = cli_parser.parse_args(["profile", "composite", "--cp", "charger-a", "--connector", "1", "--duration", "7200"])
     assert run_profile(args) == 0
     assert profile_control.calls[0][1] == {"command": "get_composite_schedule", "charger": "charger-a", "connector": 1, "duration": 7200}
     output = capsys.readouterr().out
