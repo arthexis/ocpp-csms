@@ -6,21 +6,20 @@ import pytest
 from ocpp_csms.cli.transactions import _time_filters, resolve_time, run_transactions
 
 
-@pytest.mark.parametrize("name", ["transactions", "transaction", "txns", "txn"])
-def test_transaction_aliases_normalize_to_transactions_command(parse_cli, name):
-    args = parse_cli(name, "--active")
-    assert args.command == "transactions"
+def test_canonical_txn_command(parse_cli):
+    args = parse_cli("txn", "--active")
+    assert args.command == "txn"
     assert args.active is True
 
 
 def test_c_alias_matches_connector_filter(parse_cli):
     assert parse_cli("txn", "-c", "2").connector == 2
-    assert parse_cli("transactions", "--connector", "2").connector == 2
+    assert parse_cli("txn", "--connector", "2").connector == 2
 
 
 def test_local_time_long_and_short_flags_match(parse_cli):
     assert parse_cli("txn", "-T").local_time is True
-    assert parse_cli("transactions", "--local-time").local_time is True
+    assert parse_cli("txn", "--local-time").local_time is True
 
 
 def test_active_and_last_are_mutually_exclusive(cli_parser):
@@ -60,7 +59,7 @@ def test_between_accepts_relative_and_iso_bounds(parse_cli):
 
 def test_at_selects_utc_calendar_day(parse_cli):
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
-    since, until = _time_filters(parse_cli("transaction", "--at", "1D"), now=now)
+    since, until = _time_filters(parse_cli("txn", "--at", "1D"), now=now)
     assert since == datetime(2026, 10, 5, 0, 0, tzinfo=timezone.utc)
     assert until.date().isoformat() == "2026-10-05"
     assert until.hour == 23 and until.minute == 59
@@ -68,7 +67,7 @@ def test_at_selects_utc_calendar_day(parse_cli):
 
 def test_today_selects_current_utc_calendar_day(parse_cli):
     now = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
-    since, until = _time_filters(parse_cli("txns", "--today"), now=now)
+    since, until = _time_filters(parse_cli("txn", "--today"), now=now)
     assert since == datetime(2026, 10, 6, 0, 0, tzinfo=timezone.utc)
     assert until.date().isoformat() == "2026-10-06"
 
@@ -104,7 +103,7 @@ def test_cp_and_charger_select_charge_point(parse_cli):
     assert parse_cli("txn", "--charger", "charger-a").charger == "charger-a"
 
 
-@pytest.mark.parametrize("command", ["txn", "txns", "transaction", "transactions"])
+@pytest.mark.parametrize("command", ["txn"])
 @pytest.mark.parametrize("flag", ["-N", "--no-limit"])
 def test_transaction_no_limit_aliases(parse_cli, command, flag):
     args = parse_cli(command, "--since", "3d", flag)
