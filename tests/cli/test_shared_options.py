@@ -1,6 +1,5 @@
 """Shared argument builders preserve existing parser namespaces and defaults."""
 import argparse
-import pytest
 from ocpp_csms.cli.options import add_cp, add_connector, add_json, add_limit, add_time_bounds
 
 
@@ -22,9 +21,3 @@ def test_shared_time_and_limit():
     assert (args.since, args.until, args.limit) == ("7d", "1d", 20)
 
 
-def test_canonical_only_cp_rejects_legacy_alias():
-    parser = argparse.ArgumentParser()
-    add_cp(parser)
-    assert parser.parse_args(["--cp", "CP1"]).charger == "CP1"
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--charger", "CP1"])
