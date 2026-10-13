@@ -46,8 +46,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["data"] = add_data_command(subcommands)
     commands["data-transfer"] = add_data_transfer_command(subcommands)
     commands["firmware"] = add_firmware_command(subcommands)
-    commands["diag"] = add_diagnostics_command(subcommands)
-    commands["diagnostics"] = commands["diag"]
+    commands["diagnose"] = add_diagnostics_command(subcommands)
     commands["config"] = add_config_command(subcommands)
     commands["profile"] = add_profile_command(subcommands)
     commands["recover"] = add_recovery_parser(subcommands)
@@ -133,7 +132,7 @@ def main() -> int:
         if args.command == "data": return run_data(args)
         if args.command == "data-transfer": return run_data_transfer(args)
         if args.command == "firmware": return run_firmware(args)
-        if args.command in {"diag", "diagnostics"}: return run_diagnostics(args)
+        if args.command == "diagnose": return run_diagnostics(args)
         if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
         if args.command == "auth": return run_auth(args)
