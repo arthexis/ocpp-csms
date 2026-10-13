@@ -197,8 +197,12 @@ class TransactionArchive:
         async with self._lock:
             transaction_id = payload.get("transaction_id")
             if transaction_id is None:
+                # Connector-only samples have no transaction identity. Their
+                # raw OCPP event is preserved by the session evidence store.
                 return None
             transaction_id = int(transaction_id)
+            # A missing StartTransaction is not a reason to discard readings:
+            # retain them in an incomplete archive without inventing a start.
             loaded = self._load_or_recover(transaction_id, charge_point_id, payload, message_type="MeterValues")
             if loaded[0] is None:
                 return loaded[2]
