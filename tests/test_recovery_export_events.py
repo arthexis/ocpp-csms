@@ -60,3 +60,35 @@ def test_late_stop_reconciliation_emits_once(tmp_path):
     assert event["new_state"] == "stopped"
     store.record_transaction_stop("cp-a", payload)
     assert export_contract(tmp_path, after=next_page["cursor"]["next"])["data"]["events"] == []
+
+
+def test_historical_adoption_is_exported_without_fabricated_ocpp(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_recovery_decision("cp-a", {
+        "event": "historical_transaction_recovered",
+        "transaction_id": 81, "message_type": "MeterValues",
+        "decision": "adopted",
+    })
+    events = export_contract(tmp_path)["data"]["events"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "recovery"
+    assert events[0]["transaction_id"] == 81
+    assert events[0]["reason"] == "historical_transaction_recovered"
+
+
+def test_unresolved_collision_is_exported_without_changing_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    _transaction(store)
+    store.record_recovery_decision("cp-b", {
+        "event": "historical_transaction_id_collision",
+        "transaction_id": 17, "message_type": "StopTransaction",
+        "decision": "preserved_unresolved",
+        "reason": "charge_point_mismatch",
+        "unresolved_path": "transactions-unresolved/2026-01-01/collision.json",
+    })
+    events = export_contract(tmp_path)["data"]["events"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "recovery"
+    assert events[0]["reason"] == "historical_transaction_id_collision"
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+        assert db.execute("SELECT state FROM transactions WHERE transaction_id = 17").fetchone()[0] == "open"
