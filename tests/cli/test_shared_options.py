@@ -8,7 +8,7 @@ def test_shared_selectors_and_json():
     add_cp(parser)
     add_connector(parser)
     add_json(parser)
-    args = parser.parse_args(["--charger", "CP1", "-c", "2", "-j"])
+    args = parser.parse_args(["--cp", "CP1", "-c", "2", "-j"])
     assert (args.charger, args.connector, args.json) == ("CP1", 2, True)
     assert parser.parse_args(["--cp", "CP2", "--connector", "0"]).charger == "CP2"
 
@@ -23,5 +23,7 @@ def test_shared_time_and_limit():
 
 def test_canonical_only_cp_rejects_legacy_alias():
     parser = argparse.ArgumentParser()
-    add_cp(parser, legacy_alias=False)
+    add_cp(parser)
     assert parser.parse_args(["--cp", "CP1"]).charger == "CP1"
+    with __import__("pytest").raises(SystemExit):
+        parser.parse_args(["--charger", "CP1"])
