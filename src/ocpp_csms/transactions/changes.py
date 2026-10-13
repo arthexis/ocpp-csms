@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ocpp_csms.schema import source_id
 
 _DB = "transaction-changes.sqlite3"
 
@@ -68,13 +66,18 @@ def reconcile(data_dir: str | Path) -> None:
 def changes_page(data_dir: str | Path, *, after: int = 0, limit: int = 500) -> dict[str, Any]:
     if after < 0 or limit < 1:
         raise ValueError("invalid transaction change cursor")
-    reconcile(data_dir)
-    with _connect(data_dir) as connection:
+    database = Path(data_dir) / _DB
+    if not database.exists():
+        return {"cursor": {"after": after, "next": after, "more": False}, "items": []}
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    try:
         rows = connection.execute(
             "SELECT change_id, transaction_id, fingerprint, observed_at, record_json "
             "FROM changes WHERE change_id > ? ORDER BY change_id LIMIT ?",
             (after, limit + 1),
         ).fetchall()
+    finally:
+        connection.close()
     selected = rows[:limit]
     return {
         "cursor": {"after": after, "next": selected[-1][0] if selected else after,
