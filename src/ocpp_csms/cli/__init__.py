@@ -110,7 +110,7 @@ def main() -> int:
         if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
         if args.command == 'inspect': return run_inspect(args)
         if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
-        if args.command in ("charger", "chargers"): return run_chargers(args)
+        if args.command in CHARGER_COMMANDS: return run_chargers(args)
         if args.command in ("reserve", "reservation"): return run_reservation(args)
         if args.command == "data": return run_data(args)
         if args.command == "data-transfer": return run_data_transfer(args)
