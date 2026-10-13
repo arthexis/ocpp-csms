@@ -50,13 +50,13 @@ def add_rfid_command(
             nargs="?",
             help="Charge point ID (optional when exactly one charger is connected)",
         )
-        command.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
+        command.add_argument("--cp", dest="charger_option", help="Explicit charge point ID")
 
     cache = rfid_subcommands.add_parser("cache", help="Manage the charger's authorization cache (not its local RFID list)")
     cache_sub = cache.add_subparsers(dest="cache_command", required=True)
     clear_cache = cache_sub.add_parser("clear", help="Request OCPP ClearCache without changing the local list")
     clear_cache.add_argument("charger", nargs="?", help="Charge point ID")
-    clear_cache.add_argument("--cp", "--charger", dest="charger_option", help="Explicit charge point ID")
+    clear_cache.add_argument("--cp", dest="charger_option", help="Explicit charge point ID")
     return rfid
 
 
