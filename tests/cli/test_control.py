@@ -10,7 +10,12 @@ def parse_cli(parse_cli):
     """Keep control request assertions on the canonical transaction parser."""
     def parse(*argv):
         if argv[0] in {"start", "stop"}:
-            return build_txn_operations_parser().parse_args(argv)
+            args = build_txn_operations_parser().parse_args(argv)
+            args.command = args.operation
+            if args.operation == "stop":
+                args.transaction = args.transaction_id
+                args.charger = None
+            return args
         return parse_cli(*argv)
     return parse
 
@@ -33,7 +38,6 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
     }
     assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--rfid", "REMOTE", "--now")) == expected
     assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")) == expected
-    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
@@ -49,7 +53,6 @@ def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
         "charger": "charger-a",
         "transaction": 42,
     }
-    assert control_request(parse_cli("stop", "42", "--cp", "charger-a", "--now")) == expected
     assert control_request(parse_cli("stop", "42", "--cp", "charger-a", "--now")) == expected
 
 
@@ -101,7 +104,6 @@ def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
         ("start", "--connector", "-1", "--rfid", "REMOTE", "--now"),
         ("start", "-c", "-1", "--rfid", "REMOTE", "--now"),
         ("stop", "-1", "--now"),
-        ("stop", "-1", "--now"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
@@ -109,13 +111,13 @@ def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_control_commands_default_to_now(cli_parser):
+def test_control_commands_default_to_now(parse_cli, cli_parser):
     for args in (
         ["start"],
         ["stop", "42"],
         ["reset"],
     ):
-        parsed = build_txn_operations_parser().parse_args(args) if args[0] in {"start", "stop"} else cli_parser.parse_args(args)
+        parsed = parse_cli(*args)
         assert control_request(parsed)["timing"] == "now"
 
     with pytest.raises(SystemExit):
