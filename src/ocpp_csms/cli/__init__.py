@@ -97,9 +97,9 @@ def main() -> int:
         # "txn stop 42" is shorthand for "stop --txn 42".
         if operation == "stop" and len(argv) > txn_offset + 1 and argv[txn_offset + 1].isdecimal():
             argv[txn_offset + 1:txn_offset + 2] = ["--txn", argv[txn_offset + 1]]
-    # Support the natural "transactions recover" syntax without breaking
+    # Support the natural "txn recover" syntax without breaking
     # the existing integer transaction selector.
-    offset = argv.index("transactions") if "transactions" in argv else -1
+    offset = argv.index("txn") if "txn" in argv else -1
     if offset >= 0 and len(argv) > offset + 1 and argv[offset + 1] == "recover":
         argv[offset:offset + 2] = ["recover"]
     parser, commands = build_parser(); args = parser.parse_args(argv)
@@ -133,7 +133,7 @@ def main() -> int:
                 print(run_rfid(args)); return 0
             return run_rfid_action(args)
         if args.command in DIAGNOSTIC_COMMANDS: return run_diagnostic(args)
-        if args.command == "transactions":
+        if args.command == "txn":
             if args.json: return run_transactions_json(args)
             print(run_transactions(args)); return 0
     except ValueError as exc:
