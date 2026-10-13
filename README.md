@@ -252,13 +252,13 @@ Omit `--cp` when only one charge point is connected; otherwise specify `--cp ID`
 ocpp-csms trigger heartbeat
 ocpp-csms trigger status -c 1
 ocpp-csms trigger meter -c 1
-ocpp-csms availability disable -c 2
-ocpp-csms availability enable -c 2
-ocpp-csms availability disable  # connector 0: whole charge point
+ocpp-csms avail disable -c 2
+ocpp-csms avail enable -c 2
+ocpp-csms avail disable  # connector 0: whole charge point
 ocpp-csms unlock -c 1
 ```
 
-Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
+Trigger supports `boot`, `heartbeat`, `status`, `meter`, `diagnostics`, and `firmware` when the charge point supports them; `-c` applies to status and meter only. The shorter `avail` command is canonical; `availability` remains a compatibility alias. Availability returns `Accepted`, `Rejected`, or `Scheduled`; Scheduled means the charger has deferred the change (typically until an active transaction finishes). Unlock requires a physical connector ID greater than zero. All commands support `--json` for the raw OCPP response. A charger accepting a request does **not** prove the physical action completed; inspect subsequent events and connector status.
 
 ### Capability inspection and reconciliation
 
