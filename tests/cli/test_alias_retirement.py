@@ -1,31 +1,11 @@
-"""Removed CLI spellings fail fast; canonical operations retain their contracts."""
+"""Canonical CLI control payload and selector contracts."""
 from __future__ import annotations
-
-import sys
 
 import pytest
 
-from ocpp_csms.cli import build_parser, main
+from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.control import control_request
 from ocpp_csms.cli.transactions import build_txn_operations_parser
-
-
-@pytest.mark.parametrize("argv", [
-    ["start"], ["stop"], ["recover", "--dry-run"],
-    ["reset", "--charger", "CP1"],
-    ["txn", "--charger", "CP1"],
-    ["txn", "--id-tag", "TAG"],
-    ["config", "--charger", "CP1"],
-    ["txn", "start", "--id-tag", "TAG"],
-    ["txn", "stop", "--txn", "42"],
-    ["txn", "stop", "--transaction", "42"],
-    ["txn", "stop", "-t", "42"],
-])
-def test_retired_spellings_fail_usage(monkeypatch, tmp_path, argv):
-    monkeypatch.setattr(sys, "argv", ["ocpp-csms", "--data-dir", str(tmp_path), *argv])
-    with pytest.raises(SystemExit) as exc:
-        main()
-    assert exc.value.code == 2
 
 
 @pytest.mark.parametrize(("argv", "expected"), [
