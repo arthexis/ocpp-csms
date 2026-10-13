@@ -65,3 +65,34 @@ def test_txn_recover_subparser_dispatch(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ocpp-csms", "txn", "recover", "--dry-run", "--cp", "CP1"])
     assert main() == 0
     assert seen == [(True, "CP1")]
+
+
+@pytest.mark.parametrize("argv", [
+    ["txn", "stop"],
+    ["txn", "stop", "42", "--txn", "43"],
+    ["txn", "stop", "-1"],
+    ["txn", "start", "-c", "-1"],
+    ["txn", "start", "CP1", "--cp", "CP2"],
+    ["txn", "explain", "-1"],
+    ["txn", "explain", "42", "--context", "1441"],
+    ["txn", "recover", "--enable"],
+])
+def test_txn_operations_reject_invalid_requests(monkeypatch, argv, tmp_path):
+    monkeypatch.setattr(sys, "argv", ["ocpp-csms", "--data-dir", str(tmp_path), *argv])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("argv", [
+    ["txn", "start", "--help"],
+    ["txn", "stop", "--help"],
+    ["txn", "explain", "--help"],
+    ["txn", "recover", "--help"],
+])
+def test_txn_operations_have_help(monkeypatch, argv, capsys):
+    monkeypatch.setattr(sys, "argv", ["ocpp-csms", *argv])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    assert "usage:" in capsys.readouterr().out
