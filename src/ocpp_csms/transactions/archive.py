@@ -290,8 +290,18 @@ class TransactionArchive:
                 if origin == _ORIGIN_RECOVERED:
                     return path, record, _decision("historical_transaction_evidence_attached", transaction_id, message_type, payload, decision="attached")
                 return path, record, None
-            except (OSError, json.JSONDecodeError):
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                LOGGER.error("Unreadable transaction archive %s: %s", path, exc)
+                unresolved_path = self._preserve_unresolved(
+                    transaction_id, charge_point_id, payload,
+                    message_type=message_type, reason="archive_unreadable",
+                )
+                return None, None, _decision(
+                    "historical_transaction_id_collision", transaction_id,
+                    message_type, payload, decision="preserved_unresolved",
+                    reason="archive_unreadable",
+                    unresolved_path=str(unresolved_path.relative_to(self.data_dir)),
+                )
         received_at = utc_now_iso()
         path = self._path_for(transaction_id, charge_point_id, payload)
         record = {
