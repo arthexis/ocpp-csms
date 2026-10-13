@@ -209,6 +209,17 @@ privileged-port strategy; the default native TLS port is 9443.
 
 Run `ocpp-csms --help` for the authoritative current surface.
 
+CLI compatibility contract (A4d): `diagnose` is the canonical charger-diagnostics
+command; `diag` and `diagnostics` are not registered aliases. `avail` is
+canonical and `availability` remains an intentional alias. Maintenance
+commands use `--cp` (with `--charger` compatibility), and their `-j`/`--json`
+mode emits a machine-readable response. An accepted OCPP request acknowledges
+submission, **not** physical completion. `Scheduled` availability means the
+requested change is pending. Firmware update requires explicit `--confirm`;
+`diagnose --now` requires a charger-reachable upload URL. Transfer URLs must
+use HTTP(S) or FTP(S) without fragments, and retry values cannot be negative.
+
+
 Common operations include:
 
 ```text
