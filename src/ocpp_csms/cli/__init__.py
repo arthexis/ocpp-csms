@@ -113,8 +113,10 @@ def main() -> int:
     # one positional slot. Extract only the numeric detail selector before parse.
     reserve_offset = next((i for i, word in enumerate(argv) if word == "reserve"), -1)
     reserve_id = None
-    if reserve_offset >= 0 and len(argv) > reserve_offset + 1 and argv[reserve_offset + 1].isdecimal():
-        reserve_id = int(argv.pop(reserve_offset + 1))
+    if reserve_offset >= 0 and len(argv) > reserve_offset + 1:
+        selector = argv[reserve_offset + 1]
+        if selector.lstrip("-").isdecimal():
+            reserve_id = int(argv.pop(reserve_offset + 1))
     parser, commands = build_parser(); args = parser.parse_args(argv)
     if reserve_id is not None:
         args.reservation_id = reserve_id
