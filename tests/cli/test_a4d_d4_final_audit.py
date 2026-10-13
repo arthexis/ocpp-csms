@@ -1,0 +1,72 @@
+"""A4d D4: final regression checks for maintenance grammar and safety invariants."""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from ocpp_csms.cli import build_parser
+from ocpp_csms.cli.firmware import firmware_request
+from ocpp_csms.cli.charger_diagnostics import _request as diagnostics_request
+from ocpp_csms.cli.maintenance import maintenance_request
+
+
+def parse(*words):
+    parser, _ = build_parser()
+    return parser.parse_args(words)
+
+
+@pytest.mark.parametrize("words", [
+    ("diag",), ("diagnostics",), ("reservation",),
+])
+def test_retired_commands_remain_rejected(words):
+    with pytest.raises(SystemExit) as exc:
+        parse(*words)
+    assert exc.value.code == 2
+
+
+def test_availability_alias_produces_same_wire_request():
+    canonical = maintenance_request(parse("avail", "disable", "-c", "2", "--cp", "CP1"))
+    alias = maintenance_request(parse("availability", "disable", "-c", "2", "--cp", "CP1"))
+    assert canonical == alias == {
+        "command": "availability", "charger": "CP1",
+        "connector": 2, "type": "Inoperative",
+    }
+
+
+@pytest.mark.parametrize("words", [
+    ("trigger", "heartbeat", "-c", "1"),
+    ("trigger", "meter", "-c", "0"),
+    ("unlock", "-c", "0"),
+    ("avail", "disable", "-c", "-1"),
+])
+def test_unsafe_connector_selection_is_rejected(words):
+    with pytest.raises(ValueError):
+        maintenance_request(parse(*words))
+
+
+def test_diagnostics_history_is_default_read_only_mode():
+    args = parse("diagnose", "--cp", "CP1")
+    assert args.now is False
+    assert args.charger == "CP1"
+
+
+def test_diagnostics_upload_requires_explicit_location():
+    args = parse("diagnose", "--now")
+    with pytest.raises(ValueError, match="--location is required"):
+        diagnostics_request(args)
+
+
+def test_firmware_update_requires_confirmation():
+    args = parse("firmware", "update", "--location", "https://example.org/fw", "--now")
+    with pytest.raises(ValueError, match="--confirm"):
+        firmware_request(args)
+
+
+@pytest.mark.parametrize("words", [
+    ("firmware", "update", "--location", "https://example.org/fw", "--now", "--confirm", "--retries", "-1"),
+    ("firmware", "update", "--location", "https://example.org/fw", "--now", "--confirm", "--retry-interval", "-1"),
+])
+def test_firmware_negative_retries_rejected(words):
+    with pytest.raises(ValueError, match="non-negative"):
+        firmware_request(parse(*words))
