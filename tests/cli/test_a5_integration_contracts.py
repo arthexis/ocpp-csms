@@ -34,7 +34,7 @@ def test_canonical_txn_entrypoint_preserves_control_payload(monkeypatch, invoke_
 
 
 @pytest.mark.parametrize("argv", [
-    ["txn", "stop", "42", "--txn", "43"],
+    ["txn", "stop", "--txn", "43"],
     ["txn", "start", "CP1", "--cp", "CP2"],
     ["txn", "explain", "-1"],
 ])
