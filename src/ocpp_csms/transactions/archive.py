@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -96,7 +97,7 @@ class TransactionArchive:
         self._recent_starts: dict[str, tuple[int, datetime]] = {}
         self._next_transaction_id = 1
         self._scan_existing()
-        reconcile_transaction_changes(self.data_dir)
+        self._reconcile_changes()
 
     def _scan_existing(self) -> None:
         highest_local = 0
@@ -296,10 +297,20 @@ class TransactionArchive:
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir / f"{_safe_charge_point_id(charge_point_id)}-{transaction_id}.json"
 
+    def _reconcile_changes(self) -> None:
+        try:
+            reconcile_transaction_changes(self.data_dir)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
+            # Charging must not fail because the replication journal is locked.
+            # The durable archive is reconciled on the next write/restart.
+            LOGGER.warning("Transaction change journal is locked; deferring reconciliation")
+
     def _write(self, path: Path, record: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(record, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(temporary, path)
         if path.is_relative_to(self.transactions_dir):
-            reconcile_transaction_changes(self.data_dir)
+            self._reconcile_changes()
