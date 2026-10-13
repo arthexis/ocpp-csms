@@ -30,7 +30,6 @@
       ansible.builtin.command:
         argv: [systemctl, disable, --now, "{{ item }}"]
       loop:
-        - ocpp-forwarder.service
         - ocpp-discover.service
         - ocpp-csms.service
       register: ocpp_uninstall_disable
@@ -43,7 +42,6 @@
         path: "/etc/systemd/system/{{ item }}"
         state: absent
       loop:
-        - ocpp-forwarder.service
         - ocpp-discover.service
         - ocpp-csms.service
 
@@ -114,15 +112,6 @@
       ansible.builtin.file:
         path: /etc/ocpp-csms/auth.json
         state: absent
-
-    - name: Remove Forwarder identity and replay state for fresh installation
-      become: true
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/ocpp-forwarder
-        - /var/lib/ocpp-forwarder
 
     - name: Remove replaceable program releases, not application data
       ansible.builtin.file:
