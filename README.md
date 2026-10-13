@@ -212,7 +212,7 @@ Run `ocpp-csms --help` for the authoritative current surface.
 CLI compatibility contract (A4d): `diagnose` is the canonical charger-diagnostics
 command; `diag` and `diagnostics` are not registered aliases. `avail` is
 canonical and `availability` remains an intentional alias. Maintenance
-commands use `--cp` (with `--charger` compatibility), and their `-j`/`--json`
+commands use `--cp`, and their `-j`/`--json`
 mode emits a machine-readable response. An accepted OCPP request acknowledges
 submission, **not** physical completion. `Scheduled` availability means the
 requested change is pending. Firmware update requires explicit `--confirm`;
@@ -229,18 +229,18 @@ ocpp-csms chargers [--charging] [--json]
 ocpp-csms cps ...
 ocpp-csms charger CHARGE_POINT [--json]
 ocpp-csms cp CHARGE_POINT [--json]
-ocpp-csms txn [ID] [--active|--last] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--events]
+ocpp-csms txn [ID] [--active|--last] [--cp CHARGE_POINT] [-c N|--connector N] [--events]
 ocpp-csms txn ...
 ocpp-csms rfid report [RFID]
 ocpp-csms rfid export [CHARGER]
 ocpp-csms rfid version [CHARGER]
 ocpp-csms rfid clear [CHARGER]
-ocpp-csms config [KEY ...] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-f|--force]
+ocpp-csms config [KEY ...] [--cp CHARGE_POINT] [-f|--force]
 ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
-ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT|--charger CHARGE_POINT]
-ocpp-csms profile composite [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
+ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
+ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
 ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
 ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
@@ -257,7 +257,7 @@ ocpp-csms explain CHARGER --at TIME [--minutes N]
 ### Field maintenance (OCPP 1.6J)
 
 Use the existing Unix control socket to send one-shot maintenance requests to a connected charge point.
-Omit `--cp` when only one charge point is connected; otherwise specify `--cp ID` (or `--charger ID`).
+Omit `--cp` when only one charge point is connected; otherwise specify `--cp ID` .
 
 ```bash
 ocpp-csms trigger heartbeat
@@ -283,14 +283,14 @@ ocpp-csms rfid cache clear [--cp CP001]
 
 ### Status and charger views
 
-`charger`/`cp` show one charge point and its connector detail; `chargers`/`cps` list known charge points. `-c` aliases `--connector`. `--cp` selects a charge point, with `--charger` retained as an equivalent long-form alias.
+`cp` shows one charge point and its connectors; `cps` lists charge points. `-c` aliases `--connector`, and `--cp` selects a charge point.
 
 ### Transactions and events
 
-`txn start` and `txn stop` are convenient aliases for the existing remote `start` and `stop` operations, with `--now` assumed unless `--after` or `--within` is supplied. `txn stop ID` accepts the transaction ID directly, and `txn stop --txn ID` also works. Existing `txn ID`, `txn --active`, and other history queries remain unchanged.
+`txn start` and `txn stop ID` are the canonical remote control operations, with `--now` assumed unless `--after` or `--within` is supplied. Transaction stop requires a positional ID. `txn ID`, `txn --active`, and other history queries remain unchanged.
 
 
-`transactions`/`txn` expose transaction history and active/last transaction views. `--txn` aliases `--transaction` where a transaction ID is accepted. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger.
+`txn` exposes transaction history and active/last transaction views. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger. Event-specific `--txn` filters are unchanged.
 
 By default, `events` shows the latest **100 events**. `-n` and `--limit` are interchangeable: an integer caps the number of matching events, while a duration (`s`, `m`, `h`, `d`, or `w`, case-insensitive) returns **all** events in that time window without a count cap. `--since` and `--until` accept either relative durations such as `3d` or ISO-8601 timestamps. A duration limit ends at `--until` when given, otherwise at the current UTC time; `--since` further restricts the window. The latest events are selected first and printed chronologically. Compact grouping and JSON output use the same filters.
 
@@ -364,7 +364,7 @@ The CSMS accepts and records OCPP 1.6 `DiagnosticsStatusNotification` and `Firmw
 compact grouping. It shares the relative/ISO time and count/duration limit
 semantics of `events`, including `-N/--no-limit`. The default selects the
 latest 100 **matching alerts**, rather than the latest 100 unfiltered events.
-Use `--cp` (or `--charger`), a positional charger, or `--txn` to restrict
+Use `--cp`, a positional charge point, or the event-specific `--txn` filter to restrict
 the result; `--json` exposes the versioned alert contract.
 
 ```bash
