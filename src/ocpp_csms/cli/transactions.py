@@ -8,15 +8,15 @@ from ocpp_csms.evidence.diagnostics import format_events, transaction_events
 from ocpp_csms.transactions.formatting import format_transaction, format_transactions
 from ocpp_csms.transactions.query import TransactionQuery
 
-TRANSACTION_COMMANDS = ("transactions", "transaction", "txns", "txn")
+TRANSACTION_COMMANDS = ("txn",)
 _RELATIVE_TIME = re.compile(r"^(\d+(?:\.\d+)?)([SMHDW])$", re.IGNORECASE)
 _RELATIVE_SECONDS = {"S": 1, "M": 60, "H": 3600, "D": 86400, "W": 604800}
 
 
 def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
     add = argparse.ArgumentParser.add_argument
-    transactions = subcommands.add_parser("transactions", aliases=["transaction", "txns", "txn"], help="Inspect archived transactions")
-    transactions.set_defaults(command="transactions")
+    transactions = subcommands.add_parser("txn", help="Inspect archived transactions")
+    transactions.set_defaults(command="txn")
     add(transactions, "transaction_id", nargs="?", type=int, help="Transaction ID for detailed inspection")
     selection = transactions.add_mutually_exclusive_group()
     selection.add_argument("--active", action="store_true", help="Show only active transactions")
