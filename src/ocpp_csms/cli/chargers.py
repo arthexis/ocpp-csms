@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from ocpp_csms.output import emit_json
+from ocpp_csms.cli.options import add_json
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
 
@@ -20,14 +21,14 @@ def add_charger_commands(
     )
     charger.set_defaults(command="cp")
     add(charger, "charger", help="Charge point ID")
-    add(charger, "-j", "--json", action="store_true", help="Print machine-readable charge point status")
+    add_json(charger, help="Print machine-readable charge point status")
 
     chargers = subcommands.add_parser(
         "cps", help="List known charge points"
     )
     chargers.set_defaults(command="cps")
     add(chargers, "--charging", action="store_true", help="Show only charge points with active transactions")
-    add(chargers, "-j", "--json", action="store_true", help="Print machine-readable charge point status")
+    add_json(chargers, help="Print machine-readable charge point status")
 
     return {"cp": charger, "cps": chargers}
 
