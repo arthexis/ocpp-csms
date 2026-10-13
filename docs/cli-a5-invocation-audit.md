@@ -20,9 +20,13 @@ Repository code-search discovery covered `src/`, `tests/`, `scripts/`, `ansible/
 
 A5.1 adds a focused static guard for literal **shell-style** executable invocations in the repository's deployment and operator-script surfaces. It deliberately excludes historical documentation, unit tests, Python import names, and the canonical A1 matrix. Dynamic subprocess argument arrays and externally hosted callers require manual review before removing aliases.
 
+## A5.2 confirmed documentation corrections
+
+The README still contained executable-looking pre-migration examples for `ocpp-csms transactions`, standalone `ocpp-csms start`/`stop`, and `ocpp-csms reservation list`, even though the canonical documented surface is `txn` and `reserve`. A5.2 updates those examples without removing any compatibility entry point. The historical A1 matrix is explicitly labeled as a design baseline to avoid confusing planned grammar with shipped behavior. The A5.1 executable-surface scan found no confirmed deployment-script call sites requiring a runtime migration; dynamic Python subprocess arrays remain for A5.3 inspection.
+
 ## Subsequent chunks
 
-- **A5.2:** update verified stale executable examples and reconcile A1's status matrix with shipped CLI; keep export/mail/report intact.
+- **A5.2 (this PR):** update verified stale README examples and annotate A1's historical matrix; keep export/mail/report intact.
 - **A5.3:** cross-command integration and edge-case contracts for `txn`, `reserve`, global options, output and exit codes; consider facade removal only after consumer checks.
 - **A5.4:** full required CI, test durations, deployment/integration scan, closure report against #216.
 

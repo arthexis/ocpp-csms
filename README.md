@@ -229,7 +229,7 @@ ocpp-csms chargers [--charging] [--json]
 ocpp-csms cps ...
 ocpp-csms charger CHARGE_POINT [--json]
 ocpp-csms cp CHARGE_POINT [--json]
-ocpp-csms transactions [ID] [--active|--last] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--events]
+ocpp-csms txn [ID] [--active|--last] [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--events]
 ocpp-csms txn ...
 ocpp-csms rfid report [RFID]
 ocpp-csms rfid export [CHARGER]
@@ -242,8 +242,8 @@ ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT|--charger CHARGE_POINT]
 ocpp-csms profile composite [--cp CHARGE_POINT|--charger CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
-ocpp-csms start CHARGER [-c N|--connector N] --id-tag TAG (--now|--after SECONDS|--within SECONDS)
-ocpp-csms stop CHARGER (--transaction ID|--txn ID) [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
+ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms txn start [-c N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
 ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
@@ -1077,13 +1077,14 @@ ocpp-csms txn explain 42 --context 5
 ### List reservation evidence
 
 ```bash
-ocpp-csms reservation list
-ocpp-csms reservation list --cp CP001
-ocpp-csms reservation list --all --since 7d
-ocpp-csms reservation list --json
+ocpp-csms reserve
+ocpp-csms reserve --cp CP001
+ocpp-csms reserve --all --since 7d
+ocpp-csms reserve --json
+ocpp-csms reserve 42 --cp CP001 --json
 ```
 
-This read-only command reconstructs locally observed `ReserveNow`, `CancelReservation` and reservation-associated `StartTransaction` evidence. `Requested` means the CSMS sent the request without an unambiguously attributable response; `Accepted` is the charger's recorded response and **does not mean currently active**. `--all` includes rejected, canceled, used and expired requests. Each row displays the reservation ID and charge point required by `reservation cancel ID --cp CP`. The event archive lacks message-level request/response correlation for these commands, so concurrent ambiguous responses are not attributed by guesswork. No charger queries or new storage are required.
+This read-only command reconstructs locally observed `ReserveNow`, `CancelReservation` and reservation-associated `StartTransaction` evidence. `Requested` means the CSMS sent the request without an unambiguously attributable response; `Accepted` is the charger's recorded response and **does not mean currently active**. `--all` includes rejected, canceled, used and expired requests. Each row displays the reservation ID and charge point needed for `reserve cancel ID --cp CP`; `reserve ID` reads the matching historical evidence without contacting the charger. The event archive lacks message-level request/response correlation for these commands, so concurrent ambiguous responses are not attributed by guesswork. No charger queries or new storage are required.
 
 ### Firmware preflight
 

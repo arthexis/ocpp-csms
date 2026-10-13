@@ -1,6 +1,6 @@
 # CLI A1 — canonical command contract and CI migration plan
 
-Tracking: #216. This is a **design-only** contract; A2–A5 implement the changes. The current CLI intentionally remains unchanged in A1.
+Tracking: #216. **Historical A1 design baseline:** this document originally defined the intended A2–A5 migration, not the present CLI. For the shipped command grammar, use `ocpp-csms --help` and the README. A4d #227–#231 and A5.1 #232 are merged; A5.2 reconciles operator examples while later A5 slices complete integration verification.
 
 ## Principles
 
@@ -12,7 +12,7 @@ Tracking: #216. This is a **design-only** contract; A2–A5 implement the change
 
 ## Command migration matrix
 
-| Intent | Current entry points | A2–A4 target | Side effect | Migration/CI |
+| Intent | Historical A1 entry points | Canonical target (verify with `--help`) | Side effect | Migration/CI |
 | --- | --- | --- | --- | --- |
 | Appliance status | `status` | `status` | read | preserve status JSON contract |
 | One charge point | `charger ID`, `cp ID`, `status ID` | `cp ID` (status ID may be removed after audit) | read | update alias tests |
@@ -56,9 +56,9 @@ Tracking: #216. This is a **design-only** contract; A2–A5 implement the change
 - Positional ID when it is the principal resource (`cp ID`, `txn ID`, `reserve ID`).
 - Short names do not imply automatic execution: existing `--now`, `--confirm`, scheduling and dry-run rules stay in place.
 
-## CI impact inventory (verified source files)
+## Historical CI impact inventory (A1 baseline; not a current outstanding-work list)
 
-The following currently encode **old CLI spellings** and must be updated *in the same PR as their respective parser change*:
+At A1 planning time, the following files encoded **old CLI spellings**. Several have since been migrated; do not treat this list as confirmed outstanding work:
 - `tests/cli/test_txn_control_alias.py`: argv rewriting and standalone start/stop behavior.
 - `tests/cli/test_command_contract_matrix.py`: `reserve` creation and `reservation create/cancel`.
 - `tests/cli/test_json_contracts.py`: `transactions --json` and `reservation list`.
@@ -79,7 +79,7 @@ Additional searches must cover all `tests/`, `scripts/`, `ansible/`, `docs/` and
 6. **Migration check:** search for removed spellings and fail on stale executable invocations, but permit intentional historical documentation or migration tests.
 7. **Track duration:** retain pytest duration reports; investigate new slow tests or increased overall CI time.
 
-## Suggested PR slices
+## Historical suggested PR slices
 
 - **A1 (this PR):** command matrix and CI migration policy; no runtime changes.
 - **A2a:** `cp`/`cps` and `txn` parser/subcommands + matching tests.
@@ -90,4 +90,4 @@ Additional searches must cover all `tests/`, `scripts/`, `ansible/`, `docs/` and
 
 ## Definition of done for A1
 
-The contract and verified CI hotspots are documented. **Before A2 begins**, complete the remaining exhaustive call-site and workflow audit, and record the main-branch CI baseline; then implement parser changes with tests in the same commit/PR.
+The A1 contract and its originally identified CI hotspots were documented. This was the **historical A1 exit criterion**, not a current instruction to restart A2. See `docs/cli-a5-invocation-audit.md` for the current migration verification inventory.
