@@ -211,8 +211,8 @@ Run `ocpp-csms --help` for the authoritative current surface.
 
 The A1–A5 CLI migration is complete (issue #216). Use the commands below and
 `--help` as the maintained operator reference. Historical migration plans and
-verification ledgers were retired; safety, JSON, retired-command rejection,
-and deployment invocation regression tests remain maintained in `tests/`.
+verification ledgers were retired; current command behavior, safety, and JSON
+contracts are covered by maintained regression tests.
 
 
 CLI compatibility contract (A4d): `diagnose` is the canonical charger-diagnostics
