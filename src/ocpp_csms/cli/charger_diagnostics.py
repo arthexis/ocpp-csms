@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
 
 from ocpp_csms.cli.transactions import resolve_time
+from ocpp_csms.cli.maintenance_validation import validate_transfer_url, validate_retry_options
 from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.evidence.diagnostics import events_between
 
@@ -40,13 +40,8 @@ def _iso(value, *, now):
 def _request(args):
     if not args.location:
         raise ValueError("--location is required with --now")
-    parsed = urlsplit(args.location)
-    if parsed.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parsed.hostname or parsed.fragment:
-        raise ValueError("--location must be an absolute HTTP(S) or FTP(S) URL without a fragment")
-    if args.retries is not None and args.retries < 0:
-        raise ValueError("--retries must be non-negative")
-    if args.retry_interval is not None and args.retry_interval < 0:
-        raise ValueError("--retry-interval must be non-negative")
+    validate_transfer_url(args.location, error="--location must be an absolute HTTP(S) or FTP(S) URL without a fragment")
+    validate_retry_options(args.retries, args.retry_interval)
     now = datetime.now(timezone.utc)
     start, stop = _iso(args.since, now=now), _iso(args.until, now=now)
     if start and stop and datetime.fromisoformat(start) > datetime.fromisoformat(stop):
