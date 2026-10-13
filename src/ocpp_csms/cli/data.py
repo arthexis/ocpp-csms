@@ -5,6 +5,9 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import shutil
+import sqlite3
+import uuid
 from pathlib import Path
 import subprocess
 
@@ -17,16 +20,62 @@ def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.Argume
     data = subcommands.add_parser("data", help="Inspect or archive appliance test data")
     operations = data.add_subparsers(dest="data_command", required=True)
     reset = operations.add_parser("reset", help="Archive all test data and initialize clean storage")
-    reset.add_argument("--test-only", action="store_true", help="Confirm data are disposable simulator/test data only")
+    target = reset.add_mutually_exclusive_group(required=True)
+    target.add_argument("--all", action="store_true", help="Archive and reset the entire application data directory")
+    target.add_argument("--cp", metavar="NAME", help="Archive and remove records for only this charge-point identity")
     mode = reset.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Check safety without modifying files (default)")
     mode.add_argument("--now", action="store_true", help="Actually archive test data and initialize an empty store")
     return data
 
 
-def reset_test_data(data_dir: str | Path, *, test_only: bool, now: bool = False) -> dict:
-    if not test_only:
-        raise ValueError("reset requires --test-only affirmation (no production data)")
+
+
+def _remove_cp_from_copy(root: Path, cp: str) -> None:
+    """Change only staged evidence, preserving transaction IDs of other chargers."""
+    from ocpp_csms.schema import inspect_schema, require_supported_schema
+
+    schema = inspect_schema(root)
+    require_supported_schema(schema)
+    # Select by recorded identity, never filename prefix (which can collide).
+    for folder in ("transactions", "transactions-unresolved"):
+        directory = root / folder
+        if not directory.exists():
+            continue
+        for path in directory.rglob("*.json"):
+            try:
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValueError("unreadable transaction evidence: reset refused") from exc
+            if not isinstance(record, dict) or not isinstance(record.get("charge_point_id"), str):
+                raise ValueError("ambiguous transaction evidence: reset refused")
+            if record["charge_point_id"] == cp:
+                path.unlink()
+
+    with sqlite3.connect(schema.path) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        ids = [row[0] for row in db.execute(
+            "SELECT transaction_id FROM transactions WHERE charger_id=?", (cp,)
+        )]
+        # Clear references by transaction identity; do not reuse IDs.
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
+        db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
+                   "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
+        for table in ("events", "runtime_events", "connector_status",
+                      "rfid_lists", "transactions"):
+            db.execute(f"DELETE FROM {table} WHERE charger_id=?", (cp,))
+        remaining = db.execute("PRAGMA foreign_key_check").fetchall()
+        if remaining:
+            raise ValueError("remaining database references: reset refused")
+    # Keep unrelated data and stable source identity intact.
+
+def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | None = None, now: bool = False) -> dict:
+    if all_data == (cp is not None):
+        raise ValueError("specify exactly one of --all or --cp NAME")
+    if cp is not None and (not cp.strip() or cp != cp.strip() or "/" in cp or "\\x00" in cp):
+        raise ValueError("invalid charge-point identity")
     root = Path(data_dir).expanduser().absolute()
     if root.is_symlink() or (root.exists() and not root.is_dir()):
         raise ValueError("refusing unsafe or symlinked data directory")
@@ -53,7 +102,8 @@ def reset_test_data(data_dir: str | Path, *, test_only: bool, now: bool = False)
     if backup_root.is_symlink():
         raise ValueError("refusing symlinked backup directory")
     if not now:
-        return {"decision": "dry-run", "data_dir": str(root), "backup_parent": str(backup_root),
+        return {"decision": "dry-run", "scope": "all" if all_data else "cp",
+                "cp": cp, "data_dir": str(root), "backup_parent": str(backup_root),
                 "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
     backup_root.mkdir(mode=0o700, exist_ok=True)
     os.chmod(backup_root, 0o700)
@@ -61,6 +111,26 @@ def reset_test_data(data_dir: str | Path, *, test_only: bool, now: bool = False)
     backup = backup_root / stamp
     if backup.exists():
         raise ValueError("backup destination already exists")
+    if cp is not None:
+        staging = root.parent / (root.name + "-reset-stage-" + uuid.uuid4().hex)
+        try:
+            # Refuse to follow symlinks in a source directory containing evidence.
+            if any(path.is_symlink() for path in root.rglob("*")):
+                raise ValueError("refusing symlinked evidence paths")
+            shutil.copytree(root, staging)
+            _remove_cp_from_copy(staging, cp)
+            root.rename(backup)
+            try:
+                staging.rename(root)
+            except Exception:
+                backup.rename(root)
+                raise
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+        return {"decision": "reset", "scope": "cp", "cp": cp,
+                "backup": str(backup), "data_dir": str(root),
+                "preserve": "other charge points, deployment and authentication configuration"}
     root.rename(backup)  # same parent filesystem; no destructive deletion
     try:
         initialize_storage(str(root))
@@ -72,13 +142,13 @@ def reset_test_data(data_dir: str | Path, *, test_only: bool, now: bool = False)
             root.rmdir()
         backup.rename(root)
         raise
-    return {"decision": "reset", "backup": str(backup), "data_dir": str(root),
+    return {"decision": "reset", "scope": "all", "backup": str(backup), "data_dir": str(root),
             "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
 
 
 def run_data(args: argparse.Namespace) -> int:
     if args.data_command != "reset":
         raise ValueError("unknown data operation")
-    print(json.dumps(reset_test_data(args.data_dir, test_only=args.test_only, now=args.now),
+    print(json.dumps(reset_test_data(args.data_dir, all_data=args.all, cp=args.cp, now=args.now),
                      indent=2, sort_keys=True))
     return 0
