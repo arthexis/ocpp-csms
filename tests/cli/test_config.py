@@ -61,7 +61,7 @@ def install_response(monkeypatch, response):
         assert data_dir
         return response
 
-    monkeypatch.setattr(config_module, "send_control", fake_send)
+    monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", fake_send)
 
 
 @pytest.mark.parametrize(
