@@ -35,3 +35,7 @@ Additive fields may remain in `export/v1` only when existing meanings are unchan
 - **A:** Pin existing event cursor semantics and input validation in pytest; record current non-atomicity and agree on independent change-feed design. No producer behavior change.
 - **B:** Implement durable changes, observation metadata, timestamp provenance and quality markers; prove correction-only changes and crash recovery.
 - **C:** Add sanitized fixtures for active-to-completed, repeated/out-of-order events, archive-only corrections, empty pages, reset, missing meters, timezone offsets and malformed data; validate OCPP Reports ingestion and required CI.
+
+## Chunk B read-only boundary (implementation in progress)
+
+The export path reads the transaction-change SQLite journal with a read-only connection and never creates it or reconciles archives. If the journal has not been initialized, the change feed is empty. The producer archives each committed transaction mutation and reconciles unjournaled archive revisions during `TransactionArchive` initialization, not during export. A crash between the JSON replacement and journal insertion is recovered when the producer next initializes; until that recovery occurs, an export can temporarily lag the archive. This is not a cross-store atomic snapshot guarantee. This strategy does not reconstruct intermediate revisions lost in the crash window and needs explicit operational verification in chunk C.
