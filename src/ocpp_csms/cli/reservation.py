@@ -25,7 +25,7 @@ def _cancel_args(parser):
 
 def add_reservation_commands(subcommands):
     reserve = subcommands.add_parser("reserve", help="List, inspect, create or cancel reservations")
-    add_cp(reserve, legacy_alias=False, help="Filter recorded reservations by charge point")
+    add_cp(reserve, help="Filter recorded reservations by charge point")
     reserve.add_argument("--all", action="store_true", help="Include historical reservations")
     reserve.add_argument("--since", help="Requests since timestamp (ISO-8601 or relative)")
     add_json(reserve)
