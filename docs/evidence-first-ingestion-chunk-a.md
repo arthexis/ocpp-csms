@@ -22,7 +22,7 @@ Refs #244. This chunk deliberately does not remove the recovery worker or change
 Live connector control guards, recovery-loop removal, CLI/report status redesign, schema migration, exporter compatibility.
 
 ## A1–A5 verification coverage
-- New starts remain accepted with incomplete older transactions; SQLite-only IDs are reserved when readable. Locked SQLite uses a collision-resistant fallback, not an absolute uniqueness guarantee against unknown SQLite-only IDs.
+- New starts remain accepted with incomplete older transactions; SQLite-only IDs are reserved when readable. The allocator reserves IDs through exclusive on-disk creation. Existing SQLite-only IDs are reconciled into the reservation ledger before first use; subsequent SQLite locks do not require random IDs. If the first reconciliation cannot read SQLite, allocation fails instead of guessing. All ID writers must honor this ledger; out-of-band SQLite inserts after reconciliation violate that contract.
 - MeterValues without a start are retained without creating a synthetic start; connector-only readings remain raw events.
 - Cross-charge-point, cross-connector and earlier-than-start conflicts are preserved separately and do not change the original transaction's derived state.
 - A genuine late StopTransaction completes only the matching transaction; identical retries do not rewrite its archive, and conflicting later stops remain unresolved.
