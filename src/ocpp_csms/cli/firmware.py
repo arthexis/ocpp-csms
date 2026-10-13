@@ -1,7 +1,5 @@
 """OCPP 1.6 firmware update requests and read-only status history."""
 from __future__ import annotations
-import argparse
-import asyncio
 import json
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
