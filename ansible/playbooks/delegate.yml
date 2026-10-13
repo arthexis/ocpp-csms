@@ -28,12 +28,8 @@
         - not (ocpp_csms_stage_only | default(false) | bool)
 
   post_tasks:
-    - name: Disable Forwarder when not part of selected deployment profile
-      become: true
-      ansible.builtin.command:
-        argv: [systemctl, disable, --now, ocpp-forwarder.service]
-      changed_when: false
-      failed_when: false
+    - name: Ensure excluded Forwarder is disabled
+      ansible.builtin.import_tasks: tasks/disable-forwarder.yml
       when:
         - not (ocpp_forwarder_enabled | default(false) | bool)
         - not (ocpp_csms_stage_only | default(false) | bool)
