@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from ocpp_csms.cli.transactions import resolve_time
-from ocpp_csms.control import send_control
+from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.evidence.diagnostics import events_between
 
 
@@ -16,22 +16,19 @@ _ACTIONS = {"GetDiagnostics", "DiagnosticsStatusNotification"}
 
 
 def add_diagnostics_command(subcommands):
-    parent = subcommands.add_parser("diagnostics", help="Request charger-generated diagnostics and inspect upload evidence")
-    actions = parent.add_subparsers(dest="diagnostics_action", required=True)
-    request = actions.add_parser("request", help="Request charger diagnostic upload to an external destination")
-    request.add_argument("--location", required=True, help="Charger-reachable HTTP(S)/FTP(S) upload URL")
-    request.add_argument("--cp", "--charger", dest="charger")
-    request.add_argument("--since", help="Diagnostic start time (ISO-8601 or relative, e.g. 1d)")
-    request.add_argument("--until", help="Diagnostic stop time (ISO-8601, relative, or 'now')")
-    request.add_argument("--retries", type=int)
-    request.add_argument("--retry-interval", type=int, help="Retry interval in seconds")
-    request.add_argument("-j", "--json", action="store_true")
-    history = actions.add_parser("history", help="Read stored diagnostic request and notification evidence")
-    history.add_argument("--cp", "--charger", dest="charger")
-    history.add_argument("--since", help="Limit to events after ISO-8601 or relative timestamp")
-    history.add_argument("-n", "--limit", type=int, default=100)
-    history.add_argument("-j", "--json", action="store_true")
-    return parent
+    parser = subcommands.add_parser("diagnose", help="Inspect diagnostic history or explicitly request charger diagnostics")
+    parser.add_argument("--cp", "--charger", dest="charger", help="Charge point ID")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--now", action="store_true", help="Request a new charger diagnostics upload")
+    mode.add_argument("--list", action="store_true", help="Explicitly list stored diagnostics (default)")
+    parser.add_argument("--location", help="Charger-reachable HTTP(S)/FTP(S) upload URL; required with --now")
+    parser.add_argument("--since", help="Diagnostic start time or history filter (ISO-8601 or relative)")
+    parser.add_argument("--until", help="Diagnostic stop time for --now")
+    parser.add_argument("--retries", type=int, help="Upload retries for --now")
+    parser.add_argument("--retry-interval", type=int, help="Retry interval in seconds for --now")
+    parser.add_argument("-n", "--limit", type=int, default=100, help="Maximum history events (default: 100)")
+    parser.add_argument("-j", "--json", action="store_true")
+    return parser
 
 
 def _iso(value, *, now):
@@ -43,6 +40,8 @@ def _iso(value, *, now):
 
 
 def _request(args):
+    if not args.location:
+        raise ValueError("--location is required with --now")
     parsed = urlsplit(args.location)
     if parsed.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parsed.hostname or parsed.fragment:
         raise ValueError("--location must be an absolute HTTP(S) or FTP(S) URL without a fragment")
@@ -86,7 +85,9 @@ def _history(args):
 
 
 def run_diagnostics(args):
-    if args.diagnostics_action == "history":
+    if not args.now:
+        if args.location or args.until or args.retries is not None or args.retry_interval is not None:
+            raise ValueError("--location, --until, --retries and --retry-interval require --now")
         result = _history(args)
         if args.json:
             print(json.dumps({"events": result}, ensure_ascii=False))
@@ -99,16 +100,9 @@ def run_diagnostics(args):
             print("Notifications are observations; without OCPP message IDs, request/notification association is not guaranteed.")
         return 0
     try:
-        response = asyncio.run(send_control(args.data_dir, _request(args)))
-    except (ConnectionError, OSError, ValueError) as exc:
+        payload = maintenance_control(args.data_dir, _request(args), malformed="invalid GetDiagnostics response")
+    except (MaintenanceControlError, ValueError) as exc:
         print(f"error: {exc}")
-        return 1
-    if response.get("error"):
-        print(f"error: {response['error']}: {response.get('detail') or ''}".rstrip())
-        return 1
-    payload = response.get("response")
-    if not isinstance(payload, dict):
-        print("error: invalid GetDiagnostics response")
         return 1
     if args.json:
         print(json.dumps(payload, ensure_ascii=False))

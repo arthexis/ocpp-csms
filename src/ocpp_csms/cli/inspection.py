@@ -43,11 +43,16 @@ def _features(response):
             for label, profile in FEATURE_KEYS]
 
 
-async def _query_capabilities(data_dir, charger):
+def capability_request(charger=None):
+    """Read-only OCPP GetConfiguration query shared by inspection views."""
     request = {"command": "config", "keys": ["SupportedFeatureProfiles"], "force": True}
     if charger:
         request["charger"] = charger
-    return await send_control(data_dir, request)
+    return request
+
+
+async def _query_capabilities(data_dir, charger):
+    return await send_control(data_dir, capability_request(charger))
 
 
 def _assessment(*, connected, status, ids):

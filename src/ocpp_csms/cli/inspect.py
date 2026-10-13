@@ -5,20 +5,21 @@ import argparse
 import asyncio
 import json
 
-from ocpp_csms.cli.inspection import _features, _reconciliation
+from ocpp_csms.cli.inspection import _features, _reconciliation, capability_request
+from ocpp_csms.cli.options import add_cp, add_json
 from ocpp_csms.control import send_control
 from ocpp_csms.status import appliance_status
 
 
 def add_inspect_command(subcommands):
     parser = subcommands.add_parser("inspect", help="Investigate charger state with passive evidence and safe live queries")
-    parser.add_argument("--cp", "--charger", dest="charger", help="Charge point ID")
+    add_cp(parser, help="Charge point ID")
     parser.add_argument("--all", action="store_true", help="Inspect all known charge points")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="Use stored evidence only; send no OCPP commands")
     mode.add_argument("--deep", action="store_true", help="Also query local list version and composite schedule")
     parser.add_argument("--timeout", type=float, default=8.0, help="Timeout per live query in seconds (default: 8)")
-    parser.add_argument("-j", "--json", action="store_true")
+    add_json(parser)
     return parser
 
 
@@ -71,7 +72,9 @@ async def _inspect(data_dir, cp, snapshot, *, offline, deep, timeout):
             findings.append({"severity": "unknown", "check": "connection", "message": "Charger not connected; active queries skipped"})
         return report
 
-    configuration = await _safe_query(data_dir, cp, "config", timeout, keys=["SupportedFeatureProfiles"], force=True)
+    capability = capability_request(cp)
+    configuration = await _safe_query(data_dir, cp, capability["command"], timeout,
+                                      keys=capability["keys"], force=capability["force"])
     report["queries"]["configuration"] = configuration
     if configuration["state"] == "observed":
         report["features"] = _features(configuration["response"])
