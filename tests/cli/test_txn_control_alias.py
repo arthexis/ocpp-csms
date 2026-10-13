@@ -96,3 +96,13 @@ def test_txn_operations_have_help(monkeypatch, argv, capsys):
         main()
     assert exc.value.code == 0
     assert "usage:" in capsys.readouterr().out
+
+
+def test_transaction_parser_registration_and_help():
+    from ocpp_csms.cli.transactions import build_txn_operations_parser
+    operations = build_txn_operations_parser()
+    assert operations.parse_args(["explain", "42"]).operation == "explain"
+    assert operations.parse_args(["stop", "42"]).transaction_id == 42
+    parser, commands = build_parser()
+    assert "txn recover" in commands["txn"].format_help()
+    assert parser.parse_args(["txn", "42"]).transaction_id == 42
