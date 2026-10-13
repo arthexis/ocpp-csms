@@ -20,7 +20,7 @@
 
 - name: Verify excluded Forwarder unit state
   ansible.builtin.command:
-    argv: [systemctl, show, ocpp-forwarder.service, --property=LoadState,ActiveState,UnitFileState, --no-pager]
+    argv: [systemctl, show, ocpp-forwarder.service, "--property=LoadState,ActiveState,UnitFileState", --no-pager]
   register: ocpp_forwarder_active_check
   changed_when: false
   failed_when: >-
