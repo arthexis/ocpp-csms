@@ -129,12 +129,11 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     start.add_argument("charger", nargs="?")
     start.add_argument("--cp", dest="charger_option")
     start.add_argument("-c", "--connector", type=int)
-    start.add_argument("--rfid", "--id-tag", dest="id_tag")
+    start.add_argument("--rfid", dest="id_tag")
     _add_timing_options(start)
 
     stop = operations.add_parser("stop", help="Request remote transaction stop")
-    stop.add_argument("transaction_id", nargs="?", type=int)
-    stop.add_argument("--txn", "--transaction", "-t", dest="transaction_option", type=int)
+    stop.add_argument("transaction_id", type=int)
     stop.add_argument("--cp", dest="charger_option")
     _add_timing_options(stop)
 
