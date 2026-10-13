@@ -42,18 +42,15 @@ def test_delegate_and_exposed_profile_survive_flagless_redeploy(tmp_path, monkey
     assert run().returncode == 0
     assert "delegate.yml" in log.read_text().splitlines()[-1]
 
-    assert run("--expose", "porsche-abb.gelectriic.com", "--email", "ops@example.com",
-               "--forwarder").returncode == 0
+    assert run("--expose", "porsche-abb.gelectriic.com", "--email", "ops@example.com").returncode == 0
     settings = json.loads(profile.read_text())
     assert settings["expose"] == "porsche-abb.gelectriic.com"
     assert settings["email"] == "ops@example.com"
-    assert settings["forwarder"] is True
     assert profile.stat().st_mode & 0o777 == 0o600
     assert run().returncode == 0
     last = log.read_text().splitlines()[-1]
     assert "delegate.yml" in last
     assert "ocpp_csms_expose=porsche-abb.gelectriic.com" in last
-    assert "ocpp_forwarder_enabled=true" in last
     assert "ocpp_csms_certbot_email=ops@example.com" in last
 
 
@@ -86,7 +83,7 @@ def test_failed_deploy_preserves_profile_and_uninstall_clears_after_success(tmp_
     run, profile, log = appliance(tmp_path, monkeypatch)
     assert run("--delegate").returncode == 0
     before = profile.read_text()
-    assert run("--forwarder", failed=True).returncode != 0
+    assert run("--observe", "5", failed=True).returncode != 0
     assert profile.read_text() == before
     assert run("--uninstall", failed=True).returncode != 0
     assert profile.read_text() == before
@@ -97,10 +94,3 @@ def test_failed_deploy_preserves_profile_and_uninstall_clears_after_success(tmp_
     assert json.loads(profile.read_text())["mode"] == "satellite"
 
 
-def test_forwarder_can_be_explicitly_disabled_and_stays_disabled(tmp_path, monkeypatch):
-    run, profile, log = appliance(tmp_path, monkeypatch)
-    assert run("--satellite", "--forwarder").returncode == 0
-    assert run("--no-forwarder").returncode == 0
-    assert json.loads(profile.read_text())["forwarder"] is False
-    assert run().returncode == 0
-    assert "ocpp_forwarder_enabled=true" not in log.read_text().splitlines()[-1]
