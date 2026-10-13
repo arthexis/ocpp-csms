@@ -22,7 +22,7 @@ scans are idempotent.
 There is no new Celery queue, timer unit, deployment dependency, or standalone
 daemon. The loop is owned and cancelled by the running CSMS service.
 
-Manual `transactions recover` commands, configurable timeout settings, and
+Manual `txn recover` commands, configurable timeout settings, and
 deployment preflight integration are planned for Chunk 3. Deployment preflight
 continues to reject truly open transactions until the recovery check succeeds.
 
@@ -32,15 +32,15 @@ continues to reject truly open transactions until the recovery check succeeds.
 Use the CSMS CLI with the correct `--data-dir` (the flag is before the command):
 
 ```sh
-ocpp-csms --data-dir ~/ocpp-csms-data transactions recover --dry-run
-ocpp-csms --data-dir ~/ocpp-csms-data transactions recover --cp SIM001 --dry-run
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --dry-run
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --cp SIM001 --dry-run
 ```
 
 The preview never modifies transactions. To **perform** offline recovery,
 stop the CSMS service first, ensure the charger is disconnected, and run:
 
 ```sh
-ocpp-csms --data-dir ~/ocpp-csms-data transactions recover --cp SIM001
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --cp SIM001
 ```
 
 This uses exactly the same disconnect/inactivity eligibility policy as the
@@ -53,10 +53,10 @@ upgrade workflow before attempting recovery.
 ## Configure local policy
 
 ```sh
-ocpp-csms --data-dir ~/ocpp-csms-data recover --policy
-ocpp-csms --data-dir ~/ocpp-csms-data recover --policy --timeout-minutes 60 --interval-minutes 5
-ocpp-csms --data-dir ~/ocpp-csms-data recover --policy --disable
-ocpp-csms --data-dir ~/ocpp-csms-data recover --policy --enable
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --policy
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --policy --timeout-minutes 60 --interval-minutes 5
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --policy --disable
+ocpp-csms --data-dir ~/ocpp-csms-data txn recover --policy --enable
 ```
 
 Policy is atomically saved under `recovery-policy.json` in the data directory,
