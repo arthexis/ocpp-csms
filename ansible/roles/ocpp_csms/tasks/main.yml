@@ -201,6 +201,7 @@
       - tcpdump
     state: present
     update_cache: true
+    cache_valid_time: 3600
   when: ocpp_csms_install_mode == 'online'
 
 - name: Create OCPP CSMS base directories
@@ -402,18 +403,9 @@
     - ocpp_csms_install_mode == 'online'
     - not ocpp_csms_dependency_ready.stat.exists
 
-- name: Install reusable WebSockets dependency
+- name: Install reusable runtime dependencies
   ansible.builtin.pip:
-    name: "websockets>=12,<14"
-    virtualenv: "{{ ocpp_csms_dependency_venv }}"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_dependency_ready.stat.exists
-
-- name: Install reusable OCPP dependency
-  ansible.builtin.pip:
-    name: "ocpp>=0.26,<1"
+    name: "{{ ocpp_csms_runtime_dependencies }}"
     virtualenv: "{{ ocpp_csms_dependency_venv }}"
   when:
     - not ocpp_csms_release_ready.stat.exists

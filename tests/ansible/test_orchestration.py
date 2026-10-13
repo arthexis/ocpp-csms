@@ -259,20 +259,16 @@ def test_reusable_environments_are_keyed_by_requirements_and_platform():
     assert defaults["ocpp_csms_dependencies_dir"].endswith("/dependencies")
 
 
-def test_runtime_dependencies_are_installed_once_and_timed_separately():
-    websocket = task_by_name(TASKS / "main.yml", "Install reusable WebSockets dependency")
-    ocpp = task_by_name(TASKS / "main.yml", "Install reusable OCPP dependency")
+def test_runtime_dependencies_are_installed_once_from_defaults():
+    defaults = load_yaml(DEFAULTS)
+    install = task_by_name(TASKS / "main.yml", "Install reusable runtime dependencies")
     ready = task_by_name(TASKS / "main.yml", "Mark reusable runtime dependency environment ready")
-
-    assert websocket["ansible.builtin.pip"] == {
-        "name": "websockets>=12,<14",
+    assert install["ansible.builtin.pip"] == {
+        "name": "{{ ocpp_csms_runtime_dependencies }}",
         "virtualenv": "{{ ocpp_csms_dependency_venv }}",
     }
-    assert ocpp["ansible.builtin.pip"] == {
-        "name": "ocpp>=0.26,<1",
-        "virtualenv": "{{ ocpp_csms_dependency_venv }}",
-    }
-    for task in (websocket, ocpp, ready):
+    assert defaults["ocpp_csms_runtime_dependencies"] == ["websockets>=12,<14", "ocpp>=0.26,<1"]
+    for task in (install, ready):
         assert "not ocpp_csms_dependency_ready.stat.exists" in task["when"]
 
 
@@ -342,8 +338,7 @@ def test_release_install_phases_precede_verification_and_readiness():
         "Check reusable build environment",
         "Install reusable build requirements",
         "Check reusable runtime dependency environment",
-        "Install reusable WebSockets dependency",
-        "Install reusable OCPP dependency",
+        "Install reusable runtime dependencies",
         "Link reusable runtime dependencies into release",
         "Build OCPP CSMS application wheel",
         "Install OCPP CSMS application wheel into immutable release",
