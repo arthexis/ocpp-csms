@@ -5,7 +5,7 @@ import argparse
 import asyncio
 import json
 
-from ocpp_csms.control import send_control
+from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.cli.options import add_cp, add_connector, add_json, require_nonnegative
 
 COMMANDS = ("trigger", "avail", "availability", "unlock")
@@ -68,16 +68,9 @@ def maintenance_request(args):
 
 def run_maintenance(args):
     try:
-        response = asyncio.run(send_control(args.data_dir, maintenance_request(args)))
-    except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:
+        payload = maintenance_control(args.data_dir, maintenance_request(args))
+    except (MaintenanceControlError, ValueError) as exc:
         print(f"error: {exc}")
-        return 1
-    if response.get("error"):
-        print(f"error: {response['error']}: {response.get('detail') or response.get('charger') or ''}".rstrip())
-        return 1
-    payload = response.get("response")
-    if not isinstance(payload, dict):
-        print("error: invalid OCPP response")
         return 1
     status = payload.get("status")
     if args.json:
