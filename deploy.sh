@@ -185,6 +185,9 @@ interface=$profile_interface
 
 # Diagnostics inspect the installed profile but do not rerun exposure setup.
 if [ "$diagnose" -eq 1 ]; then
+    if [ "$delegate" -eq 1 ]; then
+        set -- -e ocpp_csms_diagnose_delegate=true "$@"
+    fi
     expose=""
     certbot_email=""
     no_certbot=0
