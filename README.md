@@ -244,8 +244,6 @@ ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration
 ocpp-csms profile clear ...
 ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
 ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn start [-c N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
