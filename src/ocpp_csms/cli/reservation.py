@@ -24,7 +24,6 @@ def _cancel_args(parser):
 
 def add_reservation_commands(subcommands):
     reserve = subcommands.add_parser("reserve", help="List, inspect, create or cancel reservations")
-    reserve.add_argument("reservation_id", nargs="?", type=int, help="Inspect a reservation by ID")
     reserve.add_argument("--cp", dest="charger", help="Filter recorded reservations by charge point")
     reserve.add_argument("--all", action="store_true", help="Include historical reservations")
     reserve.add_argument("--since", help="Requests since timestamp (ISO-8601 or relative)")
@@ -65,12 +64,13 @@ def reservation_request(args):
 def run_reservation(args):
     if getattr(args, "reservation_action", None) is None:
         since = resolve_time(args.since).isoformat() if args.since else None
-        if args.reservation_id is not None and args.reservation_id <= 0:
+        reservation_id = getattr(args, "reservation_id", None)
+        if reservation_id is not None and reservation_id <= 0:
             raise ValueError("reservation ID must be positive")
         rows = list_reservations(args.data_dir, charger=args.charger,
-                                 include_all=args.all or args.reservation_id is not None, since=since)
-        if args.reservation_id is not None:
-            rows = [row for row in rows if row["id"] == args.reservation_id]
+                                 include_all=args.all or reservation_id is not None, since=since)
+        if reservation_id is not None:
+            rows = [row for row in rows if row["id"] == reservation_id]
         if args.json:
             print(json.dumps(rows, ensure_ascii=False))
         elif not rows:
