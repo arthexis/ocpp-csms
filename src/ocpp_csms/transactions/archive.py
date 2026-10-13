@@ -96,6 +96,7 @@ class TransactionArchive:
         self._origins: dict[int, str] = {}
         self._recent_starts: dict[str, tuple[int, datetime]] = {}
         self._next_transaction_id = 1
+        self._sqlite_reserved_ids: set[int] = set()
         self._scan_existing()
 
     def _scan_existing(self) -> None:
@@ -122,13 +123,23 @@ class TransactionArchive:
         self._next_transaction_id = highest_local + 1
 
     def _next_available_local_id(self) -> int:
-        reserved = set(self._paths)
+        reserved = set(self._paths) | self._sqlite_reserved_ids
         database = self.data_dir / DATABASE_FILENAME
         if database.exists():
-            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-                reserved.update(int(row[0]) for row in connection.execute(
-                    "SELECT transaction_id FROM transactions"
-                ))
+            try:
+                with sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=0) as connection:
+                    self._sqlite_reserved_ids.update(
+                        int(row[0]) for row in connection.execute(
+                            "SELECT transaction_id FROM transactions"
+                        )
+                    )
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                # A locked database must not reject a charger start. Keep
+                # previously observed IDs and all durable archive reservations.
+                LOGGER.warning("SQLite locked during transaction ID allocation; using cached reservations")
+            reserved.update(self._sqlite_reserved_ids)
         transaction_id = self._next_transaction_id
         while transaction_id in reserved:
             transaction_id += 1
