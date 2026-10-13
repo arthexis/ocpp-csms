@@ -5,12 +5,14 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from ocpp_csms.time import utc_now_iso
+from ocpp_csms.schema import DATABASE_FILENAME
 
 LOGGER = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -120,8 +122,15 @@ class TransactionArchive:
         self._next_transaction_id = highest_local + 1
 
     def _next_available_local_id(self) -> int:
+        reserved = set(self._paths)
+        database = self.data_dir / DATABASE_FILENAME
+        if database.exists():
+            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+                reserved.update(int(row[0]) for row in connection.execute(
+                    "SELECT transaction_id FROM transactions"
+                ))
         transaction_id = self._next_transaction_id
-        while transaction_id in self._paths:
+        while transaction_id in reserved:
             transaction_id += 1
         return transaction_id
 
