@@ -1,11 +1,14 @@
 ---
-# Both deployment profiles share this convergence guard.
-- name: Inspect whether Forwarder unit exists
+# Treat missing unit as absent, but never mistake a systemctl error for success.
+- name: Inspect excluded Forwarder unit load state
   ansible.builtin.command:
-    argv: [systemctl, list-unit-files, --no-legend, --plain, ocpp-forwarder.service]
+    argv: [systemctl, show, ocpp-forwarder.service, --property=LoadState, --no-pager]
   register: ocpp_forwarder_unit_presence
   changed_when: false
-  failed_when: false
+  failed_when: >-
+    ocpp_forwarder_unit_presence.rc != 0
+    or not (ocpp_forwarder_unit_presence.stdout | trim in
+            ['LoadState=loaded', 'LoadState=not-found'])
 
 - name: Disable excluded Forwarder service
   become: true
@@ -13,11 +16,17 @@
     name: ocpp-forwarder.service
     enabled: false
     state: stopped
-  when: "'ocpp-forwarder.service' in ocpp_forwarder_unit_presence.stdout"
+  when: (ocpp_forwarder_unit_presence.stdout | trim) == 'LoadState=loaded'
 
-- name: Verify excluded Forwarder is not active
+- name: Verify excluded Forwarder unit state
   ansible.builtin.command:
-    argv: [systemctl, is-active, --quiet, ocpp-forwarder.service]
+    argv: [systemctl, show, ocpp-forwarder.service, --property=LoadState,ActiveState,UnitFileState, --no-pager]
   register: ocpp_forwarder_active_check
   changed_when: false
-  failed_when: ocpp_forwarder_active_check.rc == 0
+  failed_when: >-
+    ocpp_forwarder_active_check.rc != 0
+    or not ('LoadState=not-found' in ocpp_forwarder_active_check.stdout
+            or ('LoadState=loaded' in ocpp_forwarder_active_check.stdout
+                and 'ActiveState=inactive' in ocpp_forwarder_active_check.stdout
+                and ('UnitFileState=disabled' in ocpp_forwarder_active_check.stdout
+                     or 'UnitFileState=masked' in ocpp_forwarder_active_check.stdout)))
