@@ -94,6 +94,43 @@ one client-vendor's CSMS; separate hostnames on a shared nginx process
 alone do **not** isolate databases or credentials. Use a separate
 instance/configuration for a truly independent client deployment.
 
+
+
+### Internal WSS smoke test (no DNS or public ports)
+
+The installed delegate can be checked using its native TLS listener at
+`127.0.0.1:9443`. This is independent of nginx, Certbot and the public
+`--expose` workflow. The listener must already be enabled, and its certificate
+must have a DNS SAN that matches the test's `--tls-hostname`. No DNS record is
+needed: the client uses that hostname for TLS verification but connects the
+socket directly to `127.0.0.1`. The certificate (or its issuing CA) must be
+provided explicitly as a trusted PEM; insecure TLS verification is not supported.
+
+Use an **existing dedicated test CP identity already provisioned in Basic auth**.
+Do not use pending first-claim credentials or overwrite a real ABB charger's
+identity. A single-instance Basic-auth configuration binds one identity, so
+this smoke test is not suitable for an instance already provisioned for a
+different production charger without an approved separate test identity or
+isolated test installation. The smoke sends actual simulated OCPP start/stop
+events to the installed database.
+
+```bash
+ocpp-csms tls status
+ocpp-csms tls check --ws-port 9000
+python3 scripts/internal_wss_smoke.py \
+  --cp SIM-WSS-LOCAL \
+  --tls-hostname localhost.test \
+  --ca-file /path/to/trusted-local-test-cert.pem \
+  --port 9443
+```
+
+The script prompts securely for the existing Basic-auth password and verifies
+BootNotification, Heartbeat, Authorize, StartTransaction, MeterValues,
+StopTransaction, and persisted events. It never opens a public port, starts a
+new server, changes TLS/auth configuration, or modifies systemd. Use a
+disposable or dedicated CP identity for transactions and confirm its port
+is bound to loopback before running the test.
+
 ### HTTP Basic authentication (WSS)
 
 The default for existing local deployments is `none` (no `auth.json`).
