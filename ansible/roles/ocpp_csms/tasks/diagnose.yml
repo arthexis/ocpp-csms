@@ -75,6 +75,7 @@
   environment:
     PYTHONPATH: "{{ ocpp_csms_controller_source_dir }}/src"
   register: ocpp_csms_diagnose_discover
+  when: not (ocpp_csms_diagnose_delegate | default(false) | bool)
   changed_when: false
   failed_when: false
 
@@ -102,10 +103,14 @@
           if ocpp_csms_diagnose_current.rc == 0
           else 'none'
         }}
+      deployment_mode: "{{ 'delegate' if (ocpp_csms_diagnose_delegate | default(false) | bool) else 'satellite' }}"
       discover: >-
         {{
-          (ocpp_csms_diagnose_discover.stdout | from_json)
-          if ocpp_csms_diagnose_discover.rc == 0 and ocpp_csms_diagnose_discover.stdout | length > 0
-          else {'error': ocpp_csms_diagnose_discover.stdout | default('discover diagnostics failed')}
+          {'status': 'not_applicable', 'reason': 'delegate deployment does not install Discover'}
+          if (ocpp_csms_diagnose_delegate | default(false) | bool)
+          else ((ocpp_csms_diagnose_discover.stdout | from_json)
+            if ocpp_csms_diagnose_discover.rc == 0 and ocpp_csms_diagnose_discover.stdout | length > 0
+            else {'error': ocpp_csms_diagnose_discover.stdout | default('discover diagnostics failed')})
         }}
-      takeover_preflight_passed: "{{ ocpp_csms_diagnose_preflight.rc == 0 and ocpp_csms_diagnose_incumbent.rc == 0 }}"
+      safety_preflight_passed: "{{ ocpp_csms_diagnose_preflight.rc == 0 }}"
+      incumbent_observation_succeeded: "{{ ocpp_csms_diagnose_incumbent.rc == 0 }}"
