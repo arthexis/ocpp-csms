@@ -111,7 +111,7 @@ class TransactionArchive:
             origin = _record_origin(record)
             self._paths[transaction_id] = path
             self._origins[transaction_id] = origin
-            if origin == _ORIGIN_LOCAL:
+            if origin == _ORIGIN_LOCAL and transaction_id < 1_073_741_824:
                 highest_local = max(highest_local, transaction_id)
             start = record.get("start")
             created_at = _parse_time(record.get("created_at"))
