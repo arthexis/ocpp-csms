@@ -317,10 +317,10 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 end += 1
             if end > index + 1 and (end == len(rows) or
                     _meter_key(rows[end]) != ("meter-response", first["charger_id"])):
-                charger = f" {first[\'charger_id\']}" if first["charger_id"] else ""
+                charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 tx = f" tx={meter[3]}" if meter[3] is not None else ""
                 lines.append(
-                    f"{first[\'occurred_at\']}–{rows[end - 1][\'occurred_at\']}{charger}  "
+                    f"{first['occurred_at']}–{rows[end - 1]['occurred_at']}{charger}  "
                     f"MeterValues C{meter[2]}{tx} requests (responses not established) ×{end - index}"
                 )
                 index = end
