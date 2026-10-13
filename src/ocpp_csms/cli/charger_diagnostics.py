@@ -1,8 +1,6 @@
 """Request charger-side OCPP diagnostics and inspect stored evidence."""
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
