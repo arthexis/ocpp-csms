@@ -141,6 +141,14 @@ class EventStore:
         transaction_id = int(payload["transaction_id"])
         now = utc_now_iso()
         with self._connect() as connection:
+            recovery = connection.execute(
+                "SELECT reconciled_at FROM transaction_recoveries WHERE transaction_id = ?",
+                (transaction_id,),
+            ).fetchone()
+            previous = connection.execute(
+                "SELECT state FROM transactions WHERE transaction_id = ?",
+                (transaction_id,),
+            ).fetchone()
             updated = connection.execute(
                 """
                 UPDATE transactions
@@ -156,6 +164,13 @@ class EventStore:
                 connection.execute(
                     "UPDATE transaction_recoveries SET reconciled_at = COALESCE(reconciled_at, ?) WHERE transaction_id = ?",
                     (now, transaction_id),
+                )
+            if updated and recovery is not None and recovery[0] is None:
+                self._append_recovery_event(
+                    connection, charger_id=charger_id, transaction_id=transaction_id,
+                    previous_state=str(previous[0]), new_state="stopped",
+                    reason="late_stop_reconciled", observed_at=now,
+                    details={"stop_event_at": str(payload["timestamp"])},
                 )
             if not updated:
                 connection.execute(
