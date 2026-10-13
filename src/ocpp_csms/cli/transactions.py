@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from ocpp_csms.evidence.diagnostics import format_events, transaction_events
-from ocpp_csms.cli.options import add_cp, add_connector, add_time_bounds
+from ocpp_csms.cli.options import add_cp, add_connector, add_time_bounds, require_nonnegative, require_positive, validate_time_order
 from ocpp_csms.transactions.formatting import format_transaction, format_transactions
 from ocpp_csms.transactions.query import TransactionQuery
 
@@ -75,18 +75,15 @@ def _time_filters(args: argparse.Namespace, *, now: datetime | None = None) -> t
     else:
         since = resolve_time(args.since, now=current) if args.since else None
         until = resolve_time(args.until, now=current) if args.until else None
-    if since is not None and until is not None and since > until:
-        raise ValueError("lower time bound must not be after upper time bound")
+    validate_time_order(since, until)
     return since, until
 
 
 def run_transactions(args: argparse.Namespace) -> str:
-    if args.transaction_id is not None and args.transaction_id < 0:
-        raise ValueError("transaction ID must be zero or greater")
-    if args.connector is not None and args.connector < 0:
-        raise ValueError("-c/--connector must be zero or greater")
-    if args.limit is not None and args.limit < 1:
-        raise ValueError("--limit must be at least 1")
+    require_nonnegative(args.transaction_id, name="transaction ID")
+    require_nonnegative(args.connector, name="-c/--connector")
+    if args.limit is not None:
+        require_positive(args.limit, name="--limit")
     filtered = any((args.charger, args.connector is not None, args.id_tag, args.since, args.until, args.between, args.at, args.today))
     if args.events and args.transaction_id is None:
         raise ValueError("--events requires a transaction ID")
