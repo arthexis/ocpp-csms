@@ -28,7 +28,7 @@ def _event_rows(data_dir: str | Path, *, after: int, limit: int) -> tuple[list[s
     try:
         rows = connection.execute(
             """
-            SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
+            SELECT id, received_at AS occurred_at, charger_id, CASE WHEN direction = 'internal' THEN 'recovery' ELSE 'ocpp' END AS kind,
                    action, direction, transaction_id, id_tag, payload_json AS payload
             FROM events
             WHERE id > ?
