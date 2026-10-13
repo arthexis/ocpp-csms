@@ -6,6 +6,7 @@ import asyncio
 import json
 
 from ocpp_csms.control import send_control
+from ocpp_csms.cli.options import add_cp, add_connector, add_json
 from ocpp_csms.status import appliance_status
 from ocpp_csms.transactions.query import TransactionQuery
 
@@ -24,10 +25,10 @@ def add_inspection_commands(subcommands):
     for name, help_text in (("capabilities", "Read advertised charger feature profiles"),
                             ("reconcile", "Compare persisted connector statuses and transaction state without changes")):
         command = subcommands.add_parser(name, help=help_text)
-        command.add_argument("--cp", "--charger", dest="charger", help="Filter to charge point")
-        command.add_argument("-j", "--json", action="store_true", help="Print JSON")
+        add_cp(command, help="Filter to charge point")
+        add_json(command)
         if name == "reconcile":
-            command.add_argument("-c", "--connector", type=int, help="Filter to physical connector")
+            add_connector(command, help="Filter to physical connector")
         result[name] = command
     return result
 
