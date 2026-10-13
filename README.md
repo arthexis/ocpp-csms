@@ -306,12 +306,13 @@ ocpp-csms data-transfer send --vendor com.example.vendor --data 'opaque text' --
 
 ### OCPP reservations
 
-Use `reserve` to create an OCPP `ReserveNow` reservation; `reservation create` is an equivalent spelling. Reservation IDs are operator-supplied positive integers, unique for the charger. Connector 0 lets the charger choose any connector. The charger must support reservations; an `Accepted` response acknowledges the request, not guaranteed future availability.
+Use `reserve` to list recorded reservations, `reserve ID` to inspect historical evidence, `reserve create` to send OCPP `ReserveNow`, and `reserve cancel ID` to cancel. Reservation IDs are operator-supplied positive integers, unique for the charger. Connector 0 lets the charger choose any connector. The charger must support reservations; an `Accepted` response acknowledges the request, not guaranteed future availability.
 
 ```bash
-ocpp-csms reserve --cp CP001 -c 1 --rfid ABC123 --id 42 --until 2026-10-12T18:00:00Z
-ocpp-csms reservation create --cp CP001 -c 1 --rfid ABC123 --id 42 --until 1h
-ocpp-csms reservation cancel 42 --cp CP001
+ocpp-csms reserve --cp CP001
+ocpp-csms reserve 42 --json
+ocpp-csms reserve create --cp CP001 -c 1 --rfid ABC123 --id 42 --until 1h
+ocpp-csms reserve cancel 42 --cp CP001
 ```
 
 Optional `--parent-rfid` maps to `parentIdTag`. Requests and responses use the existing OCPP evidence store. Reservation creation does not require a new service, scheduler, or local booking database. A reservation ID must be tracked by the operator for cancellation.
