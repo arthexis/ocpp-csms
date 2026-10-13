@@ -1,49 +1,25 @@
-# Export cursor contract (issue #224, chunk A)
+# CSMS export cursor contract (#224)
 
-This document distinguishes **current behavior** from the **proposed producer extension**. Nothing in the proposed section is available to consumers until chunk B implements it and chunk C verifies it.
+## Existing contract: ocpp-csms/export/v1
 
-## Verified current `ocpp-csms/export/v1` behavior
+The CSMS export command owns all reads of operational SQLite and transaction archives. OCPP Reports consumes the command's JSON output; it must not open CSMS files or write to CSMS databases.
 
-- The top-level JSON result has schema `ocpp-csms/export/v1`; `data` includes `source_id`, `cursor`, `events`, `energy`, `transactions`, and `status`.
-- `source_id` is a persisted UUID in SQLite `appliance_metadata`, identifying the data store, not an individual CP. Namespace event IDs and transaction IDs by source. A copied/restored database may retain its source ID, so clones must not be treated as independent producers.
-- `cursor.after` is an **exclusive** lower bound on SQLite OCPP event IDs. Events are ascending by ID and bounded by `limit`. `cursor.next` is the last included event ID, or the input `after` on an empty page. `cursor.more` reflects whether an additional event was visible at query time. IDs need not be contiguous. `after >= 0`, `limit >= 1`; there is currently no enforced upper limit.
-- Runtime events are not included. Energy samples are derived from MeterValues events in the selected page. A repeated page can return the same event identities but need not be byte-identical.
-- Transaction items are **current archive snapshots** for IDs referenced by that event page. The event query, archive reads and status reads are **not atomic**. Archive-only corrections can be missed entirely by event pagination. An empty event page does not imply unchanged transactions.
-- Existing transaction `started_at` and `stopped_at` prefer receive/archive times. They are not guaranteed charger-reported event timestamps. `energy_wh` is watt-hours; absent readings must not be converted into invented zero energy.
-- The current producer does not expose a consistent snapshot, event high-watermark, durable transaction-change cursor, reset epoch or correction completeness guarantee. A cursor ahead of the maximum can currently return an empty page without an error.
+The persisted `source_id` identifies the CSMS data store. `cursor.after` is the exclusive lower bound on OCPP event IDs; `cursor.next` is the last returned ID (or `after` for an empty page); `cursor.more` indicates another visible event. Events are ascending and limited by `limit`. Event IDs need not be contiguous. `after >= 0`, `limit >= 1`. A repeated request may return the same event identities, but transaction snapshots are not immutable across requests.
 
-## Chunk B design: durable independent transaction changes
+`events` contains OCPP frames from the operational event table, and `energy` contains samples derived from the page's MeterValues. `transactions` contains current archive snapshots for transaction IDs referenced by the event page. The exporter also returns `status`. These reads are not an atomic cross-store snapshot. The export is read-only and does not change the operational SQLite journal mode.
 
-Introduce an **independent, monotonically increasing transaction change ID** with an exclusive `after` cursor and deterministic ascending pagination. Each change carries the stable identity `(source_id, transaction_id)`, change ID, UTC observation time and canonical content fingerprint. A consumer deduplicates by change ID and **upserts** a transaction revision; it must never sum repeated snapshots.
+## Additive metadata (chunk B)
 
-Every authoritative archive mutation, including recovery, inferred stop, late stop, reconciliation and archive-only correction, must produce a durable change. Audit all writers before choosing the hook. SQLite and JSON files cannot be committed in one atomic transaction: choose and test a write-ahead/outbox or repair/reconciliation strategy that closes the crash window; do not promise impossible cross-store atomicity. If deletions are supported, define tombstones. An event cursor must never substitute for this feed.
+Transaction snapshots additionally expose nullable `start_event_at`, `start_received_at`, `stop_event_at`, `stop_received_at`, `meter_sample_times`, and a `quality` object with `active`, `incomplete`, `missing_meter`, `recovered`, `inferred`, and `corrected` flags. Timestamp provenance is normalized to UTC only for valid timezone-aware timestamps; unknown, invalid or timezone-naive timestamps remain null. Existing `started_at` and `stopped_at` fields keep their meanings; energy remains in Wh with unknown values represented as null.
 
-Add timezone-aware UTC `exported_at` and an event high-watermark captured at a documented boundary. A high-watermark is **not** a consistent snapshot of SQLite, JSON archives and status. Bound event pagination against that watermark only if implementation explicitly does so.
+The `corrected` flag identifies an inferred recovery reconciled by a real stop; it is not a generic manual-edit detector. A delayed StopTransaction produces a new event ID and causes the exporter to include the transaction's current snapshot in the next event page.
 
-Preserve existing v1 timestamp fields and add separate nullable charger event and CSMS receive times for start/stop and meter samples where evidence exists. Invalid or missing event timestamps remain null, not substituted with receive times. Document UTC normalization and offset handling. Add explicit, evidence-based quality flags for active, incomplete, missing-meter, recovered/inferred and corrected transactions; preserve nullable `energy_wh` in Wh.
+## Recovery gap and separate follow-up
 
-## Source resets, retries and compatibility
+Internal inferred-stop and some other recovery transitions currently mutate derived state without inserting an event into the exportable `events` stream. They are not guaranteed to be observable by the existing cursor. Track the append-only event representation, transaction correlation, idempotency, and SQLite/JSON crash consistency in #244. Do not invent charger OCPP frames or claim that current export captures these transitions until #244 is implemented.
 
-A changed `source_id` is a new namespace. A cursor greater than the source's current high-watermark requires an explicit reset/gap outcome in the extended protocol. Numeric holes within the ID sequence do not by themselves prove lost events. Restoring an earlier backup with the **same** source ID requires a durable generation/epoch or an explicitly documented reset procedure; source ID alone cannot detect it.
+No second SQLite database, independent transaction revision feed, forwarder compatibility code, or reporting-specific database mode is required.
 
-Event and change cursors advance independently. Retrying an `after` value is safe for event/change identity but not a guarantee of immutable transaction snapshots. Specify pagination limits, replay, error behavior, reset and retention before promising durable replication.
+## Cursor caveats
 
-Additive fields may remain in `export/v1` only when existing meanings are unchanged. Otherwise introduce `export/v2` and a deliberate consumer transition. The obsolete forwarder was removed in #240; there is no forwarder compatibility or migration requirement. Validate against `arthexis/ocpp-reports` consumer fixtures, without importing Reports into CSMS.
-
-## Chunk A / B / C acceptance gates
-
-- **A:** Pin existing event cursor semantics and input validation in pytest; record current non-atomicity and agree on independent change-feed design. No producer behavior change.
-- **B:** Implement durable changes, observation metadata, timestamp provenance and quality markers; prove correction-only changes and crash recovery.
-- **C:** Add sanitized fixtures for active-to-completed, repeated/out-of-order events, archive-only corrections, empty pages, reset, missing meters, timezone offsets and malformed data; validate OCPP Reports ingestion and required CI.
-
-## Chunk B read-only boundary (implementation in progress)
-
-The export path reads the transaction-change SQLite journal with a read-only connection and never creates it or reconciles archives. If the journal has not been initialized, the change feed is empty. The producer archives each committed transaction mutation and reconciles unjournaled archive revisions during `TransactionArchive` initialization, not during export. A crash between the JSON replacement and journal insertion is recovered when the producer next initializes; until that recovery occurs, an export can temporarily lag the archive. This is not a cross-store atomic snapshot guarantee. This strategy does not reconstruct intermediate revisions lost in the crash window and needs explicit operational verification in chunk C.
-
-## Chunk B additive fields
-
-Export transaction snapshots include nullable `start_event_at`, `start_received_at`, `stop_event_at`, `stop_received_at`, per-meter-sample event/receive times, and a `quality` object. Transaction-change entries expose the same information under `metadata`, alongside the archived raw record. Timestamp provenance is UTC-normalized only when the original string has an explicit timezone; missing, invalid and timezone-naive event times remain null. The existing `started_at` and `stopped_at` meanings are unchanged.
-
-Quality indicators are evidence-based: `active` reflects an open/recovered record without a stop; `incomplete` means missing start or stop; `missing_meter` means missing start/stop or either boundary meter reading; `recovered` marks recovered origins/missing start; `inferred` marks an inferred stop; `corrected` currently means an inferred recovery later reconciled with an actual stop, **not** an arbitrary manual archive edit. Manual edits are detectable as change revisions but not yet classified as corrected by this flag.
-
-The transaction-change journal is a separate SQLite database. Export does not write it. Producer startup reconciles the archive/journal gap. No global cross-store atomic snapshot or replay of overwritten intermediate archive revisions is promised.
+A changed `source_id` is a new namespace. A copied or restored database may retain the same source ID, so same-source backup rollback cannot reliably be detected by `source_id` alone. A cursor beyond the highest event ID currently yields an empty page; explicit reset/high-watermark behavior is a separate design concern. Consumers advance cursors only after durable ingestion and deduplicate by `(source_id, event_id)`.
