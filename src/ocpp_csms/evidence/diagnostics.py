@@ -279,58 +279,56 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             summary = ("Heartbeat requests (responses not established)"
                        if first["direction"] == "in" else "→ Heartbeat responses")
         if len(group) == 1:
-            lines.append(f"{first['occurred_at']}{charg        meter = _meter_key(first)
+            lines.append(f"{first['occurred_at']}{charger}  {summary}")
+        else:
+            # These are counts of observed stored events, not inferred
+            # request/response pairs or claims about unseen window edges.
+            lines.append(
+                f"{first['occurred_at']}–{last['occurred_at']}{charger}  "
+                f"{summary} ×{len(group)}"
+            )
+
+    # Adjacency indicates an observed exchange, not protocol-level correlation.
+    index = 0
+    while index < len(rows):
+        first = rows[index]
+        meter = _meter_key(first)
         if meter is not None and meter[0] == "meter-request":
-            response_key = ("meter-response", first["charger_id"])
-            # A transaction-only timeline contains requests but not the
-            # acknowledgements, because the latter carry no transaction ID.
-            # A run of consecutive requests is still worth compressing, but
-            # must never claim successful responses.
-            end = index
-            while end < len(rows) and _meter_key(rows[end]) == meter:
-                end += 1
-            if end > index + 1 and end < len(rows) and _meter_key(rows[end]) == response_key:
-                append_group(rows[index:end - 1])
-                index = end - 1
-                first = rows[index]
-            paired_end, count = _consume_exchanges(rows, index, meter, response_key, _meter_key)
-            charger = f" {first['charger_id']}" if first["charger_id"] else ""
-            tx = f" tx={meter[3]}" if meter[3] is not None else ""
+            count = 0
+            end_at = first["occurred_at"]
+            while index + 1 < len(rows):
+                request, response = rows[index], rows[index + 1]
+                if (_meter_key(request) != meter
+                        or _meter_key(response) != ("meter-response", first["charger_id"])):
+                    break
+                count += 1
+                end_at = response["occurred_at"]
+                index += 2
             if count:
-                last = rows[paired_end - 1]
-                span = (f"{first['occurred_at']}–{last['occurred_at']}"
-                        if count > 1 else first["occurred_at"])
+                charger = f" {first['charger_id']}" if first["charger_id"] else ""
+                span = (f"{first['occurred_at']}–{end_at}" if count > 1
+                        else first["occurred_at"])
+                tx = f" tx={meter[3]}" if meter[3] is not None else ""
                 lines.append(f"{span}{charger}  MeterValues C{meter[2]}{tx} ↔ ×{count}")
-                index = paired_end
-                continue
-            if end > index + 1:
-                last = rows[end - 1]
-                lines.append(
-                    f"{first['occurred_at']}–{last['occurred_at']}{charger}  "
-                    f"MeterValues C{meter[2]}{tx} requests (responses not established) ×{end - index}"
-                )
-                index = end
                 continue
         if _group_key(first) == ("heartbeat-request", first["charger_id"]):
+            # Preserve unmatched leading requests, while allowing the final
+            # request to form an adjacent observed exchange with a response.
             request_key = ("heartbeat-request", first["charger_id"])
             response_key = ("heartbeat-response", first["charger_id"])
             end = index
             while end < len(rows) and _group_key(rows[end]) == request_key:
                 end += 1
-            if end > index + 1 and end < len(rows) and _group_key(rows[end]) == response_key:
+            if end - index > 1 and end < len(rows) and _group_key(rows[end]) == response_key:
                 append_group(rows[index:end - 1])
                 index = end - 1
                 first = rows[index]
-            paired_end, count = _consume_exchanges(rows, index, request_key, response_key, _group_key)
-            if count:
-                charger = f" {first['charger_id']}" if first["charger_id"] else ""
-                last = rows[paired_end - 1]
-                span = (f"{first['occurred_at']}–{last['occurred_at']}"
-                        if count > 1 else first["occurred_at"])
-                lines.append(f"{span}{charger}  Heartbeat ↔ ×{count}")
-                index = paired_end
-                continue
-esponse", first["charger_id"])):
+            count = 0
+            end_at = first["occurred_at"]
+            while index + 1 < len(rows):
+                request, response = rows[index], rows[index + 1]
+                if (_group_key(request) != ("heartbeat-request", first["charger_id"])
+                        or _group_key(response) != ("heartbeat-response", first["charger_id"])):
                     break
                 count += 1
                 end_at = response["occurred_at"]
