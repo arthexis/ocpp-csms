@@ -5,7 +5,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from ocpp_csms.cli.transactions import resolve_time
-from ocpp_csms.cli.options import add_cp, add_connector, add_json
+from ocpp_csms.cli.options import add_cp, add_connector, add_json, require_nonnegative
 from ocpp_csms.control import send_control
 from ocpp_csms.reservations import list_reservations
 
@@ -43,8 +43,7 @@ def reservation_request(args):
             raise ValueError("reservation ID must be positive")
         result = {"command": "cancel_reservation", "reservation_id": args.reservation_id}
     else:
-        if args.connector < 0:
-            raise ValueError("connector must be zero or greater")
+        require_nonnegative(args.connector, name="connector")
         if args.reservation_id <= 0:
             raise ValueError("reservation ID must be positive")
         if not 1 <= len(args.rfid) <= 20:
