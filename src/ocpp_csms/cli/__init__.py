@@ -96,6 +96,8 @@ def main() -> int:
             except ValueError as exc:
                 operations.error(str(exc))
         args.command = args.operation
+        if args.operation == "start" and args.charger and args.charger_option:
+            operations.error("charge point may be specified positionally or with --cp, not both")
         if args.operation == "stop":
             if args.transaction_id is not None and args.transaction_option is not None:
                 operations.error("provide transaction ID either positionally or via --txn")
