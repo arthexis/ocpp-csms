@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from ocpp_csms.cli.transactions import resolve_time
-from ocpp_csms.control import send_control
+from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.evidence.diagnostics import events_between
 
 
@@ -100,16 +100,9 @@ def run_diagnostics(args):
             print("Notifications are observations; without OCPP message IDs, request/notification association is not guaranteed.")
         return 0
     try:
-        response = asyncio.run(send_control(args.data_dir, _request(args)))
-    except (ConnectionError, OSError, ValueError) as exc:
+        payload = maintenance_control(args.data_dir, _request(args), malformed="invalid GetDiagnostics response")
+    except (MaintenanceControlError, ValueError) as exc:
         print(f"error: {exc}")
-        return 1
-    if response.get("error"):
-        print(f"error: {response['error']}: {response.get('detail') or ''}".rstrip())
-        return 1
-    payload = response.get("response")
-    if not isinstance(payload, dict):
-        print("error: invalid GetDiagnostics response")
         return 1
     if args.json:
         print(json.dumps(payload, ensure_ascii=False))
