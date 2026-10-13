@@ -66,7 +66,7 @@ def test_config_download_json_uses_deterministic_emitter(monkeypatch, tmp_path, 
             },
         }
 
-    monkeypatch.setattr(config_cli, "send_control", fake_send_control)
+    monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", fake_send_control)
     parser, _ = build_parser()
     args = parser.parse_args(["--data-dir", str(tmp_path), "config", "download", "charger-a", "--json"])
     assert run_config_download(args) == 0
