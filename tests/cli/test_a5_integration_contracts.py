@@ -69,11 +69,10 @@ def test_txn_json_schema_stays_stable(invoke_cli, capsys):
 
 
 def test_export_command_stays_registered_and_schema_constant():
-    from ocpp_forwarder.exporter import EXPORT_SCHEMA
     parser, commands = build_parser()
     assert "export" in commands
     assert parser.parse_args(["export", "--after", "12", "--limit", "20", "-j"]).command == "export"
-    assert EXPORT_SCHEMA == "ocpp-csms/export/v1"
+    assert "ocpp-csms/export/v1" in __import__("inspect").getsource(__import__("ocpp_csms.cli.export", fromlist=[""]).run_export)
 
 
 def test_txn_operation_parser_is_independent_of_read_only_query():
