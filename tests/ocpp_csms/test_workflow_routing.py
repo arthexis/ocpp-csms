@@ -16,11 +16,6 @@ def test_gway001_runner_and_appliance_dispatch_are_retired():
     assert "simulator-pr-" not in ci
 
 
-def test_manual_deploy_routes_to_gway_remote():
-    deploy = (WORKFLOWS / "deploy-gway-001.yml").read_text()
-    assert "workflow_dispatch:" in deploy
-    assert "runs-on: ubuntu-latest" in deploy
-    assert "repos/arthexis/gway-remote/dispatches" in deploy
-    assert "event_type=ocpp-csms-deploy" in deploy
-    assert "client_payload[sha]" in deploy
-    assert "self-hosted" not in deploy
+def test_legacy_deploy_dispatch_is_removed():
+    # Gway Remote discovers and deploys eligible CSMS revisions itself.
+    assert not (WORKFLOWS / "deploy-gway-001.yml").exists()
