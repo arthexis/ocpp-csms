@@ -7,7 +7,7 @@ from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
 
 
-CHARGER_COMMANDS = ("charger", "chargers", "cp", "cps")
+CHARGER_COMMANDS = ("cp", "cps")
 
 
 def add_charger_commands(
@@ -16,25 +16,25 @@ def add_charger_commands(
     add = argparse.ArgumentParser.add_argument
 
     charger = subcommands.add_parser(
-        "charger", aliases=["cp"], help="Show one charge point and its connectors"
+        "cp", help="Show one charge point and its connectors"
     )
-    charger.set_defaults(command="charger")
+    charger.set_defaults(command="cp")
     add(charger, "charger", help="Charge point ID")
     add(charger, "-j", "--json", action="store_true", help="Print machine-readable charge point status")
 
     chargers = subcommands.add_parser(
-        "chargers", aliases=["cps"], help="List known charge points"
+        "cps", help="List known charge points"
     )
-    chargers.set_defaults(command="chargers")
+    chargers.set_defaults(command="cps")
     add(chargers, "--charging", action="store_true", help="Show only charge points with active transactions")
     add(chargers, "-j", "--json", action="store_true", help="Print machine-readable charge point status")
 
-    return {name: charger if name in ("charger", "cp") else chargers for name in CHARGER_COMMANDS}
+    return {"cp": charger, "cps": chargers}
 
 
 def run_chargers(args: argparse.Namespace) -> int:
     status = appliance_status(args.data_dir)
-    charger_id = args.charger if args.command == "charger" else None
+    charger_id = args.charger if args.command == "cp" else None
     charging_only = getattr(args, "charging", False)
     if args.json:
         emit_json(status_contract(status, charger_id=charger_id, charging_only=charging_only))
