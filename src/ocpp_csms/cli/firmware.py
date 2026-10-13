@@ -2,9 +2,9 @@
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
 
 from ocpp_csms.cli.transactions import resolve_time
+from ocpp_csms.cli.maintenance_validation import validate_transfer_url, validate_retry_options
 from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
 from ocpp_csms.evidence.diagnostics import events_between
 from ocpp_csms.firmware_preflight import preflight
@@ -43,16 +43,8 @@ def add_firmware_command(subcommands):
 def firmware_request(args, *, now=None):
     if not args.confirm:
         raise ValueError("firmware update requires --confirm (may interrupt charging)")
-    try:
-        parts = urlsplit(args.location)
-        if parts.scheme.lower() not in {"http", "https", "ftp", "ftps"} or not parts.hostname or parts.fragment:
-            raise ValueError("invalid firmware URL")
-    except ValueError as exc:
-        raise ValueError("invalid firmware URL") from exc
-    if args.retries is not None and args.retries < 0:
-        raise ValueError("--retries must be non-negative")
-    if args.retry_interval is not None and args.retry_interval < 0:
-        raise ValueError("--retry-interval must be non-negative")
+    validate_transfer_url(args.location, error="invalid firmware URL")
+    validate_retry_options(args.retries, args.retry_interval)
     current = now or datetime.now(timezone.utc)
     if args.now:
         date = current
