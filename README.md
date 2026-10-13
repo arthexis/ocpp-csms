@@ -20,7 +20,7 @@ The design principle is: **observe aggressively; block reluctantly.**
 
 Use `ansible/playbooks/delegate.yml` for a delegate CSMS instance instead of
 `satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
-no Forwarder, and no traffic interception. It supports Debian-family ARM64
+and no traffic interception. It supports Debian-family ARM64
 and x86_64 machines, including Ubuntu 24.04.
 
 ### Expose one hostname through nginx (Lightsail)
@@ -68,23 +68,8 @@ Bootstrap in this order:
    and verify stored evidence on Lightsail. Do not hand ABB the URL until
    this succeeds.
 
-`./deploy.sh --satellite` is identical to `./deploy.sh` with no deployment-mode flag. It cannot be combined with `--delegate` or `--expose`; `--forwarder` remains optional with any deployment mode.
+`./deploy.sh --satellite` is identical to `./deploy.sh` with no deployment-mode flag. It cannot be combined with `--delegate` or `--expose`.
 
-The OCPP Forwarder is optional for **both satellites and delegates**. Pass
-`--forwarder` to either deployment mode, including an exposed delegate, after
-providing the existing required `ocpp_forwarder_satellite_id` (the forwarder
-source identifier, including for delegates) and `ocpp_forwarder_token` via
-Ansible configuration or extra variables. A delegate does not install Discover
-just because the forwarder is enabled. Without `--forwarder`, neither
-deployment enables the forwarder by default. For example:
-
-```bash
-./deploy.sh --delegate --forwarder \\
-  -e ocpp_forwarder_satellite_id=porsche-abb \\
-  -e ocpp_forwarder_token=REPLACE_WITH_SECURE_TOKEN
-```
-
-Supply real tokens securely, rather than placing them in shell history.
 
 The `--delegate` mode bootstraps a loopback-only CSMS for credential setup;
 `--expose` adds nginx/Certbot after credentials exist. The `--expose` path
@@ -933,85 +918,6 @@ deploy.sh              canonical deployment wrapper
 This README is the canonical project documentation.
 
 
-## OCPP Forwarder
-
-`ocpp-forwarder` is an independent satellite-side process that forwards the
-stable `ocpp-csms/export/v1` contract to an OCPP Collector. It does not read
-the CSMS SQLite database or import the CSMS persistence layer.
-
-Example one-page manual run:
-
-```bash
-ocpp-forwarder \
-  --satellite-id gway-004 \
-  --collector-url https://ocpp-collector.arthexis.com \
-  --token-file /etc/ocpp-forwarder/token \
-  run --once
-```
-
-The default persistent state file is:
-
-```
-/var/lib/ocpp-forwarder/state.json
-```
-
-The cursor is advanced only after events, energy samples, transaction snapshots,
-charger state, and satellite progress have all been accepted by the Collector.
-Failures therefore result in safe at-least-once retries against idempotent
-Collector keys.
-
-If the CSMS `source_id` changes because the local datastore was replaced, the
-Forwarder starts the new source epoch from cursor zero while retaining the old
-epoch centrally.
-
-The long-running mode drains backlog pages immediately and sleeps only once it
-is caught up:
-
-```bash
-ocpp-forwarder --satellite-id gway-004 run
-```
-
-Local forwarding state can be inspected without contacting the Collector:
-
-```bash
-ocpp-forwarder --satellite-id gway-004 status
-```
-
-
-### Deploying OCPP Forwarder
-
-OCPP Forwarder deployment is opt-in. Ordinary satellite deployment does not
-install or enable the Forwarder role:
-
-```bash
-./deploy.sh
-```
-
-Enable it explicitly with `--forwarder` and provide its satellite identity and
-Collector token through Ansible variables (normally from Vault/host vars):
-
-```bash
-./deploy.sh --forwarder \
-  -e ocpp_forwarder_satellite_id=gway-004 \
-  -e @forwarder-secrets.yml
-```
-
-where the secret variable is:
-
-```yaml
-ocpp_forwarder_token: "<collector JWT>"
-```
-
-The deployed service is `ocpp-forwarder.service`. It has no
-`Requires=`, `PartOf=`, or `BindsTo=` relationship with
-`ocpp-csms.service`.
-
-Collector reachability is not an Ansible deployment gate. If DNS, Internet, or
-the Collector is unavailable, the Forwarder remains isolated from the CSMS,
-keeps its cursor unchanged, logs a warning, and retries with exponential
-backoff capped at 60 seconds. Normal charging and OCPP-CSMS operation continue
-unaffected.
-
 ### Inspect (read-only charger investigation)
 
 ```bash
@@ -1101,15 +1007,12 @@ A successful normal `./deploy.sh` records its nonsecret installation
 profile at `~/.local/state/ocpp-csms/deployment.json` (mode 0600).
 Subsequent deployments without mode flags reuse the recorded satellite/delegate
 mode, public `--expose` hostname, Certbot email and management switch,
-Forwarder setting and interface. In particular, an exposed delegate never
+and interface. In particular, an exposed delegate never
 silently becomes a satellite when `./deploy.sh` is rerun.
 
 Only the original *deployment identity* can be retained: satellite versus
 delegate cannot change in place, and changing an exposed hostname also requires
 uninstallation. An unexposed delegate can acquire `--expose` without reinstalling.
-`--forwarder` and `--no-forwarder` toggle the optional Forwarder without
-changing installation type. Installed Forwarder credentials are reused from
-their protected configuration files, not copied into the profile.
 
 Temporary `--diagnose`, `--recover`, `--stage-only`, `--dev`,
 `--observe` and `--reconnect` do not persist as future defaults.
@@ -1122,9 +1025,7 @@ removes the hostname-specific nginx site if installed, and removes replaceable
 code releases, then clears the saved profile only upon successful completion.
 Transaction archives, the database, and certificate archives are preserved.
 Basic authentication is deactivated and its protected file is archived at
-`/etc/ocpp-csms/auth.uninstalled.json`; Forwarder credentials and replay
-state are removed to avoid carrying a previous deployment identity into a new
-installation. Back up durable records before uninstalling. Installation
+`/etc/ocpp-csms/auth.uninstalled.json`. Back up durable records before uninstalling. Installation
 from an older version with no saved profile requires explicit mode plus
 `--adopt` after verifying the installed role; it will not guess the role
 from an existing systemd unit.

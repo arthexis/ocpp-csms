@@ -17,8 +17,8 @@ import tempfile
 DOMAIN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]+$")
-FIELDS = {"mode", "expose", "email", "no_certbot", "forwarder", "interface"}
-DEFAULT = dict(mode="satellite", expose="", email="", no_certbot=False, forwarder=False, interface="")
+FIELDS = {"mode", "expose", "email", "no_certbot", "interface"}
+DEFAULT = dict(mode="satellite", expose="", email="", no_certbot=False, interface="")
 SCHEMA = 1
 
 
@@ -29,7 +29,7 @@ def validate(profile: dict) -> dict:
         raise ValueError("Unsupported deployment profile version")
     if profile["mode"] not in ("satellite", "delegate"):
         raise ValueError("Invalid installed mode")
-    if any(type(profile[k]) is not bool for k in ("forwarder", "no_certbot")):
+    if any(type(profile[k]) is not bool for k in ("no_certbot",)):
         raise ValueError("Invalid boolean deployment settings")
     for k in ("expose", "email", "interface"):
         if not isinstance(profile[k], str):
@@ -71,10 +71,6 @@ def resolve(previous, args):
         config["email"] = args.email
     if args.no_certbot:
         config["no_certbot"] = True
-    if args.forwarder:
-        config["forwarder"] = True
-    if args.no_forwarder:
-        config["forwarder"] = False
     if args.interface:
         config["interface"] = args.interface
     validate({"schema": SCHEMA, **config})
@@ -114,8 +110,6 @@ def main():
     parser.add_argument("--expose", default="")
     parser.add_argument("--email", default="")
     parser.add_argument("--no-certbot", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--forwarder", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--no-forwarder", type=int, choices=(0, 1), default=0)
     parser.add_argument("--interface", default="")
     parser.add_argument("--adopt", type=int, choices=(0, 1), default=0)
     args = parser.parse_args()
@@ -131,8 +125,6 @@ def main():
             raise ValueError("--satellite cannot be combined with delegate or expose")
         if args.delegate and args.expose:
             raise ValueError("--delegate and --expose are alternative mode selectors")
-        if args.forwarder and args.no_forwarder:
-            raise ValueError("--forwarder and --no-forwarder conflict")
         config = resolve(previous, args)
         if args.operation == "resolve":
             render_shell(config)

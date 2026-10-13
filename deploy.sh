@@ -22,14 +22,12 @@ reconnect_seconds=""
 stage_only=0
 diagnose=0
 dev=0
-forwarder=0
 recover=0
 expose=""
 delegate=0
 satellite=0
 certbot_email=""
 no_certbot=0
-no_forwarder=0
 adopt=0
 uninstall=0
 
@@ -108,20 +106,12 @@ while [ "$#" -gt 0 ]; do
             no_certbot=1
             shift
             ;;
-        --no-forwarder)
-            no_forwarder=1
-            shift
-            ;;
         --adopt)
             adopt=1
             shift
             ;;
         --uninstall)
             uninstall=1
-            shift
-            ;;
-        --forwarder)
-            forwarder=1
             shift
             ;;
         --)
@@ -158,7 +148,7 @@ if [ "$uninstall" -eq 1 ]; then
         printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
         exit 2
     fi
-    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$forwarder" -eq 1 ] || [ "$no_forwarder" -eq 1 ] || [ "$recover" -eq 1 ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$recover" -eq 1 ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
         exit 2
     fi
@@ -166,8 +156,7 @@ fi
 profile_assignments=$(python3 "$profile_helper" resolve --path "$profile_path" \
     --satellite "$satellite" --delegate "$delegate" \
     --expose "$expose" --email "$certbot_email" \
-    --no-certbot "$no_certbot" --forwarder "$forwarder" \
-    --no-forwarder "$no_forwarder" --interface "$interface" \
+    --no-certbot "$no_certbot" --interface "$interface" \
     --adopt "$adopt") || exit 2
 eval "$profile_assignments"
 satellite=0
@@ -180,7 +169,6 @@ fi
 expose=$profile_expose
 certbot_email=$profile_email
 no_certbot=$profile_no_certbot
-forwarder=$profile_forwarder
 interface=$profile_interface
 
 # Diagnostics inspect the installed profile but do not rerun exposure setup.
@@ -269,10 +257,6 @@ if [ "$dev" -eq 1 ]; then
     set -- -e ocpp_csms_dev=true "$@"
 fi
 
-if [ "$forwarder" -eq 1 ]; then
-    set -- -e ocpp_forwarder_enabled=true "$@"
-fi
-
 if [ "$recover" -eq 1 ]; then
     if [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--recover cannot be combined with --diagnose or --stage-only.' >&2
@@ -321,15 +305,10 @@ if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$s
     if [ -n "$expose" ]; then
         commit_delegate=0
     fi
-    commit_no_forwarder=0
-    if [ "$forwarder" -eq 0 ]; then
-        commit_no_forwarder=1
-    fi
     python3 "$profile_helper" commit --path "$profile_path" \
         --satellite "$((1 - delegate))" --delegate "$commit_delegate" \
         --expose "$expose" --email "$certbot_email" \
-        --no-certbot "$no_certbot" --forwarder "$forwarder" \
-        --no-forwarder "$commit_no_forwarder" --interface "$interface" \
+        --no-certbot "$no_certbot" --interface "$interface" \
         --adopt 1 || exit 2
 fi
 
