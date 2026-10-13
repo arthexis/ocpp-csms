@@ -251,7 +251,11 @@ class EventStore:
                 previous_state="unknown",
                 new_state="recovered" if event == "historical_transaction_recovered" else "unresolved",
                 reason=event, observed_at=now,
-                details={key: value for key, value in decision.items() if key != "event"},
+                details={
+                    **{key: value for key, value in decision.items()
+                       if key not in {"event", "reason"}},
+                    **({"collision_reason": decision["reason"]} if "reason" in decision else {}),
+                },
             )
 
     def record_connector_status(self, charger_id: str, payload: dict[str, Any]) -> bool:
