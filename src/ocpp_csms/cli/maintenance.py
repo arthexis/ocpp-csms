@@ -1,8 +1,6 @@
 """Field maintenance OCPP 1.6J requests via the existing control socket."""
 from __future__ import annotations
 
-import argparse
-import asyncio
 import json
 
 from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
