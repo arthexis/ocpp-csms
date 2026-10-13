@@ -12,7 +12,7 @@ def add_data_transfer_command(subcommands):
     root = subcommands.add_parser("data-transfer", help="Send vendor-specific OCPP DataTransfer")
     actions = root.add_subparsers(dest="transfer_action", required=True)
     send = actions.add_parser("send", help="Send vendor DataTransfer to a connected charge point")
-    send.add_argument("--cp", "--charger", dest="charger")
+    send.add_argument("--cp", dest="charger")
     send.add_argument("--vendor", required=True, help="OCPP vendorId")
     send.add_argument("--message-id", help="Optional vendor messageId")
     send.add_argument("--data", help="Optional opaque string payload (including JSON text)")
