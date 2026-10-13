@@ -1,4 +1,5 @@
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 
@@ -56,7 +57,46 @@ async def test_allocator_uses_cached_sqlite_reservations_when_locked(tmp_path):
     lock = sqlite3.connect(events.path)
     lock.execute("BEGIN EXCLUSIVE")
     try:
-        assert await archive.start("cp-a", START) == 2
+        with patch("ocpp_csms.transactions.archive.secrets.randbelow", return_value=5):
+            assert await archive.start("cp-a", START) == 1_073_741_829
+    finally:
+        lock.rollback()
+        lock.close()
+
+
+@pytest.mark.asyncio
+async def test_locked_sqlite_only_id_uses_disjoint_fallback_candidate(tmp_path):
+    events = EventStore(tmp_path)
+    events.record_transaction_start(1, "cp-a", START)
+    archive = TransactionArchive(tmp_path)
+    lock = sqlite3.connect(events.path)
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        with patch("ocpp_csms.transactions.archive.secrets.randbelow", return_value=7):
+            allocated = await archive.start("cp-a", START)
+        assert allocated == 1_073_741_831
+        assert allocated != 1
+    finally:
+        lock.rollback()
+        lock.close()
+
+
+@pytest.mark.asyncio
+async def test_locked_fallback_retries_known_reserved_candidate(tmp_path):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    with patch("ocpp_csms.transactions.archive.secrets.randbelow", return_value=7):
+        first = 1_073_741_831
+        await archive.start("cp-a", START)
+    # The first start above uses sequential ID 1 while SQLite is readable.
+    assert first not in archive._paths
+    lock = sqlite3.connect(events.path)
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        with patch("ocpp_csms.transactions.archive.secrets.randbelow", side_effect=[7, 8]):
+            archive._paths[first] = tmp_path / "reserved.json"
+            next_start = {**START, "meter_start": 200, "timestamp": "2026-10-13T13:00:00Z"}
+            assert await archive.start("cp-a", next_start) == first + 1
     finally:
         lock.rollback()
         lock.close()
