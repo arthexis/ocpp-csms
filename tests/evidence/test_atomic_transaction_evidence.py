@@ -1,9 +1,12 @@
 """Chunk 2: SQLite-authoritative, additive transaction evidence."""
 import json
+import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from ocpp_csms.evidence.store import EventStore
+from ocpp_csms.session.handlers import SessionHandlers
 
 
 START = {"connector_id": 1, "id_tag": "card-a", "meter_start": 100, "timestamp": "2026-10-03T10:00:00Z"}
@@ -77,3 +80,54 @@ def test_failed_stop_state_update_rolls_back_event(tmp_path):
             "timestamp": "2026-10-03T10:10:00Z"
         })
     assert rows(store) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,handler,payload", [
+    ("MeterValues", "on_meter_values", {"transaction_id": 999, "connector_id": 1, "meter_value": []}),
+    ("StopTransaction", "on_stop_transaction", {"transaction_id": 999, "meter_stop": 150, "timestamp": "2026-10-03T10:10:00Z"}),
+])
+async def test_handler_acknowledges_only_after_sqlite_commit(tmp_path, action, handler, payload):
+    store = EventStore(tmp_path)
+    session = SimpleNamespace(id="cp-a", events=store)
+    result = await getattr(SessionHandlers, handler)(session, **payload)
+    assert result is not None
+    events, transactions = rows(store)
+    assert [event[1] for event in events] == [action]
+    assert transactions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,handler,payload", [
+    ("MeterValues", "on_meter_values", {"transaction_id": 999, "connector_id": 1, "meter_value": []}),
+    ("StopTransaction", "on_stop_transaction", {"transaction_id": 999, "meter_stop": 150, "timestamp": "2026-10-03T10:10:00Z"}),
+])
+async def test_handler_does_not_acknowledge_failed_sqlite_commit(tmp_path, action, handler, payload):
+    store = EventStore(tmp_path)
+    with sqlite3.connect(store.path) as db:
+        db.execute("""CREATE TRIGGER reject_evidence BEFORE INSERT ON events
+                      WHEN NEW.action = '%s'
+                      BEGIN SELECT RAISE(ABORT, 'reject evidence'); END""" % action)
+    session = SimpleNamespace(id="cp-a", events=store)
+    with pytest.raises(sqlite3.DatabaseError):
+        await getattr(SessionHandlers, handler)(session, **payload)
+    assert rows(store) == ([], [])
+
+
+def test_stop_receipt_retries_do_not_change_first_stop_timestamp(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("cp-a", START)
+    stop = {"transaction_id": transaction_id, "meter_stop": 150, "timestamp": "2026-10-03T10:10:00Z"}
+    store.commit_transaction_evidence("cp-a", "StopTransaction", stop)
+    with store._connect() as connection:
+        first_receipt = connection.execute(
+            "SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)
+        ).fetchone()[0]
+    store.commit_transaction_evidence("cp-a", "StopTransaction", stop)
+    with store._connect() as connection:
+        second_receipt = connection.execute(
+            "SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)
+        ).fetchone()[0]
+    assert second_receipt == first_receipt
+    events, _ = rows(store)
+    assert [event[1] for event in events].count("StopTransaction") == 2
