@@ -33,14 +33,6 @@ def test_txn_explain_subparser_dispatch(monkeypatch):
     assert seen == [(42, 5)]
 
 
-def test_txn_recover_subparser_dispatch(monkeypatch):
-    seen = []
-    monkeypatch.setattr("ocpp_csms.cli.run_recovery", lambda args: seen.append((args.dry_run, args.charger)) or 0)
-    monkeypatch.setattr(sys, "argv", ["ocpp-csms", "txn", "recover", "--dry-run", "--cp", "CP1"])
-    assert main() == 0
-    assert seen == [(True, "CP1")]
-
-
 @pytest.mark.parametrize("argv", [
     ["txn", "stop"],
     ["txn", "stop", "-1"],
@@ -48,7 +40,6 @@ def test_txn_recover_subparser_dispatch(monkeypatch):
     ["txn", "start", "CP1", "--cp", "CP2"],
     ["txn", "explain", "-1"],
     ["txn", "explain", "42", "--context", "1441"],
-    ["txn", "recover", "--enable"],
 ])
 def test_txn_operations_reject_invalid_inputs(monkeypatch, argv, tmp_path):
     monkeypatch.setattr(sys, "argv", ["ocpp-csms", "--data-dir", str(tmp_path), *argv])
@@ -61,7 +52,6 @@ def test_txn_operations_reject_invalid_inputs(monkeypatch, argv, tmp_path):
     ["txn", "start", "--help"],
     ["txn", "stop", "--help"],
     ["txn", "explain", "--help"],
-    ["txn", "recover", "--help"],
 ])
 def test_txn_operations_have_help(monkeypatch, argv, capsys):
     monkeypatch.setattr(sys, "argv", ["ocpp-csms", *argv])
@@ -77,5 +67,5 @@ def test_transaction_parser_registration_and_help():
     assert operations.parse_args(["explain", "42"]).operation == "explain"
     assert operations.parse_args(["stop", "42"]).transaction_id == 42
     parser, commands = build_parser()
-    assert "txn recover" in commands["txn"].format_help()
+    assert "txn explain" in commands["txn"].format_help()
     assert parser.parse_args(["txn", "42"]).transaction_id == 42
