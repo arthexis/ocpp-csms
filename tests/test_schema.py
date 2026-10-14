@@ -148,7 +148,7 @@ def test_upgrade_refuses_unversioned_database(tmp_path):
     info = inspect_schema(tmp_path)
     assert info.version == 0
     assert can_upgrade_schema(info) is False
-    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 7"):
+    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 8"):
         upgrade_schema(tmp_path)
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='legacy'").fetchone() == ("legacy",)
