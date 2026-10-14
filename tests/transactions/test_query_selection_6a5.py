@@ -94,3 +94,44 @@ def test_query_owns_consistent_snapshot_across_summary_and_evidence(tmp_path, mo
         assert connection.in_transaction
         assert query.list(charger="cp-a")[0].transaction_id == txn_id
         assert connection.in_transaction
+
+
+def test_standalone_query_reads_summary_and_evidence_from_same_wal_snapshot(tmp_path, monkeypatch):
+    """A writer committing between SELECTs must not leak into the read snapshot."""
+    store = EventStore(tmp_path)
+    txn_id = store.commit_start("cp-a", {
+        "connector_id": 1, "id_tag": "A", "meter_start": 10,
+        "timestamp": "2026-10-01T00:00:00Z",
+    })
+    original_connect = sqlite3.connect
+    class InterleavedConnection:
+        def __init__(self, underlying):
+            self.underlying = underlying
+            self.injected = False
+
+        def execute(self, sql, params=()):
+            if "FROM events WHERE direction" in sql and not self.injected:
+                self.injected = True
+                with original_connect(database_path(tmp_path)) as writer:
+                    writer.execute(
+                        """INSERT INTO events
+                           (received_at, charger_id, action, direction,
+                            transaction_id, payload_json)
+                           VALUES (?, ?, 'MeterValues', 'in', ?, ?)""",
+                        ("2026-10-14T00:00:00Z", "cp-a", txn_id,
+                         '{"meter_value":[{"timestamp":"2026-10-14T00:00:00Z"}]}'),
+                    )
+            return self.underlying.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self.underlying, name)
+
+    def wrapped_connect(*args, **kwargs):
+        return InterleavedConnection(original_connect(*args, **kwargs))
+
+    monkeypatch.setattr("ocpp_csms.transactions.query.sqlite3.connect", wrapped_connect)
+    view = TransactionQuery(tmp_path).get(txn_id)
+    assert view is not None
+    assert view.record["meter_values"] == []
+    # The writer really committed, and a subsequent query sees the new event.
+    assert len(TransactionQuery(tmp_path).get(txn_id).record["meter_values"]) == 1
