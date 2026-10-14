@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, SchemaInfo, create_current_schema, inspect_schema
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, SchemaInfo, create_current_schema, inspect_schema, database_path
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,29 @@ def schema_directory(root: str | Path, version: int) -> Path:
     return Path(root).expanduser() / "schemas" / str(version)
 
 
+def discover_active_storage(root: str | Path) -> Path | None:
+    """Discover active versioned storage or the original unversioned layout.
+
+    Discovery never follows a broken activation pointer or silently falls back
+    to legacy storage when a current pointer exists.
+    """
+    root = Path(root).expanduser()
+    current = root / "current"
+    if current.is_symlink():
+        target = current.resolve(strict=True)
+        if not target.is_dir() or not target.is_relative_to((root / "schemas").resolve()):
+            raise RuntimeError(f"invalid active schema pointer: {current}")
+        return target
+    if current.exists():
+        raise RuntimeError(f"active schema pointer is not a symlink: {current}")
+    legacy = database_path(root)
+    if legacy.exists():
+        return root
+    if (root / "schemas").exists():
+        raise RuntimeError("versioned storage exists without an active current pointer")
+    return None
+
+
 def plan_storage(root: str | Path, active: str | Path | None,
                  *, candidate_version: int = CURRENT_SCHEMA_VERSION) -> StoragePlan:
     """Plan without modifying either the active or target database.
@@ -32,6 +55,10 @@ def plan_storage(root: str | Path, active: str | Path | None,
     An existing target directory is rejected even if its SQLite file is absent:
     interrupted preparation must be investigated, not overwritten.
     """
+    if candidate_version != CURRENT_SCHEMA_VERSION:
+        # Planning an older version is useful to detect downgrades, but it
+        # must never be prepared by this version of the application.
+        pass
     target = schema_directory(root, candidate_version)
     active_path = Path(active).expanduser() if active is not None else None
     info: SchemaInfo | None = inspect_schema(active_path) if active_path is not None else None
@@ -53,6 +80,8 @@ def prepare_storage(plan: StoragePlan) -> SchemaInfo:
     """Prepare only a new candidate; never change active storage or activation links."""
     if plan.action == "reuse":
         return inspect_schema(plan.target)
+    if plan.target.name != str(CURRENT_SCHEMA_VERSION):
+        raise RuntimeError("cannot prepare a schema other than the current version")
     if plan.action != "create":
         raise ValueError(f"unknown storage action: {plan.action}")
     if plan.target.exists() or plan.target.is_symlink():
