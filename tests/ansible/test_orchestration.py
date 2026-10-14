@@ -360,3 +360,20 @@ def test_ansible_reports_elapsed_time_for_each_task():
     assert 'CALLBACK_NAME = "task_timing"' in callback
     assert "time.monotonic()" in callback
     assert 'TIMING [{task.get_name()}] {elapsed:.2f}s' in callback
+
+
+def test_wal_preparation_runs_for_existing_current_schema_before_activation():
+    cutover = TASKS / "cutover.yml"
+    task = task_by_name(cutover, "Upgrade schema and enable WAL after service stop")
+    assert task["when"] == "ocpp_csms_schema_action != 'create'"
+    assert "schema-upgrade" in task["ansible.builtin.command"]["argv"]
+    verify = task_by_name(cutover, "Verify database schema and SQLite integrity before activation")
+    assert verify["when"] == "ocpp_csms_schema_action != 'create'"
+    assert "schema-verify" in verify["ansible.builtin.command"]["argv"]
+    assert_task_order(
+        read(cutover),
+        "Stop existing OCPP CSMS service",
+        "Upgrade schema and enable WAL after service stop",
+        "Verify database schema and SQLite integrity before activation",
+        "Install live OCPP CSMS systemd unit",
+    )
