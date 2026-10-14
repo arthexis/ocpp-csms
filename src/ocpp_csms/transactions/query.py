@@ -91,7 +91,6 @@ def _received_activity_at(record: dict[str, Any]) -> datetime:
 class TransactionView:
     record: dict[str, Any]
     path: Path
-    unresolved: tuple[dict[str, Any], ...] = ()
 
     @property
     def transaction_id(self) -> int:
