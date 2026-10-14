@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from ocpp_csms.install_recovery import bootstrap_recovery
-from ocpp_csms.schema import create_current_schema, inspect_schema
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, create_current_schema, inspect_schema
 
 
 def test_recover_on_empty_fresh_data_is_noop(tmp_path):
@@ -23,7 +23,7 @@ def test_recover_refuses_running_process_before_mutation(tmp_path):
     with patch("ocpp_csms.install_recovery.process_is_running", return_value=True):
         with pytest.raises(RuntimeError, match="stop it"):
             bootstrap_recovery(tmp_path)
-    assert inspect_schema(tmp_path).version == 8
+    assert inspect_schema(tmp_path).version == CURRENT_SCHEMA_VERSION
 
 
 def test_recover_refuses_preflight_disagreement(tmp_path):
