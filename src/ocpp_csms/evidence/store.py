@@ -181,43 +181,47 @@ class EventStore:
                 (utc_now_iso(), int(transaction_id)),
             )
 
-    def record_transaction_stop(self, charger_id: str, payload: dict[str, Any]) -> None:
-        transaction_id = int(payload["transaction_id"])
+    def commit_transaction_evidence(
+        self, charger_id: str, action: str, payload: dict[str, Any]
+    ) -> None:
+        """Persist incoming evidence before acknowledgment, without inventing starts."""
+        if action not in {"MeterValues", "StopTransaction"}:
+            raise ValueError("unsupported transaction evidence")
+        transaction_id = int(payload["transaction_id"]) if payload.get("transaction_id") is not None else None
         now = utc_now_iso()
         with self._connect() as connection:
-            updated = connection.execute(
-                """
-                UPDATE transactions
-                SET meter_stop = COALESCE(meter_stop, ?),
-                    stopped_at = COALESCE(stopped_at, ?),
-                    stop_received_at = COALESCE(stop_received_at, ?),
-                    state = 'stopped', last_activity_at = ?
-                WHERE transaction_id = ?
-                """,
-                (int(payload["meter_stop"]), str(payload["timestamp"]), now, now, transaction_id),
-            ).rowcount
-            if updated:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """INSERT INTO events (
+                    received_at, charger_id, action, direction, transaction_id,
+                    id_tag, charger_timestamp, payload_json
+                ) VALUES (?, ?, ?, 'in', ?, ?, ?, ?)""",
+                (now, charger_id, action, transaction_id,
+                 str(payload["id_tag"]) if payload.get("id_tag") is not None else None,
+                 str(payload["timestamp"]) if payload.get("timestamp") is not None else None,
+                 json.dumps(payload, sort_keys=True, ensure_ascii=False)),
+            )
+            if transaction_id is None:
+                return
+            if action == "MeterValues":
                 connection.execute(
-                    "UPDATE transaction_recoveries SET reconciled_at = COALESCE(reconciled_at, ?) WHERE transaction_id = ?",
-                    (now, transaction_id),
+                    """UPDATE transactions SET last_activity_at = ?
+                    WHERE transaction_id = ? AND charger_id = ?""",
+                    (now, transaction_id, charger_id),
                 )
-            if not updated:
+            else:
                 connection.execute(
-                    """
-                    INSERT INTO transactions (
-                        transaction_id, charger_id, meter_stop, stopped_at,
-                        stop_received_at, state, last_activity_at
-                    ) VALUES (?, ?, ?, ?, ?, 'stopped', ?)
-                    """,
-                    (
-                        transaction_id,
-                        charger_id,
-                        int(payload["meter_stop"]),
-                        str(payload["timestamp"]),
-                        now,
-                        now,
-                    ),
+                    """UPDATE transactions
+                    SET meter_stop = ?, stopped_at = ?, stop_received_at = ?,
+                        state = 'stopped', last_activity_at = ?
+                    WHERE transaction_id = ? AND charger_id = ?
+                      AND stop_received_at IS NULL""",
+                    (int(payload["meter_stop"]), str(payload["timestamp"]), now, now,
+                     transaction_id, charger_id),
                 )
+
+    def record_transaction_stop(self, charger_id: str, payload: dict[str, Any]) -> None:
+        self.commit_transaction_evidence(charger_id, "StopTransaction", payload)
 
     def infer_transaction_stop(
         self, transaction_id: int, *, reason: str = "disconnected_timeout",
