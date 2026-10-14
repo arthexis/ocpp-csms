@@ -65,34 +65,26 @@ def test_record_failure_logs_raw_frame(caplog):
 
 
 @pytest.mark.asyncio
-async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
+async def test_start_does_not_acknowledge_when_sqlite_is_locked(tmp_path):
     events = EventStore(tmp_path)
-    archive = TransactionArchive(tmp_path)
     session = ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="start"),
-        archive,
-        events,
+        "charger-a", SimpleNamespace(last_frame="start"),
+        TransactionArchive(tmp_path), events,
     )
     payload = {
-        "connector_id": 1,
-        "id_tag": "card-a",
-        "timestamp": "2026-10-02T12:00:00Z",
-        "meter_start": 100,
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
     }
-
     lock = sqlite3.connect(tmp_path / DATABASE_FILENAME)
     lock.execute("BEGIN EXCLUSIVE")
     try:
-        first = await session.on_start_transaction(**payload)
-        retry = await session.on_start_transaction(**payload)
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            await session.on_start_transaction(**payload)
     finally:
         lock.rollback()
         lock.close()
-
-    assert first.transaction_id == 1
-    assert retry.transaction_id == first.transaction_id
-    assert len(transaction_records(tmp_path)) == 1
+    assert transaction_records(tmp_path) == []
+    assert event_directions(tmp_path, "StartTransaction") == []
 
 
 @pytest.mark.asyncio
