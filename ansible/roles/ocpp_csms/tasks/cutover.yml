@@ -337,3 +337,18 @@
       - status
   changed_when: false
   when: not (ocpp_csms_activation_required | bool)
+
+# Read-only verification on unchanged deployments: never switch journal mode
+# against a running charger service. A non-WAL database fails closed and
+# requires a controlled cutover rather than an in-place live conversion.
+- name: Verify converged database WAL and SQLite integrity
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-verify
+      - --data-dir
+      - "{{ ocpp_csms_data_dir }}"
+  changed_when: false
+  when: not (ocpp_csms_activation_required | bool)
