@@ -1,8 +1,4 @@
-"""Red-first behavioral contract for issue #247.
-
-These tests deliberately describe behavior not yet implemented on main.
-Do not xfail/skip them: CI should stay red until the production refactor.
-"""
+"""SQLite-authoritative transaction lifecycle and diagnostic contracts."""
 import json
 from datetime import timedelta
 
@@ -13,15 +9,11 @@ from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.formatting import format_transaction, format_transactions, transaction_energy_wh
 
-class SQLiteBackedArchive(TransactionArchive):
-    """Test adapter: exercise SQLite start authority with optional JSON diagnostics."""
-
-    async def start(self, charge_point_id, payload):
-        transaction_id = EventStore(self.data_dir).commit_start(charge_point_id, payload)
-        await self.diagnostic_start(charge_point_id, payload, transaction_id)
-        return transaction_id
-
-
+async def commit_start_with_diagnostics(archive, charge_point_id, payload):
+    """Commit via the real SQLite authority, then write optional JSON diagnostics."""
+    transaction_id = EventStore(archive.data_dir).commit_start(charge_point_id, payload)
+    await archive.diagnostic_start(charge_point_id, payload, transaction_id)
+    return transaction_id
 
 
 CP = "charger-a"
@@ -71,9 +63,9 @@ def unresolved(root):
 
 @pytest.mark.asyncio
 async def test_distinct_starts_one_second_apart_are_both_retained(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    second = await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    second = await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:00:01Z"))
     assert second == first + 1
     records = {record["transaction_id"]: record for record in archives(tmp_path)}
     assert len(records) == 2
@@ -92,7 +84,7 @@ async def test_exact_retry_beyond_sixty_seconds_uses_original_id(tmp_path, monke
             return original_datetime.now(tz) + timedelta(minutes=5)
 
     events = EventStore(tmp_path)
-    archive = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
     payload = start()
     first = events.commit_start(CP, payload)
     await archive.diagnostic_start(CP, payload, first)
@@ -107,7 +99,7 @@ async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_
     import ocpp_csms.transactions.archive as archive_module
 
     events = EventStore(tmp_path)
-    archive = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
     payload = start()
     first = events.commit_start(CP, payload)
     await archive.diagnostic_start(CP, payload, first)
@@ -118,7 +110,7 @@ async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_
             return real_datetime.now(tz) + timedelta(days=1)
 
     monkeypatch.setattr(archive_module, "datetime", FutureDatetime)
-    restarted = SQLiteBackedArchive(tmp_path)
+    restarted = TransactionArchive(tmp_path)
     assert EventStore(tmp_path).commit_start(CP, payload) == first
     await restarted.diagnostic_start(CP, payload, first)
     assert len(archives(tmp_path)) == 1
@@ -126,18 +118,18 @@ async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_
 
 @pytest.mark.asyncio
 async def test_same_timestamp_with_different_evidence_gets_new_id(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    second = await archive.start(CP, start(meter_start=101))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    second = await commit_start_with_diagnostics(archive, CP, start(meter_start=101))
     assert second == first + 1
     assert len(archives(tmp_path)) == 2
 
 
 @pytest.mark.asyncio
 async def test_same_start_on_different_charge_point_is_not_deduplicated(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    second = await archive.start("charger-b", start())
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    second = await commit_start_with_diagnostics(archive, "charger-b", start())
     assert second == first + 1
 
 
@@ -153,9 +145,9 @@ async def test_unknown_meter_and_stop_are_orphan_evidence_not_transactions(tmp_p
 
 @pytest.mark.asyncio
 async def test_new_start_never_persists_a_synthetic_stop_for_previous(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:05:00Z"))
     previous = next(row for row in archives(tmp_path) if row["transaction_id"] == first)
     assert previous["stop"] is None
     assert previous["status"] == "open"
@@ -164,9 +156,9 @@ async def test_new_start_never_persists_a_synthetic_stop_for_previous(tmp_path):
 
 @pytest.mark.asyncio
 async def test_query_derives_next_start_boundary_without_mutating_archive(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:05:00Z"))
     before = next(row for row in archives(tmp_path) if row["transaction_id"] == first)
     second = next(row for row in archives(tmp_path) if row["transaction_id"] != first)
     view = TransactionQuery(tmp_path).get(first)
@@ -185,9 +177,9 @@ async def test_query_derives_next_start_boundary_without_mutating_archive(tmp_pa
 
 @pytest.mark.asyncio
 async def test_late_real_stop_takes_precedence_over_derived_boundary(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:05:00Z"))
     EventStore(tmp_path).commit_transaction_evidence(CP, "StopTransaction", stop(first))
     view = TransactionQuery(tmp_path).get(first)
     assert view.status == "stopped"
@@ -196,9 +188,9 @@ async def test_late_real_stop_takes_precedence_over_derived_boundary(tmp_path):
 
 @pytest.mark.asyncio
 async def test_new_start_on_other_connector_does_not_infer_stop(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start(connector=1))
-    await archive.start(CP, start(connector=2, timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start(connector=1))
+    await commit_start_with_diagnostics(archive, CP, start(connector=2, timestamp="2026-10-03T10:05:00Z"))
     before = next(row for row in archives(tmp_path) if row["transaction_id"] == first)
     view = TransactionQuery(tmp_path).get(first)
     assert view is not None
@@ -213,37 +205,37 @@ async def test_new_start_on_other_connector_does_not_infer_stop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_allocation_does_not_create_per_id_reservations(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    await archive.start(CP, start())
-    await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
+    archive = TransactionArchive(tmp_path)
+    await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:00:01Z"))
     assert not (tmp_path / "transaction-id-reservations").exists()
 
 
 @pytest.mark.asyncio
 async def test_monotonic_ids_survive_restart_with_incomplete_sessions(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    second = await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
-    restarted = SQLiteBackedArchive(tmp_path)
-    third = await restarted.start(CP, start(timestamp="2026-10-03T10:00:02Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    second = await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:00:01Z"))
+    restarted = TransactionArchive(tmp_path)
+    third = await commit_start_with_diagnostics(restarted, CP, start(timestamp="2026-10-03T10:00:02Z"))
     assert [first, second, third] == [1, 2, 3]
     assert all(record["stop"] is None for record in archives(tmp_path))
 
 
 @pytest.mark.asyncio
 async def test_unknown_evidence_does_not_advance_allocator_across_restart(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
     await archive.meter_values(CP, meter(100000))
     await archive.stop(CP, stop(100001))
-    restarted = SQLiteBackedArchive(tmp_path)
-    assert await restarted.start(CP, start()) == 1
+    restarted = TransactionArchive(tmp_path)
+    assert await commit_start_with_diagnostics(restarted, CP, start()) == 1
 
 
 @pytest.mark.asyncio
 async def test_distinct_start_on_other_charge_point_cannot_infer_boundary(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    await archive.start("charger-b", start(timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, "charger-b", start(timestamp="2026-10-03T10:05:00Z"))
     view = TransactionQuery(tmp_path).get(first)
     assert view.next_start_received_at is None
 
@@ -257,9 +249,9 @@ async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, m
         "2026-10-03T10:07:00+00:00",
     ])
     monkeypatch.setattr(archive_module, "utc_now_iso", lambda: next(received))
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start(timestamp="2026-10-03T10:00:00Z"))
-    await archive.start(CP, start(timestamp="2026-10-03T09:59:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:00:00Z"))
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T09:59:00Z"))
     records = {row["transaction_id"]: row for row in archives(tmp_path)}
     assert records[first]["start_received_at"] == "2026-10-03T10:01:00+00:00"
     successor = next(row for transaction_id, row in records.items() if transaction_id != first)
@@ -290,8 +282,8 @@ async def test_conflicting_late_stops_do_not_overwrite_first_stop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_identical_stop_retry_does_not_change_observed_stop(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    transaction_id = await archive.start(CP, start())
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await commit_start_with_diagnostics(archive, CP, start())
     observed = stop(transaction_id)
     await archive.stop(CP, observed)
     await archive.stop(CP, observed)
@@ -302,9 +294,9 @@ async def test_identical_stop_retry_does_not_change_observed_stop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start())
-    await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start())
+    await commit_start_with_diagnostics(archive, CP, start(timestamp="2026-10-03T10:05:00Z"))
     view = TransactionQuery(tmp_path).get(first)
     assert view.next_start_received_at is not None
     assert view.record["stop"] is None
@@ -325,7 +317,7 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
     payload = start()
     transaction_id = await archive.start(CP, payload)
     before = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
@@ -338,9 +330,9 @@ async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path
 
 @pytest.mark.asyncio
 async def test_many_distinct_starts_do_not_collapse_or_reuse_ids(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
     timestamps = [f"2026-10-03T10:00:{second:02d}Z" for second in range(20)]
-    ids = [await archive.start(CP, start(timestamp=timestamp)) for timestamp in timestamps]
+    ids = [await commit_start_with_diagnostics(archive, CP, start(timestamp=timestamp)) for timestamp in timestamps]
     assert len(set(ids)) == len(timestamps)
     assert ids == sorted(ids)
     assert len(archives(tmp_path)) == len(timestamps)
@@ -348,8 +340,8 @@ async def test_many_distinct_starts_do_not_collapse_or_reuse_ids(tmp_path):
 
 @pytest.mark.asyncio
 async def test_unknown_stop_on_another_charge_point_never_changes_local_transaction(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    transaction_id = await archive.start(CP, start())
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await commit_start_with_diagnostics(archive, CP, start())
     before = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
     EventStore(tmp_path).commit_transaction_evidence("charger-b", "StopTransaction", stop(transaction_id))
     after = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
@@ -363,8 +355,8 @@ async def test_unknown_stop_on_another_charge_point_never_changes_local_transact
 @pytest.mark.asyncio
 async def test_completed_session_reports_measured_energy_consistently(tmp_path):
     """The actual stop reading, not a prior inferred boundary, determines energy."""
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start(meter_start=1000))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start(meter_start=1000))
     EventStore(tmp_path).commit_transaction_evidence(CP, "StopTransaction", {
         "transaction_id": first, "meter_stop": 7420,
         "timestamp": "2026-10-03T10:10:30Z",
@@ -385,8 +377,8 @@ async def test_completed_session_reports_measured_energy_consistently(tmp_path):
 @pytest.mark.asyncio
 async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
     """A late stop is authoritative even when a later start suggests a boundary."""
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start(meter_start=1000))
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start(meter_start=1000))
     await archive.start(CP, start(
         timestamp="2026-10-03T10:05:00Z", meter_start=2000,
     ))
@@ -424,11 +416,11 @@ async def test_retry_after_restart_preserves_first_receipt_and_archive(tmp_path,
 
 @pytest.mark.asyncio
 async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    first = await archive.start(CP, start(connector=1))
-    second = await archive.start("charger-b", start(connector=1))
-    third = await archive.start(CP, start(connector=2))
-    restarted = SQLiteBackedArchive(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    first = await commit_start_with_diagnostics(archive, CP, start(connector=1))
+    second = await commit_start_with_diagnostics(archive, "charger-b", start(connector=1))
+    third = await commit_start_with_diagnostics(archive, CP, start(connector=2))
+    restarted = TransactionArchive(tmp_path)
     fourth = await restarted.start("charger-b", start(
         connector=2, timestamp="2026-10-03T10:01:00Z",
     ))
@@ -507,8 +499,8 @@ async def test_identical_stop_retry_preserves_original_receipt(tmp_path):
 
 @pytest.mark.asyncio
 async def test_mismatched_connector_meter_does_not_change_local_transaction(tmp_path):
-    archive = SQLiteBackedArchive(tmp_path)
-    transaction_id = await archive.start(CP, start(connector=1))
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await commit_start_with_diagnostics(archive, CP, start(connector=1))
     original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
     payload = {**meter(transaction_id), "connector_id": 2}
     EventStore(tmp_path).commit_transaction_evidence(CP, "MeterValues", payload)
