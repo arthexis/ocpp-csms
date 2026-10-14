@@ -20,7 +20,7 @@ SCHEMA = "ocpp-csms/export/v1"
 
 
 def _event_rows(connection: sqlite3.Connection, *, after: int, limit: int) -> tuple[list[sqlite3.Row], bool]:
-        rows = connection.execute(
+    rows = connection.execute(
             """
             SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
                    action, direction, transaction_id, id_tag, payload_json AS payload
