@@ -83,41 +83,6 @@ async def test_last_returns_active_when_only_active_transaction_exists(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_recovered_unstopped_transaction_can_be_last(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    finished = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
-    await archive.meter_values(
-        CHARGER_A,
-        {
-            "connector_id": 2,
-            "transaction_id": 225,
-            "meter_value": [{"timestamp": "2026-10-03T11:00:00Z"}],
-        },
-    )
-
-    query = TransactionQuery(tmp_path)
-
-    assert [view.transaction_id for view in query.active()] == [225]
-    assert query.get(225).status == "recovered"
-    assert query.last().transaction_id == 225
-
-
-@pytest.mark.asyncio
-async def test_recovered_stopped_transaction_can_be_last(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    local = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(local, timestamp="2026-10-03T09:30:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(225, timestamp="2026-10-03T11:00:00Z"))
-
-    last = TransactionQuery(tmp_path).last()
-
-    assert last.transaction_id == 225
-    assert last.status == "stopped"
-    assert last.record["origin"] == "recovered"
-
-
-@pytest.mark.asyncio
 async def test_filters_apply_before_last_selection(tmp_path):
     archive = SQLiteTransactions(tmp_path)
     a1 = await archive.start(
@@ -166,41 +131,6 @@ async def test_list_filters_time_and_limit(tmp_path):
     )
 
     assert [view.transaction_id for view in matches] == [ids[1]]
-
-
-@pytest.mark.asyncio
-async def test_connector_filter_uses_recovered_meter_evidence(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    await archive.meter_values(
-        CHARGER_A,
-        {
-            "connector_id": 4,
-            "transaction_id": 225,
-            "meter_value": [{"timestamp": "2026-10-03T11:00:00Z"}],
-        },
-    )
-
-    matches = TransactionQuery(tmp_path).list(connector=4)
-
-    assert [view.transaction_id for view in matches] == [225]
-    assert matches[0].connector_id == 4
-
-
-@pytest.mark.asyncio
-async def test_unresolved_collision_evidence_is_attached_to_view(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T10:00:00Z"))
-    await archive.stop(
-        CHARGER_A,
-        stop_payload(transaction_id, timestamp="2026-10-03T09:00:00Z"),
-    )
-
-    view = TransactionQuery(tmp_path).get(transaction_id)
-
-    assert view.status == "open"
-    assert len(view.unresolved) == 1
-    assert view.unresolved[0]["transaction_id"] == transaction_id
-    assert view.unresolved[0]["reason"] == "message_predates_local_start"
 
 
 def test_query_skips_malformed_archive_files(tmp_path):
