@@ -55,10 +55,6 @@ def plan_storage(root: str | Path, active: str | Path | None,
     An existing target directory is rejected even if its SQLite file is absent:
     interrupted preparation must be investigated, not overwritten.
     """
-    if candidate_version != CURRENT_SCHEMA_VERSION:
-        # Planning an older version is useful to detect downgrades, but it
-        # must never be prepared by this version of the application.
-        pass
     target = schema_directory(root, candidate_version)
     active_path = Path(active).expanduser() if active is not None else None
     info: SchemaInfo | None = inspect_schema(active_path) if active_path is not None else None
