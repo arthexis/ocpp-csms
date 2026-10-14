@@ -354,11 +354,10 @@ async def test_unknown_stop_on_another_charge_point_never_changes_local_transact
     EventStore(tmp_path).commit_transaction_evidence("charger-b", "StopTransaction", stop(transaction_id))
     after = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
     assert after == before
-    assert any(
-        entry["charge_point_id"] == "charger-b"
-        and entry["transaction_id"] == transaction_id
-        for entry in unresolved(tmp_path)
-    )
+    with EventStore(tmp_path)._connect() as db:
+        row = db.execute("SELECT charger_id FROM events WHERE action = ?", ("StopTransaction",)).fetchone()
+    assert row[0] == "charger-b"
+    assert TransactionQuery(tmp_path).get(transaction_id).status == "open"
 
 
 @pytest.mark.asyncio
@@ -515,9 +514,9 @@ async def test_mismatched_connector_meter_does_not_change_local_transaction(tmp_
     EventStore(tmp_path).commit_transaction_evidence(CP, "MeterValues", payload)
     current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
     assert current == original
-    assert any(row["payload"] == payload for row in orphan_messages(
-        tmp_path, "MeterValues", transaction_id,
-    ))
+    with EventStore(tmp_path)._connect() as db:
+        row = db.execute("SELECT payload_json FROM events WHERE action = ?", ("MeterValues",)).fetchone()
+    assert json.loads(row[0]) == payload
 
 
 @pytest.mark.asyncio
