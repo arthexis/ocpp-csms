@@ -56,7 +56,9 @@ def test_export_retransmission_events_are_distinct_and_restart_replay_stable(tmp
     second = next_page["events"][0]
     assert first["id"] != second["id"]
     assert first["transaction_id"] == second["transaction_id"] == 41
-    assert first["payload"] == second["payload"]
+    assert first["kind"] == second["kind"] == "transaction_started"
+    assert first["connector_id"] == second["connector_id"] == 1
+    assert first["rfid"] == second["rfid"] == "card-a"
     assert export_contract(tmp_path, limit=1)["data"]["events"][0] == first
     assert export_contract(tmp_path, after=first["id"], limit=1)["data"]["events"][0] == second
 
@@ -75,7 +77,8 @@ def test_export_late_stop_is_visible_without_mutating_old_event(tmp_path):
     assert len(later["events"]) == 1
     assert later["events"][0]["id"] > original_event["id"]
     assert later["events"][0]["action"] == "StopTransaction"
-    assert later["events"][0]["payload"] == stop
+    assert later["events"][0]["kind"] == "transaction_stopped"
+    assert later["events"][0]["transaction_id"] == 41
     assert export_contract(tmp_path)["data"]["events"][0] == original_event
 
 
