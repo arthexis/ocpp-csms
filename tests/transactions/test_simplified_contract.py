@@ -9,6 +9,7 @@ from datetime import timedelta
 import pytest
 
 from ocpp_csms.transactions.archive import TransactionArchive
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.formatting import format_transaction, format_transactions, transaction_energy_wh
 
@@ -80,10 +81,14 @@ async def test_exact_retry_beyond_sixty_seconds_uses_original_id(tmp_path, monke
         def now(cls, tz=None):
             return original_datetime.now(tz) + timedelta(minutes=5)
 
+    events = EventStore(tmp_path)
     archive = TransactionArchive(tmp_path)
-    first = await archive.start(CP, start())
+    payload = start()
+    first = events.commit_start(CP, payload)
+    await archive.diagnostic_start(CP, payload, first)
     monkeypatch.setattr(archive_module, "datetime", FutureDatetime)
-    assert await archive.start(CP, start()) == first
+    assert events.commit_start(CP, payload) == first
+    await archive.diagnostic_start(CP, payload, first)
     assert len(archives(tmp_path)) == 1
 
 
@@ -91,8 +96,11 @@ async def test_exact_retry_beyond_sixty_seconds_uses_original_id(tmp_path, monke
 async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_path, monkeypatch):
     import ocpp_csms.transactions.archive as archive_module
 
+    events = EventStore(tmp_path)
     archive = TransactionArchive(tmp_path)
-    first = await archive.start(CP, start())
+    payload = start()
+    first = events.commit_start(CP, payload)
+    await archive.diagnostic_start(CP, payload, first)
     real_datetime = archive_module.datetime
     class FutureDatetime(real_datetime):
         @classmethod
@@ -101,7 +109,8 @@ async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_
 
     monkeypatch.setattr(archive_module, "datetime", FutureDatetime)
     restarted = TransactionArchive(tmp_path)
-    assert await restarted.start(CP, start()) == first
+    assert EventStore(tmp_path).commit_start(CP, payload) == first
+    await restarted.diagnostic_start(CP, payload, first)
     assert len(archives(tmp_path)) == 1
 
 
