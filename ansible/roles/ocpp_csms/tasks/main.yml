@@ -83,6 +83,7 @@
       - python3
       - -m
       - ocpp_csms.install_preflight
+      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
       - --data-dir
       - "{{ ocpp_csms_data_dir }}"
       - --json
@@ -590,6 +591,7 @@
       - "{{ ocpp_csms_release_venv }}/bin/python"
       - -m
       - ocpp_csms.install_preflight
+      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
       - --data-dir
       - "{{ ocpp_csms_data_dir }}"
       - --json
