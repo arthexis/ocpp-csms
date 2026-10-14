@@ -694,5 +694,3 @@
     fail_msg: >-
       Stable OCPP CSMS command does not resolve to the active current release.
 
-- name: Remove retired OCPP CSMS mail service and timer
-  ansible.builtin.import_tasks: mail_cleanup.yml
