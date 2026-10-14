@@ -65,3 +65,44 @@ def test_schema_verification_does_not_convert_rollback_journal(tmp_path):
         verify_schema_integrity(tmp_path)
     with sqlite3.connect(database) as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+
+def test_existing_database_cutover_preserves_export_cursor_and_transaction_identity(tmp_path):
+    """A deployed rollback-journal database retains evidence across WAL cutover and restart."""
+    from ocpp_csms.evidence.store import EventStore
+    from ocpp_csms.export_contract import export_contract
+    from ocpp_csms.schema import source_id
+
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    before = export_contract(tmp_path, after=0, limit=100)["data"]
+    original_source = source_id(tmp_path)
+    original_ids = [event["id"] for event in before["events"]]
+    original_cursor = before["cursor"]["next"]
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+
+    assert schema_action(tmp_path) == "current"
+    assert apply_schema_action(tmp_path) == "current"
+    verify_schema_integrity(tmp_path)
+    restarted = EventStore(tmp_path)
+    assert source_id(tmp_path) == original_source
+    replay = export_contract(tmp_path, after=0, limit=100)["data"]
+    assert replay["events"] == before["events"]
+    assert replay["cursor"] == before["cursor"]
+    assert [event["id"] for event in replay["events"]] == original_ids
+
+    restarted.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 150,
+        "timestamp": "2026-10-03T10:10:00Z",
+    })
+    later = export_contract(tmp_path, after=original_cursor, limit=100)["data"]
+    assert [event["action"] for event in later["events"]] == ["StopTransaction"]
+    assert later["events"][0]["transaction_id"] == transaction_id
+    assert later["events"][0]["id"] > original_cursor
+    assert later["transactions"][0]["id"] == transaction_id
+    assert later["transactions"][0]["state"] == "stopped"
