@@ -410,3 +410,29 @@ def test_converged_deployment_verifies_wal_without_live_conversion():
         "Verify converged OCPP CSMS application status",
         "Verify converged database WAL and SQLite integrity",
     )
+
+
+def test_offline_skips_only_post_start_reconnection():
+    defaults = load_yaml(DEFAULTS)
+    assert defaults["ocpp_csms_offline"] is False
+    cutover = read(TASKS / "cutover.yml")
+    reconnect = task_by_name(TASKS / "cutover.yml", "Verify previously connected chargers reconnect")
+    assert reconnect["when"] == "not (ocpp_csms_offline | bool)"
+    assert_task_order(
+        cutover,
+        "Capture charger reconnect baseline",
+        "Stop existing OCPP CSMS service",
+        "Wait for OCPP CSMS listener",
+        "Verify candidate OCPP CSMS application status",
+        "Verify previously connected chargers reconnect",
+    )
+    assert "ocpp_csms_offline" not in read(TASKS / "main.yml")
+    assert "ocpp_csms_offline" not in read(TASKS / "reconnect.yml")
+
+
+def test_deploy_offline_flag_is_forwarded_to_ansible():
+    deploy = read(DEPLOY_SCRIPT)
+    assert "--offline)" in deploy
+    assert "offline=0" in deploy
+    assert 'set -- -e ocpp_csms_offline=true "$@"' in deploy
+    assert "--offline does not apply to --diagnose." in deploy
