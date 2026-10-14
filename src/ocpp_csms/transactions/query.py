@@ -203,15 +203,15 @@ class TransactionQuery:
             connection.row_factory = sqlite3.Row
             rows = connection.execute("SELECT * FROM transaction_summary").fetchall()
             evidence = connection.execute(
-                """SELECT transaction_id, action, payload_json, received_at
+                """SELECT transaction_id, charger_id, action, payload_json, received_at
                    FROM events WHERE direction = 'in' AND transaction_id IS NOT NULL
                      AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
                    ORDER BY id"""
             ).fetchall()
 
-        grouped: dict[int, list[sqlite3.Row]] = {}
+        grouped: dict[tuple[int, str], list[sqlite3.Row]] = {}
         for event in evidence:
-            grouped.setdefault(int(event["transaction_id"]), []).append(event)
+            grouped.setdefault((int(event["transaction_id"]), str(event["charger_id"])), []).append(event)
 
         views: list[TransactionView] = []
         for row in rows:
@@ -233,7 +233,7 @@ class TransactionQuery:
                 "meter_values": [],
                 "meter_values_received_at": [],
             }
-            for event in grouped.get(transaction_id, ()):
+            for event in grouped.get((transaction_id, str(row["charger_id"])), ()):
                 try:
                     payload = json.loads(event["payload_json"])
                 except (TypeError, ValueError):
@@ -242,8 +242,10 @@ class TransactionQuery:
                     continue
                 if event["action"] == "StartTransaction" and record["start"] is None:
                     record["start"] = payload
-                elif event["action"] == "StopTransaction" and record["stop"] is None and row["stop_received_at"] is not None:
-                    record["stop"] = payload
+                elif event["action"] == "StopTransaction":
+                    # The first committed stop is authoritative, not a later retry.
+                    if event["received_at"] == row["stop_received_at"]:
+                        record["stop"] = payload
                 elif event["action"] == "MeterValues":
                     record["meter_values"].append(payload)
                     record["meter_values_received_at"].append(event["received_at"])
@@ -254,7 +256,7 @@ class TransactionQuery:
                     "meter_start": row["meter_start"],
                     "timestamp": row["started_at"],
                 }
-            if row["stop_received_at"] is not None:
+            if row["stop_received_at"] is not None and record["stop"] is None:
                 record["stop"] = {
                     "transaction_id": transaction_id,
                     "meter_stop": row["meter_stop"],
