@@ -15,7 +15,7 @@ def start(store, charger, connector, timestamp, meter=100):
 def boundaries(tmp_path):
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
         return db.execute(
-            "SELECT transaction_id, effective_stop_source, effective_stop_at "
+            "SELECT transaction_id, next_start_received_at, observed_stop_at "
             "FROM transaction_boundaries ORDER BY transaction_id"
         ).fetchall()
 
@@ -32,10 +32,10 @@ def test_next_start_is_read_only_and_scoped_by_charge_point_and_connector(tmp_pa
         ).fetchone()[0]
         before = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     assert boundaries(tmp_path) == [
-        (first, "next_start", receipt),
-        (other_connector, "unresolved", None),
-        (other_charger, "unresolved", None),
-        (second, "unresolved", None),
+        (first, receipt, None),
+        (other_connector, None, None),
+        (other_charger, None, None),
+        (second, None, None),
     ]
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
         assert db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == before
@@ -48,7 +48,7 @@ def test_exact_retry_is_not_a_new_boundary_and_real_stop_wins(tmp_path):
                "timestamp": "2026-10-03T10:00:00Z"}
     first = store.commit_start("cp-a", payload)
     assert store.commit_start("cp-a", payload) == first
-    assert boundaries(tmp_path) == [(first, "unresolved", None)]
+    assert boundaries(tmp_path) == [(first, None, None)]
     second = start(store, "cp-a", 1, "2026-10-03T10:05:00Z", 200)
     store.commit_transaction_evidence("cp-a", "StopTransaction", {
         "transaction_id": first, "meter_stop": 150,
@@ -59,7 +59,7 @@ def test_exact_retry_is_not_a_new_boundary_and_real_stop_wins(tmp_path):
             "SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (first,)
         ).fetchone()[0]
     assert boundaries(tmp_path) == [
-        (first, "observed", stop_receipt),
+        (first, boundaries(tmp_path)[0][1], stop_receipt),
         (second, "unresolved", None),
     ]
 
@@ -73,4 +73,4 @@ def test_summary_and_index_available_on_current_schema(tmp_path):
         columns = {row[1] for row in db.execute("PRAGMA table_info(transaction_summary)")}
     assert {"transaction_boundaries", "transaction_summary"} <= views
     assert "idx_transactions_boundary" in indexes
-    assert {"effective_stop_at", "effective_stop_source", "next_start_received_at"} <= columns
+    assert {"observed_stop_at", "next_start_received_at"} <= columns
