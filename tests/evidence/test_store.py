@@ -128,7 +128,7 @@ def test_older_status_does_not_replace_newer_connector_state(tmp_path):
     ) == ("Charging",)
 
 
-def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path):
+def test_terminal_status_does_not_mutate_transaction_history(tmp_path):
     store = EventStore(tmp_path)
     start = {
         "connector_id": 2,
@@ -151,10 +151,10 @@ def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path
     assert fetchone(
         tmp_path,
         "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227",
-    ) == ("ended", None, None)
+    ) == ("open", None, None)
 
 
-def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
+def test_status_notifications_never_close_transaction_history(tmp_path):
     store = EventStore(tmp_path)
     store.record_transaction_start(
         7,
@@ -191,10 +191,10 @@ def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
     assert fetchone(
         tmp_path,
         "SELECT state FROM transactions WHERE transaction_id = 7",
-    ) == ("ended",)
+    ) == ("open",)
 
 
-def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
+def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
     store = EventStore(tmp_path)
     for transaction_id, timestamp in (
         (1, "2026-10-01T15:00:00Z"),
@@ -223,7 +223,7 @@ def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
     assert fetchall(
         tmp_path,
         "SELECT transaction_id, state FROM transactions ORDER BY transaction_id",
-    ) == [(1, "open"), (2, "ended")]
+    ) == [(1, "open"), (2, "open")]
 
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
