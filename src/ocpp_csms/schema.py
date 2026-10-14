@@ -148,6 +148,7 @@ _SCHEMA_8_ADDITIONS_SQL = """
 CREATE INDEX IF NOT EXISTS idx_transactions_boundary
     ON transactions (charger_id, connector_id, start_received_at, transaction_id);
 
+DROP VIEW IF EXISTS transaction_boundaries;
 CREATE VIEW transaction_boundaries AS
 WITH ordered AS (
     SELECT transaction_id,
