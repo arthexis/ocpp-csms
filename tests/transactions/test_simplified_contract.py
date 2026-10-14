@@ -319,22 +319,20 @@ async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_failed_start_write_does_not_publish_id_or_partial_transaction(tmp_path, monkeypatch):
+async def test_json_diagnostic_failure_does_not_prevent_sqlite_authoritative_start(tmp_path, monkeypatch):
+    """Optional JSON output cannot veto a committed authoritative start."""
     archive = TransactionArchive(tmp_path)
-    original_write = archive._write
 
-    def fail_write(path, record):
-        raise OSError("simulated interrupted archive write")
+    def fail_json(*args, **kwargs):
+        raise OSError("diagnostic JSON unavailable")
 
-    monkeypatch.setattr(archive, "_write", fail_write)
-    with pytest.raises(OSError, match="interrupted archive write"):
-        await archive.start(CP, start())
-    assert archives(tmp_path) == []
-
-    monkeypatch.setattr(archive, "_write", original_write)
-    first = await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
-    assert first > 0
-    assert len(archives(tmp_path)) == 1
+    monkeypatch.setattr(archive, "_write", fail_json)
+    transaction_id = await archive.start(CP, start())
+    assert transaction_id > 0
+    # The committed SQLite transaction remains discoverable without JSON.
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    assert store.find_recent_start(CP, start()) == transaction_id
 
 
 @pytest.mark.asyncio
@@ -457,29 +455,16 @@ async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_
 
 
 @pytest.mark.asyncio
-async def test_failed_atomic_replace_never_publishes_partial_transaction(tmp_path, monkeypatch):
-    import ocpp_csms.transactions.archive as archive_module
-
+async def test_sqlite_start_identity_survives_restart_without_json_archives(tmp_path):
+    """JSON is diagnostic; restart deduplication must use SQLite alone."""
     archive = TransactionArchive(tmp_path)
-    original_replace = archive_module.os.replace
-
-    def fail_replace(source, destination):
-        raise OSError("simulated interrupted atomic replacement")
-
-    monkeypatch.setattr(archive_module.os, "replace", fail_replace)
-    with pytest.raises(OSError, match="interrupted atomic replacement"):
-        await archive.start(CP, start())
-    assert archives(tmp_path) == []
-    assert list((tmp_path / "transactions").glob("*/*.json")) == []
-
-    monkeypatch.setattr(archive_module.os, "replace", original_replace)
+    original_id = await archive.start(CP, start())
+    assert original_id > 0
+    for path in (tmp_path / "transactions").glob("*/*.json"):
+        path.unlink()
     restarted = TransactionArchive(tmp_path)
-    new_id = await restarted.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
-    assert new_id > 0
-    records = archives(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == new_id
-    assert records[0]["start"]["timestamp"] == "2026-10-03T10:00:01Z"
+    assert await restarted.start(CP, start()) == original_id
+
 
 
 def orphan_messages(root, message_type, transaction_id):
