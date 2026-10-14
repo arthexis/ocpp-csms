@@ -12,13 +12,7 @@ The persisted `source_id` identifies the CSMS data store. `cursor.after` is the 
 
 Transaction snapshots additionally expose nullable `start_event_at`, `start_received_at`, `stop_event_at`, `stop_received_at`, `meter_sample_times`, and a `quality` object with `active`, `incomplete`, `missing_meter`, `recovered`, `inferred`, and `corrected` flags. Timestamp provenance is normalized to UTC only for valid timezone-aware timestamps; unknown, invalid or timezone-naive timestamps remain null. Existing `started_at` and `stopped_at` fields keep their meanings; energy remains in Wh with unknown values represented as null.
 
-The `corrected` flag identifies an inferred recovery reconciled by a real stop; it is not a generic manual-edit detector. A delayed StopTransaction produces a new event ID and causes the exporter to include the transaction's current snapshot in the next event page.
-
-## Recovery gap and separate follow-up
-
-Internal inferred-stop and some other recovery transitions currently mutate derived state without inserting an event into the exportable `events` stream. They are not guaranteed to be observable by the existing cursor. Track the append-only event representation, transaction correlation, idempotency, and SQLite/JSON crash consistency in #244. Do not invent charger OCPP frames or claim that current export captures these transitions until #244 is implemented.
-
-No second SQLite database, independent transaction revision feed, forwarder compatibility code, or reporting-specific database mode is required.
+A delayed StopTransaction produces a new event ID; export must expose the resulting transaction state through the event cursor. Legacy recovery-related quality fields do not imply a synthetic stop or mutable recovery state.
 
 ## Cursor caveats
 
