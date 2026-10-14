@@ -352,12 +352,7 @@ def test_export_uses_one_sqlite_snapshot_for_events_and_transactions(tmp_path, m
         "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
         "timestamp": "2026-10-03T10:00:00Z",
     })
-    import sqlite3
-    from ocpp_csms.schema import database_path
-
-    # WAL allows the writer to commit while the reader retains its snapshot.
-    with sqlite3.connect(database_path(tmp_path)) as connection:
-        connection.execute("PRAGMA journal_mode=WAL")
+    # Production initialization enables WAL, so a writer can commit during export.
     original = exporter._event_rows
 
     def read_then_commit(connection, *, after, limit):
