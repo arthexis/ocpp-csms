@@ -211,6 +211,20 @@ def inspect_schema(data_dir: str | Path) -> SchemaInfo:
     return SchemaInfo(path=path, exists=True, version=version)
 
 
+def ensure_wal(data_dir: str | Path) -> None:
+    """Enable persistent WAL mode; never treat a busy database as corruption."""
+    path = database_path(data_dir)
+    if not path.exists():
+        raise RuntimeError(f"events database does not exist: {path}")
+    try:
+        with sqlite3.connect(path, timeout=5) as connection:
+            mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+            if mode is None or str(mode[0]).lower() != "wal":
+                raise RuntimeError(f"cannot enable WAL for events database: {mode}")
+    except sqlite3.OperationalError as exc:
+        raise RuntimeError(f"events database WAL readiness failed: {exc}") from exc
+
+
 def create_current_schema(data_dir: str | Path) -> SchemaInfo:
     """Create a new database directly at the current schema version."""
     path = database_path(data_dir)
@@ -224,6 +238,7 @@ def create_current_schema(data_dir: str | Path) -> SchemaInfo:
             (str(uuid.uuid4()),),
         )
         connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+    ensure_wal(data_dir)
     return SchemaInfo(path=path, exists=True, version=CURRENT_SCHEMA_VERSION)
 
 
