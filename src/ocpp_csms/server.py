@@ -10,6 +10,7 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.occupancy import connector_occupancy as read_connector_occupancy
 from ocpp_csms.connector_query import physical_connector_ids
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.control import ControlServer, control_socket_path
@@ -81,24 +82,7 @@ class CSMSServer:
         """Latest connector reports from the current WebSocket connection only."""
         if self.session(charge_point_id) is None:
             return {}
-        database = self.events.data_dir / DATABASE_FILENAME
-        with sqlite3.connect(database) as connection:
-            connection.row_factory = sqlite3.Row
-            connected = connection.execute(
-                """SELECT occurred_at FROM runtime_events
-                   WHERE charger_id = ? AND event = 'charger_connected'
-                   ORDER BY id DESC LIMIT 1""", (charge_point_id,)
-            ).fetchone()
-            if connected is None:
-                return {}
-            rows = connection.execute(
-                """SELECT connector_id, status, received_at FROM connector_status
-                   WHERE charger_id = ? AND connector_id > 0""", (charge_point_id,)
-            ).fetchall()
-        return {
-            int(row["connector_id"]): row["status"]
-            for row in rows if row["received_at"] >= connected["occurred_at"]
-        }
+        return read_connector_occupancy(self.events.data_dir, charge_point_id)
 
     def record_control_event(
         self,
