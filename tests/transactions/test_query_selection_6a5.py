@@ -78,3 +78,19 @@ def test_targeted_evidence_query_plan_uses_transaction_index(tmp_path):
             (txn_id, "cp-a"),
         ).fetchall()
     assert any("idx_events_transaction" in str(row) for row in plan)
+
+
+def test_query_owns_consistent_snapshot_across_summary_and_evidence(tmp_path, monkeypatch):
+    store = EventStore(tmp_path)
+    txn_id = store.commit_start("cp-a", {
+        "connector_id": 1, "id_tag": "A", "meter_start": 10,
+        "timestamp": "2026-10-01T00:00:00Z",
+    })
+    # A supplied connection with an explicit snapshot remains owned by the caller.
+    with sqlite3.connect(database_path(tmp_path)) as connection:
+        connection.execute("BEGIN")
+        query = TransactionQuery(tmp_path, connection=connection)
+        assert query.get(txn_id).transaction_id == txn_id
+        assert connection.in_transaction
+        assert query.list(charger="cp-a")[0].transaction_id == txn_id
+        assert connection.in_transaction
