@@ -196,7 +196,7 @@ class TransactionArchive:
             if transaction_id is None:
                 return None
             transaction_id = int(transaction_id)
-            loaded = self._load_or_recover(transaction_id, charge_point_id, payload, message_type="MeterValues")
+            loaded = self._load_existing(transaction_id, charge_point_id, payload, message_type="MeterValues")
             if loaded[0] is None:
                 return loaded[2]
             path, record, decision = loaded
@@ -211,86 +211,35 @@ class TransactionArchive:
             self._write(path, record)
             return decision
 
-    async def infer_stop(
-        self, transaction_id: int, *, reason: str = "disconnected_timeout",
-    ) -> bool:
-        """Record recovery evidence without inventing a charger stop payload."""
-        if reason != "disconnected_timeout":
-            raise ValueError("unsupported recovery reason")
-        async with self._lock:
-            path = self._paths.get(int(transaction_id))
-            if path is None or not path.exists():
-                return False
-            record = json.loads(path.read_text(encoding="utf-8"))
-            if record.get("status") not in {"open", "recovered"} or record.get("stop") is not None:
-                return False
-            now = utc_now_iso()
-            record["recovery"] = {
-                "reason": reason,
-                "inferred_at": now,
-                "last_activity_at": record.get("updated_at", record.get("created_at")),
-                "last_meter_wh": None,
-                "reconciled_at": None,
-            }
-            record["status"] = "inferred_stopped"
-            record["updated_at"] = now
-            self._write(path, record)
-            return True
-
     async def stop(self, charge_point_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:
             transaction_id = int(payload["transaction_id"])
-            loaded = self._load_or_recover(transaction_id, charge_point_id, payload, message_type="StopTransaction")
+            loaded = self._load_existing(transaction_id, charge_point_id, payload, message_type="StopTransaction")
             if loaded[0] is None:
                 return loaded[2]
             path, record, decision = loaded
             received_at = utc_now_iso()
             record["stop"] = payload
             record["stop_received_at"] = received_at
-            if isinstance(record.get("recovery"), dict):
-                record["recovery"]["reconciled_at"] = received_at
             record["status"] = "stopped"
             record["updated_at"] = received_at
             self._write(path, record)
             return decision
 
-    def _load_or_recover(self, transaction_id: int, charge_point_id: str, payload: dict[str, Any], *, message_type: str) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any] | None]:
+    def _load_existing(self, transaction_id: int, charge_point_id: str, payload: dict[str, Any], *, message_type: str) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any] | None]:
+        """Only use an existing diagnostic record; never reconstruct a transaction."""
         path = self._paths.get(transaction_id)
-        if path is not None and path.exists():
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-                origin = _record_origin(record)
-                record.setdefault("origin", origin)
-                self._origins[transaction_id] = origin
-                reason = self._conflict_reason(record, charge_point_id, payload)
-                if reason is not None:
-                    unresolved_path = self._preserve_unresolved(transaction_id, charge_point_id, payload, message_type=message_type, reason=reason)
-                    return None, None, _decision("historical_transaction_id_collision", transaction_id, message_type, payload, decision="preserved_unresolved", reason=reason, unresolved_path=str(unresolved_path.relative_to(self.data_dir)))
-                if origin == _ORIGIN_RECOVERED:
-                    return path, record, _decision("historical_transaction_evidence_attached", transaction_id, message_type, payload, decision="attached")
-                return path, record, None
-            except (OSError, json.JSONDecodeError):
-                pass
-        received_at = utc_now_iso()
-        path = self._path_for(transaction_id, charge_point_id, payload)
-        record = {
-            "transaction_id": transaction_id,
-            "origin": _ORIGIN_RECOVERED,
-            "charge_point_id": charge_point_id,
-            "status": "recovered",
-            "created_at": received_at,
-            "updated_at": received_at,
-            "id_tag": payload.get("id_tag"),
-            "start": None,
-            "start_received_at": None,
-            "meter_values": [],
-            "meter_values_received_at": [],
-            "stop": None,
-            "stop_received_at": None,
-        }
-        self._paths[transaction_id] = path
-        self._origins[transaction_id] = _ORIGIN_RECOVERED
-        return path, record, _decision("historical_transaction_recovered", transaction_id, message_type, payload, decision="adopted")
+        if path is None or not path.exists():
+            return None, None, None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None, None, None
+        reason = self._conflict_reason(record, charge_point_id, payload)
+        if reason is not None:
+            # Authoritative orphan/conflicting evidence is already in SQLite.
+            return None, None, None
+        return path, record, None
 
     def _conflict_reason(self, record: dict[str, Any], charge_point_id: str, payload: dict[str, Any]) -> str | None:
         existing_charge_point = record.get("charge_point_id")
