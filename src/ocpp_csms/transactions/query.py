@@ -143,21 +143,15 @@ class TransactionQuery:
         self._connection = connection
 
     def get(self, transaction_id: int) -> TransactionView | None:
-        for view in self._views():
-            if view.transaction_id == transaction_id:
-                return view
-        return None
+        views = self._views(transaction_id=transaction_id)
+        return views[0] if views else None
 
     def list(self, *, charger: str | None = None, connector: int | None = None, id_tag: str | None = None, since: datetime | str | None = None, until: datetime | str | None = None, active: bool | None = None, limit: int | None = None, local_time: bool = False) -> list[TransactionView]:
         since_time = self._coerce_time(since)
         until_time = self._coerce_time(until)
         matches = [
-            view for view in self._views()
-            if (charger is None or view.charge_point_id == charger)
-            and (connector is None or view.connector_id == connector)
-            and (id_tag is None or view.id_tag == id_tag)
-            and (active is None or view.active is active)
-            and (since_time is None or view.event_time(local_time=local_time) >= since_time)
+            view for view in self._views(charger=charger, connector=connector, id_tag=id_tag, active=active)
+            if (since_time is None or view.event_time(local_time=local_time) >= since_time)
             and (until_time is None or view.event_time(local_time=local_time) <= until_time)
         ]
         matches.sort(key=lambda view: (view.event_time(local_time=local_time), view.transaction_id), reverse=True)
@@ -170,21 +164,47 @@ class TransactionQuery:
         matches = self.list(limit=1, **filters)
         return matches[0] if matches else None
 
-    def _views(self) -> Iterable[TransactionView]:
-        """Read authoritative SQLite summaries and their recorded OCPP evidence."""
+    def _views(self, *, transaction_id: int | None = None, charger: str | None = None,
+               connector: int | None = None, id_tag: str | None = None,
+               active: bool | None = None) -> list[TransactionView]:
+        """Filter summaries before reading evidence; preserve event-time ordering."""
         path = database_path(self.data_dir)
         if not path.is_file():
-            return ()
+            return []
+        predicates: list[str] = []
+        params: list[Any] = []
+        for column, value in (
+            ("transaction_id", transaction_id), ("charger_id", charger),
+            ("connector_id", connector), ("id_tag", id_tag),
+        ):
+            if value is not None:
+                predicates.append(f"{column} = ?")
+                params.append(value)
+        if active is not None:
+            predicates.append("state = 'open' AND stop_received_at IS NULL" if active
+                              else "(state != 'open' OR stop_received_at IS NOT NULL)")
+        where = (" WHERE " + " AND ".join(predicates)) if predicates else ""
         connection = self._connection or sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
             connection.row_factory = sqlite3.Row
-            rows = connection.execute("SELECT * FROM transaction_summary").fetchall()
-            evidence = connection.execute(
-                """SELECT transaction_id, charger_id, action, payload_json, received_at
-                   FROM events WHERE direction = 'in' AND transaction_id IS NOT NULL
-                     AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
-                   ORDER BY id"""
-            ).fetchall()
+            rows = connection.execute("SELECT * FROM transaction_summary" + where, params).fetchall()
+            if not rows:
+                return []
+            keys = sorted((int(row["transaction_id"]), str(row["charger_id"])) for row in rows)
+            evidence: list[sqlite3.Row] = []
+            # Bound parameter count for unlimited listings.
+            for offset in range(0, len(keys), 400):
+                batch = keys[offset:offset + 400]
+                placeholders = " OR ".join("(transaction_id = ? AND charger_id = ?)" for _ in batch)
+                values = [item for key in batch for item in key]
+                evidence.extend(connection.execute(
+                    """SELECT id, transaction_id, charger_id, action, payload_json, received_at
+                       FROM events WHERE direction = 'in'
+                         AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
+                         AND (""" + placeholders + ") ORDER BY id",
+                    values,
+                ).fetchall())
+            evidence.sort(key=lambda event: event["id"])
         finally:
             if self._connection is None:
                 connection.close()
