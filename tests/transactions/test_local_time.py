@@ -18,7 +18,7 @@ async def test_archive_persists_receive_time_for_each_event(tmp_path, monkeypatc
     ))
     monkeypatch.setattr(transactions_module, "utc_now_iso", lambda: next(times))
     archive = TransactionArchive(tmp_path)
-    payload = {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"}
+    payload = {"connector_id": 1, "id_tag": "CARD", "meter_start": 100, "timestamp": "2020-01-01T00:00:00Z"}
     transaction_id = EventStore(tmp_path).commit_start("charger-a", payload)
     await archive.diagnostic_start("charger-a", payload, transaction_id)
     await archive.meter_values("charger-a", {"transaction_id": transaction_id, "connector_id": 1, "meter_value": [{"timestamp": "2020-01-01T00:05:00Z"}]})
