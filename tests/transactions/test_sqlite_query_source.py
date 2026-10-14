@@ -85,3 +85,32 @@ def test_query_committed_stop_overrides_later_retry(tmp_path):
     assert view.status == "stopped"
     assert view.record["stop_received_at"] is not None
     assert view.next_start_received_at is None
+
+
+def test_sqlite_fields_take_precedence_over_event_payload_fallbacks(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("cp-a", {
+        "connector_id": 2, "id_tag": "original", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    view = TransactionQuery(tmp_path).get(transaction_id)
+    assert view.connector_id == 2
+    assert view.id_tag == "original"
+    assert view.status == "open"
+    assert view.active
+
+
+def test_only_open_transactions_are_active(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("cp-a", {
+        "connector_id": 1, "id_tag": "alpha", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    store.commit_transaction_evidence("cp-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 200,
+        "timestamp": "2026-10-03T10:10:00Z",
+    })
+    view = TransactionQuery(tmp_path).get(transaction_id)
+    assert view.status == "stopped"
+    assert not view.active
+    assert TransactionQuery(tmp_path).active() == []
