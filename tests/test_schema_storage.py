@@ -74,3 +74,29 @@ def test_missing_or_unversioned_active_database_is_rejected(tmp_path):
         db.execute("CREATE TABLE unknown (id INTEGER)")
     with pytest.raises(RuntimeError, match="invalid schema"):
         plan_storage(tmp_path, active)
+
+
+def test_installer_storage_commands_are_separate_from_legacy_ansible(tmp_path, capsys):
+    import json
+    from ocpp_csms.install_cutover import main
+    root = str(tmp_path)
+    assert main(["storage-plan", "--storage-root", root]) == 0
+    planned = json.loads(capsys.readouterr().out)
+    assert planned["action"] == "create"
+    assert not (tmp_path / "schemas").exists()
+    assert main(["storage-prepare", "--storage-root", root]) == 0
+    prepared = json.loads(capsys.readouterr().out)
+    assert prepared["target"] == planned["target"]
+    assert main(["storage-prepare", "--storage-root", root]) == 1
+    assert "already exists" in capsys.readouterr().out
+
+
+def test_installer_storage_plan_rejects_downgrade(tmp_path, capsys):
+    from ocpp_csms.install_cutover import main
+    active = tmp_path / "active"
+    active.mkdir()
+    with sqlite3.connect(active / "ocpp-csms.sqlite3") as db:
+        db.execute("PRAGMA user_version = 99")
+    assert main(["storage-plan", "--storage-root", str(tmp_path),
+                 "--active-data-dir", str(active)]) == 1
+    assert "downgrade" in capsys.readouterr().out
