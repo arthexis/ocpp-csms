@@ -60,7 +60,7 @@ def test_exact_retry_is_not_a_new_boundary_and_real_stop_wins(tmp_path):
         ).fetchone()[0]
     assert boundaries(tmp_path) == [
         (first, boundaries(tmp_path)[0][1], stop_receipt),
-        (second, "unresolved", None),
+        (second, None, None),
     ]
 
 
