@@ -480,3 +480,100 @@ async def test_failed_atomic_replace_never_publishes_partial_transaction(tmp_pat
     assert len(records) == 1
     assert records[0]["transaction_id"] == new_id
     assert records[0]["start"]["timestamp"] == "2026-10-03T10:00:01Z"
+
+
+def orphan_messages(root, message_type, transaction_id):
+    """Inspect durable unresolved evidence without depending on file names."""
+    return [
+        row for row in unresolved(root)
+        if row.get("message_type") == message_type
+        and row.get("transaction_id") == transaction_id
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    payload = meter(225)
+    await archive.meter_values(CP, payload)
+    restarted = TransactionArchive(tmp_path)
+    assert archives(tmp_path) == []
+    assert restarted is not None
+    evidence = orphan_messages(tmp_path, "MeterValues", 225)
+    assert len(evidence) == 1
+    assert evidence[0]["charge_point_id"] == CP
+    assert evidence[0]["payload"] == payload
+    assert isinstance(evidence[0]["received_at"], str)
+    assert evidence[0]["received_at"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_stop_is_preserved_without_creating_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    payload = stop(226)
+    await archive.stop(CP, payload)
+    assert archives(tmp_path) == []
+    evidence = orphan_messages(tmp_path, "StopTransaction", 226)
+    assert len(evidence) == 1
+    assert evidence[0]["charge_point_id"] == CP
+    assert evidence[0]["payload"] == payload
+    assert isinstance(evidence[0]["received_at"], str)
+    assert evidence[0]["received_at"]
+
+
+@pytest.mark.asyncio
+async def test_conflicting_stop_preserves_first_receipt_and_second_payload(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start())
+    first_stop = stop(transaction_id)
+    await archive.stop(CP, first_stop)
+    original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    conflict = {**first_stop, "meter_stop": 999}
+    await archive.stop(CP, conflict)
+    current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert current["stop"] == first_stop
+    assert current["stop_received_at"] == original["stop_received_at"]
+    evidence = orphan_messages(tmp_path, "StopTransaction", transaction_id)
+    assert any(row["payload"] == conflict for row in evidence)
+
+
+@pytest.mark.asyncio
+async def test_identical_stop_retry_preserves_original_receipt(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start())
+    payload = stop(transaction_id)
+    await archive.stop(CP, payload)
+    original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    await archive.stop(CP, payload)
+    current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert current["stop"] == original["stop"]
+    assert current["stop_received_at"] == original["stop_received_at"]
+    assert orphan_messages(tmp_path, "StopTransaction", transaction_id) == []
+
+
+@pytest.mark.asyncio
+async def test_mismatched_connector_meter_does_not_change_local_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start(connector=1))
+    original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    payload = {**meter(transaction_id), "connector_id": 2}
+    await archive.meter_values(CP, payload)
+    current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert current == original
+    assert any(row["payload"] == payload for row in orphan_messages(
+        tmp_path, "MeterValues", transaction_id,
+    ))
+
+
+@pytest.mark.asyncio
+async def test_orphan_external_id_not_adopted_after_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    await archive.stop("charger-b", stop(12345))
+    restarted = TransactionArchive(tmp_path)
+    local_id = await restarted.start(CP, start())
+    assert local_id == 1
+    records = archives(tmp_path)
+    assert len(records) == 1
+    assert records[0]["transaction_id"] == local_id
+    assert records[0]["start"] == start()
+    assert orphan_messages(tmp_path, "StopTransaction", 12345)
