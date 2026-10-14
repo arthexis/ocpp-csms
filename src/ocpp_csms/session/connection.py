@@ -29,6 +29,7 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
         self.transactions = transactions
         self.events = events
         self.connection = connection
+        self.live_transactions: dict[int, int] = {}
 
     def _record(
         self,
