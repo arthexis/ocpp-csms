@@ -31,7 +31,7 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
             "timestamp": "2026-10-01T15:00:01Z",
         },
     )
-    events.record_transaction_start(7, "charger-a", start_payload())
+    transaction_id = events.commit_start("charger-a", start_payload())
 
     data = appliance_status(tmp_path)
     charger = data["chargers"][0]
@@ -39,7 +39,7 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
     assert data["server"] == "running"
     assert charger.charger_id == "charger-a"
     assert charger.status == "Charging"
-    assert charger.transaction_id == 7
+    assert charger.transaction_id == transaction_id
     assert charger.id_tag == "card-a"
 
 
