@@ -161,6 +161,35 @@ class TransactionArchive:
             self._next_transaction_id = transaction_id + 1
             return transaction_id
 
+    async def diagnostic_start(
+        self, charge_point_id: str, payload: dict[str, Any], transaction_id: int,
+    ) -> None:
+        """Optional JSON projection of a committed SQLite start; never allocate an ID."""
+        async with self._lock:
+            existing = self._paths.get(transaction_id)
+            if existing is not None and existing.exists():
+                return
+            received_at = utc_now_iso()
+            record = {
+                "transaction_id": transaction_id,
+                "origin": _ORIGIN_LOCAL,
+                "charge_point_id": charge_point_id,
+                "status": "open",
+                "created_at": received_at,
+                "updated_at": received_at,
+                "id_tag": payload.get("id_tag"),
+                "start": payload,
+                "start_received_at": received_at,
+                "meter_values": [],
+                "meter_values_received_at": [],
+                "stop": None,
+                "stop_received_at": None,
+            }
+            path = self._path_for(transaction_id, charge_point_id, payload)
+            self._write(path, record)
+            self._paths[transaction_id] = path
+            self._origins[transaction_id] = _ORIGIN_LOCAL
+
     async def meter_values(self, charge_point_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:
             transaction_id = payload.get("transaction_id")
