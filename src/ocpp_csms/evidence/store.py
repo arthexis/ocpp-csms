@@ -12,7 +12,6 @@ from ocpp_csms.schema import (
     create_current_schema,
     inspect_schema,
     require_supported_schema,
-    upgrade_schema,
 )
 from ocpp_csms.time import utc_now_iso
 
@@ -40,10 +39,7 @@ class EventStore:
         if not schema.exists:
             create_current_schema(self.data_dir)
             return
-        if schema.version is not None and schema.version < CURRENT_SCHEMA_VERSION:
-            upgrade_schema(self.data_dir)
-        else:
-            require_supported_schema(schema)
+        require_supported_schema(schema)
 
     def record_ocpp(
         self,
