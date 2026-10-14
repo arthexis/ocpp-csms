@@ -88,7 +88,7 @@
         state: stopped
       when: ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Upgrade database schema after service stop
+    - name: Upgrade schema and enable WAL after service stop
       ansible.builtin.command:
         argv:
           - "{{ ocpp_csms_release_venv }}/bin/python"
@@ -97,7 +97,7 @@
           - schema-upgrade
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
-      when: ocpp_csms_schema_action == 'upgrade'
+      when: ocpp_csms_schema_action != 'create'
 
     - name: Verify database schema and SQLite integrity before activation
       ansible.builtin.command:
@@ -130,6 +130,17 @@
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
           - init
+
+    - name: Verify initialized database WAL and SQLite integrity
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - schema-verify
+          - --data-dir
+          - "{{ ocpp_csms_data_dir }}"
+      changed_when: false
 
     - name: Inspect initialized OCPP CSMS database
       ansible.builtin.stat:
