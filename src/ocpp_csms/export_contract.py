@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -99,7 +100,7 @@ def export_contract(
 
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
     if database.exists():
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN")
             rows, more = _event_rows(connection, after=after, limit=limit)
