@@ -171,6 +171,7 @@ def test_initialized_storage_is_validated_before_service_start():
         "Initialize OCPP CSMS storage with candidate release",
         "Inspect initialized OCPP CSMS database",
         "Inspect initialized OCPP CSMS transaction archive",
+        "Assert initialized OCPP CSMS storage",
         "Verify OCPP CSMS storage access as systemd service user",
         "Enable and start candidate OCPP CSMS service",
     )
@@ -187,6 +188,8 @@ def test_storage_probe_uses_service_identity_and_checks_sqlite_writer_access():
     assert "{{ ocpp_csms_transactions_dir }}" in argv
     assert "{{ ocpp_csms_data_dir }}" in argv
     script = argv[argv.index("-c") + 1]
+    assert "mode=rw" in script
+    assert "uri=True" in script
     assert "BEGIN IMMEDIATE" in script
     assert "connection.rollback()" in script
     assert "os.access" in script
