@@ -229,7 +229,6 @@ ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
 ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
-ocpp-csms mail send report [--since TIME] [--until TIME] [--cp CHARGE_POINT]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
@@ -353,8 +352,7 @@ ocpp-csms alerts --since 3d -N
 ocpp-csms alerts --cp CP001 --txn 123 --json
 ```
 
-Ordinary charging starts remain events, not alerts. Future mail configuration
-will allow opting into transaction-start emails independently, disabled by default.
+Ordinary charging starts remain events, not alerts.
 The current classifier reports explicitly recognized faults, authorization
 rejections, and disconnects; state-derived offline thresholds and recovery
 correlation are future work.
@@ -372,96 +370,7 @@ snapshot, not a historical reconstruction.
 ```bash
 ocpp-csms report --since 1d
 ocpp-csms report --since 7d --cp CP001 --json
-ocpp-csms mail send report --since 1d
 ```
-
-Manual email requires SMTP. Scheduled delivery is configured independently:
-
-```toml
-[mail.reports.daily]
-enabled = true
-time = "08:00"
-timezone = "America/Monterrey"
-
-[mail.reports.weekly]
-enabled = true
-weekday = "monday"
-time = "08:00"
-timezone = "America/Monterrey"
-```
-
-`ocpp-csms mail schedule run` checks for due completed local calendar periods,
-queues each report once per recipient with a stable period identity, and invokes
-the existing retrying mail outbox. Ansible installs a persistent systemd timer
-running this check every 15 minutes. This avoids a heavyweight scheduler and
-does not send anything while mail is disabled. Reports include transaction RFIDs
-and the period subtotal; charger health is a generation-time snapshot.
-
-### SMTP mail transport
-
-Ansible installs a documented, fully disabled `/etc/ocpp-csms/mail.toml`
-only when the file is absent; later deploys preserve operator changes. It
-validates the existing TOML as the service user before configuring the mail
-timer, but does not create password files. The report timer is installed but
-**inactive by default**; set Ansible variable `ocpp_csms_mail_timer_enabled:
-true` to activate it, after configuring SMTP and the desired report schedules.
-
-
-SMTP is optional and disabled unless explicitly enabled in
-`/etc/ocpp-csms/mail.toml`. The mail command accepts a custom path via
-`--config` before the subcommand:
-
-```bash
-ocpp-csms mail status
-ocpp-csms mail status --json
-ocpp-csms mail --config ./mail.toml test
-```
-
-Example configuration:
-
-```toml
-[mail]
-enabled = false
-from = "csms@example.com"
-to = ["administrator@example.com"]
-
-[mail.smtp]
-host = "smtp.example.com"
-port = 587
-starttls = true
-username = "csms@example.com"
-password_env = "OCPP_CSMS_SMTP_PASSWORD"
-timeout = 10
-
-[mail.alerts]
-enabled = true
-minimum_severity = "warning"
-
-[mail.events.transaction_started]
-enabled = false
-```
-
-Set the named environment variable in the operator's environment (or securely
-via systemd credentials when integrating a service). Never commit credentials
-to version control. SMTP uses validated TLS and has a bounded timeout.
-`mail test` explicitly sends one test email; SMTP acceptance does not prove
-inbox delivery. Automatic notifications run independently of charger message handling and use
-a small durable SQLite outbox in the data directory. Enable [mail.alerts]
-to send qualifying exceptional events, and opt into [mail.events.transaction_started]
-or [mail.events.transaction_stopped] for ordinary transactions. Cooldown
-applies only to repeated alerts, never to distinct transactions. The first
-enabled worker cycle starts from the current evidence high-water mark to avoid
-backfilling historical messages. Failed SMTP attempts retry with bounded
-exponential backoff.
-
-```bash
-ocpp-csms mail history
-ocpp-csms mail history --failed
-ocpp-csms mail history --json
-```
-
-`mail status` includes notification delivery counts when the outbox exists.
-Email processing never blocks OCPP handlers.
 
 ### Configuration
 
