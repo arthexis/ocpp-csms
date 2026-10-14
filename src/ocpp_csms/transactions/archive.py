@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -66,7 +65,6 @@ class TransactionArchive:
     def __init__(self, data_dir: str | Path | None = None) -> None:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
         self.transactions_dir = self.data_dir / "transactions"
-        self.unresolved_dir = self.data_dir / "transactions-unresolved"
         self.transactions_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
         self._paths: dict[int, Path] = {}
@@ -177,15 +175,6 @@ class TransactionArchive:
         if start_time is not None and incoming_time is not None and incoming_time < start_time:
             return "message_predates_local_start"
         return None
-
-    def _preserve_unresolved(self, transaction_id: int, charge_point_id: str, payload: dict[str, Any], *, message_type: str, reason: str) -> Path:
-        timestamp = utc_now_iso()
-        day_dir = self.unresolved_dir / timestamp[:10]
-        day_dir.mkdir(parents=True, exist_ok=True)
-        charger = _safe_charge_point_id(charge_point_id)
-        path = day_dir / f"{charger}-{transaction_id}-{message_type}-{uuid.uuid4().hex[:12]}.json"
-        self._write(path, {"transaction_id": transaction_id, "charge_point_id": charge_point_id, "message_type": message_type, "reason": reason, "received_at": timestamp, "payload": payload})
-        return path
 
     def _path_for(self, transaction_id: int, charge_point_id: str, payload: dict[str, Any]) -> Path:
         day_dir = self.transactions_dir / _transaction_date(payload)
