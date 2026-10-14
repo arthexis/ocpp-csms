@@ -216,3 +216,56 @@ def test_export_cursor_advances_for_late_real_stop_evidence(tmp_path):
     assert later_page["events"][0]["action"] == "StopTransaction"
     assert later_page["cursor"]["next"] > first_cursor
     assert export_contract(tmp_path, after=first_cursor, limit=20)["data"]["events"] == later_page["events"]
+
+
+def test_reporting_boundary_is_context_not_a_stop_and_other_connectors_are_independent(tmp_path):
+    from ocpp_csms.transactions.query import TransactionQuery
+
+    store = EventStore(tmp_path)
+    first = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    other_connector = store.commit_start("charger-a", {
+        "connector_id": 2, "id_tag": "B", "meter_start": 200,
+        "timestamp": "2026-10-03T10:01:00Z",
+    })
+    newer = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "C", "meter_start": 300,
+        "timestamp": "2026-10-03T10:02:00Z",
+    })
+
+    query = TransactionQuery(tmp_path)
+    old = query.get(first)
+    separate = query.get(other_connector)
+    assert old is not None and separate is not None
+    assert old.status == "open"
+    assert old.active is True
+    assert old.record["stop_received_at"] is None
+    assert old.record["stop"] is None
+    assert old.record["energy_wh"] is None
+    assert old.next_start_received_at == query.get(newer).record["start_received_at"]
+    assert separate.next_start_received_at is None
+
+    data = export_contract(tmp_path, after=0, limit=20)["data"]
+    snapshot = next(item for item in data["transactions"] if item["id"] == first)
+    assert snapshot["stopped_at"] is None
+    assert snapshot["energy_wh"] is None
+    assert snapshot["quality"]["incomplete"] is True
+
+
+def test_reporting_does_not_depend_on_optional_json_archives(tmp_path):
+    from ocpp_csms.transactions.query import TransactionQuery
+
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    assert not list(tmp_path.rglob("*.json"))
+    view = TransactionQuery(tmp_path).get(transaction_id)
+    assert view is not None
+    assert view.status == "open"
+    snapshot = export_contract(tmp_path)["data"]["transactions"]
+    assert len(snapshot) == 1
+    assert snapshot[0]["id"] == transaction_id
