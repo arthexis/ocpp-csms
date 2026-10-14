@@ -74,15 +74,36 @@ def test_existing_database_cutover_preserves_export_cursor_and_transaction_ident
     from ocpp_csms.export_contract import export_contract
     from ocpp_csms.schema import source_id
 
-    store = EventStore(tmp_path)
-    transaction_id = store.commit_start("charger-a", {
-        "connector_id": 1, "id_tag": "card-a", "meter_start": 100,
-        "timestamp": "2026-10-03T10:00:00Z",
-    })
-    # The deployed application normally uses WAL. Prepare the legacy journal
-    # state before opening export readers, then close the setup connection.
-    with sqlite3.connect(database_path(tmp_path)) as db:
+    # Build the pre-upgrade state with a closed SQLite writer, not EventStore:
+    # EventStore initializes WAL and may leave live connections behind.
+    import json
+
+    create_current_schema(tmp_path)
+    database = database_path(tmp_path)
+    with sqlite3.connect(database) as db:
         assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+        transaction_id = 1
+        started = "2026-10-03T10:00:00Z"
+        payload = {
+            "connector_id": 1, "id_tag": "card-a", "meter_start": 100,
+            "timestamp": started,
+        }
+        db.execute(
+            """INSERT INTO transactions
+               (transaction_id, charger_id, connector_id, id_tag, meter_start,
+                started_at, start_received_at, state, last_activity_at)
+               VALUES (?, 'charger-a', 1, 'card-a', 100, ?, ?, 'open', ?)""",
+            (transaction_id, started, started, started),
+        )
+        db.execute(
+            """INSERT INTO events
+               (received_at, charger_id, action, direction, transaction_id,
+                id_tag, charger_timestamp, payload_json)
+               VALUES (?, 'charger-a', 'StartTransaction', 'in', ?, 'card-a', ?, ?)""",
+            (started, transaction_id, started, json.dumps(payload)),
+        )
+        db.execute("UPDATE transaction_allocator SET last_id = ?", (transaction_id,))
+
     before = export_contract(tmp_path, after=0, limit=100)["data"]
     original_source = source_id(tmp_path)
     original_ids = [event["id"] for event in before["events"]]
