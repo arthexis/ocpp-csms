@@ -31,7 +31,7 @@ def test_current_schema_is_created_directly_at_version_eight(tmp_path):
     info = create_current_schema(tmp_path)
 
     assert info.exists is True
-    assert info.version == CURRENT_SCHEMA_VERSION == 9
+    assert info.version == CURRENT_SCHEMA_VERSION == 8
     with sqlite3.connect(info.path) as connection:
         objects = {
             (kind, name)
@@ -68,7 +68,7 @@ def test_inspection_reports_newer_schema_without_modifying_it(tmp_path):
     info = inspect_schema(tmp_path)
 
     assert info.version == 99
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 9"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 8"):
         require_supported_schema(info)
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 99
@@ -84,7 +84,7 @@ def test_event_store_refuses_newer_schema(tmp_path):
 
 
 def test_event_store_refuses_older_schema_without_mutating_it(tmp_path, schema_one):
-    with pytest.raises(RuntimeError, match="schema 1 is older than required 9; explicit upgrade required"):
+    with pytest.raises(RuntimeError, match="schema 1 is older than required 8; explicit upgrade required"):
         EventStore(tmp_path)
 
     with sqlite3.connect(schema_one) as connection:
@@ -302,7 +302,8 @@ def test_fresh_schema_has_no_recovery_table(tmp_path):
         ).fetchone() is None
 
 
-def test_upgrade_schema_eight_drops_recovery_table(tmp_path):
+
+def test_upgrade_schema_seven_drops_recovery_table(tmp_path):
     import sqlite3
     from ocpp_csms.schema import create_current_schema, database_path, upgrade_schema
 
@@ -312,7 +313,7 @@ def test_upgrade_schema_eight_drops_recovery_table(tmp_path):
             "CREATE TABLE transaction_recoveries (transaction_id INTEGER PRIMARY KEY, reason TEXT)"
         )
         db.execute("INSERT INTO transaction_recoveries VALUES (42, 'legacy')")
-        db.execute("PRAGMA user_version = 8")
+        db.execute("PRAGMA user_version = 7")
     upgraded = upgrade_schema(tmp_path)
     assert upgraded.version == CURRENT_SCHEMA_VERSION
     with sqlite3.connect(database_path(tmp_path)) as db:
