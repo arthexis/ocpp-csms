@@ -167,3 +167,55 @@ async def test_failed_send_does_not_record_outbound_evidence(tmp_path):
         await session.route_message(raw)
 
     assert event_directions(tmp_path, "Heartbeat") == [("in",)]
+
+
+@pytest.mark.asyncio
+async def test_committed_start_survives_json_diagnostic_failure(tmp_path, monkeypatch):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    session = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="start"), archive, events,
+    )
+    async def broken_diagnostic(*args, **kwargs):
+        raise OSError("diagnostic storage unavailable")
+    monkeypatch.setattr(archive, "diagnostic_start", broken_diagnostic)
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
+    }
+    response = await session.on_start_transaction(**payload)
+    assert response.transaction_id == 1
+    assert events.find_recent_start("charger-a", payload) == 1
+    assert event_directions(tmp_path, "StartTransaction") == [("in",)]
+    assert transaction_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_start_commit_precedes_response_and_retry_survives_restart(tmp_path, monkeypatch):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    session = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="start"), archive, events,
+    )
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
+    }
+    observed = []
+    original = archive.diagnostic_start
+    async def inspect_committed(charger, start, transaction_id):
+        assert events.find_recent_start(charger, start) == transaction_id
+        assert event_directions(tmp_path, "StartTransaction") == [("in",)]
+        observed.append(transaction_id)
+        await original(charger, start, transaction_id)
+    monkeypatch.setattr(archive, "diagnostic_start", inspect_committed)
+    first = await session.on_start_transaction(**payload)
+    restarted = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="retry"),
+        TransactionArchive(tmp_path), EventStore(tmp_path),
+    )
+    retry = await restarted.on_start_transaction(**payload)
+    assert observed == [first.transaction_id]
+    assert retry.transaction_id == first.transaction_id == 1
+    assert event_directions(tmp_path, "StartTransaction") == [("in",), ("in",)]
+    assert len(transaction_records(tmp_path)) == 1
