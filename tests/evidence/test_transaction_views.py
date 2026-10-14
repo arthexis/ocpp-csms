@@ -69,7 +69,7 @@ def test_summary_and_index_available_on_current_schema(tmp_path):
     assert inspect_schema(tmp_path).version == CURRENT_SCHEMA_VERSION == 8
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
         views = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'view'")}
-        indexes = {row[0] for row in db.execute("PRAGMA index_list(transactions)")}
+        indexes = {row[1] for row in db.execute("PRAGMA index_list(transactions)")}
         columns = {row[1] for row in db.execute("PRAGMA table_info(transaction_summary)")}
     assert {"transaction_boundaries", "transaction_summary"} <= views
     assert "idx_transactions_boundary" in indexes
