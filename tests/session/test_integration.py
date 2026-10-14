@@ -194,7 +194,7 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
             assert second > first
 
             before = TransactionQuery(tmp_path).get(first)
-            assert before.effective_stop_source == "next_start"
+            assert before.next_start_received_at is not None
             assert before.record["stop"] is None
             assert len(before.record["meter_values"]) == 1
 
@@ -214,7 +214,7 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
 
     first_view = TransactionQuery(tmp_path).get(first)
     second_view = TransactionQuery(tmp_path).get(second)
-    assert first_view.effective_stop_source == "observed"
+    assert first_view.status == "stopped"
     assert first_view.record["stop"]["meter_stop"] == 150
     assert second_view.record["stop"]["meter_stop"] == 240
     assert len(first_view.record["meter_values"]) == 1
@@ -289,7 +289,7 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
     ]
     assert len(records) == 2
     assert {record["transaction_id"] for record in records} == {first_id, second_id}
-    assert TransactionQuery(tmp_path).get(first_id).effective_stop_source == "observed"
+    assert TransactionQuery(tmp_path).get(first_id).status == "stopped"
     assert TransactionQuery(tmp_path).get(second_id).record["stop"] is None
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
