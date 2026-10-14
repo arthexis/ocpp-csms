@@ -184,3 +184,88 @@ async def test_allocation_does_not_create_per_id_reservations(tmp_path):
     await archive.start(CP, start())
     await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
     assert not (tmp_path / "transaction-id-reservations").exists()
+
+
+@pytest.mark.asyncio
+async def test_monotonic_ids_survive_restart_with_incomplete_sessions(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start())
+    second = await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
+    restarted = TransactionArchive(tmp_path)
+    third = await restarted.start(CP, start(timestamp="2026-10-03T10:00:02Z"))
+    assert [first, second, third] == [1, 2, 3]
+    assert all(record["stop"] is None for record in archives(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_unknown_evidence_does_not_advance_allocator_across_restart(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    await archive.meter_values(CP, meter(100000))
+    await archive.stop(CP, stop(100001))
+    restarted = TransactionArchive(tmp_path)
+    assert await restarted.start(CP, start()) == 1
+
+
+@pytest.mark.asyncio
+async def test_distinct_start_on_other_charge_point_cannot_infer_boundary(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start())
+    await archive.start("charger-b", start(timestamp="2026-10-03T10:05:00Z"))
+    view = TransactionQuery(tmp_path).get(first)
+    assert view.effective_stop_source is None
+
+
+@pytest.mark.asyncio
+async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, monkeypatch):
+    import ocpp_csms.transactions.archive as archive_module
+
+    received = iter([
+        "2026-10-03T10:01:00+00:00",
+        "2026-10-03T10:07:00+00:00",
+    ])
+    monkeypatch.setattr(archive_module, "utc_now_iso", lambda: next(received))
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start(timestamp="2026-10-03T10:00:00Z"))
+    await archive.start(CP, start(timestamp="2026-10-03T09:59:00Z"))
+    view = TransactionQuery(tmp_path).get(first)
+    assert view.effective_stop_source == "next_start"
+    assert view.effective_stop_at == "2026-10-03T10:07:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_conflicting_late_stops_do_not_overwrite_first_stop(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start())
+    observed = stop(transaction_id)
+    await archive.stop(CP, observed)
+    await archive.stop(CP, {**observed, "meter_stop": 999})
+    record = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert record["stop"] == observed
+    assert any(
+        item["message_type"] == "StopTransaction"
+        and item["transaction_id"] == transaction_id
+        for item in unresolved(tmp_path)
+    )
+
+
+@pytest.mark.asyncio
+async def test_identical_stop_retry_does_not_change_observed_stop(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start())
+    observed = stop(transaction_id)
+    await archive.stop(CP, observed)
+    await archive.stop(CP, observed)
+    record = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert record["stop"] == observed
+    assert unresolved(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start())
+    await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    view = TransactionQuery(tmp_path).get(first)
+    assert view.effective_stop_source == "next_start"
+    assert view.record["stop"] is None
+    assert view.record.get("meter_values", []) == []
