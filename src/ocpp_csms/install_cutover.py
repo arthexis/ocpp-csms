@@ -7,7 +7,7 @@ from contextlib import closing
 import time
 from pathlib import Path
 
-from ocpp_csms.status import appliance_status
+from ocpp_csms.schema_storage import plan_storage, prepare_storage\nfrom ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
@@ -155,7 +155,7 @@ def _parser() -> argparse.ArgumentParser:
     upgrade = subcommands.add_parser("schema-upgrade")
     upgrade.add_argument("--data-dir", required=True)
 
-    verify = subcommands.add_parser("schema-verify")
+    plan = subcommands.add_parser("storage-plan")\n    plan.add_argument("--storage-root", required=True)\n    plan.add_argument("--active-data-dir")\n\n    prepare = subcommands.add_parser("storage-prepare")\n    prepare.add_argument("--storage-root", required=True)\n    prepare.add_argument("--active-data-dir")\n\n    verify = subcommands.add_parser("schema-verify")
     verify.add_argument("--data-dir", required=True)
 
     capture = subcommands.add_parser("capture-baseline")
@@ -177,7 +177,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "schema-check":
+        if args.command in ("storage-plan", "storage-prepare"):\n            plan = plan_storage(args.storage_root, args.active_data_dir)\n            if args.command == "storage-prepare":\n                prepare_storage(plan)\n            print(json.dumps({"action": plan.action, "target": str(plan.target),\n                              "active_schema": plan.active_schema}, sort_keys=True))\n            return 0\n        if args.command == "schema-check":
             print(schema_action(args.data_dir))
             return 0
         if args.command == "schema-upgrade":
