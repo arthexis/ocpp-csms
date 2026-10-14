@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from ocpp_csms.transactions.archive import default_data_dir
 from ocpp_csms.schema import database_path
 
-_ACTIVE_STATUSES = {"open", "recovered"}
+_ACTIVE_STATUSES = {"open"}
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -23,34 +23,6 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
-
-def _connector_id(record: dict[str, Any]) -> int | None:
-    start = record.get("start")
-    if record.get("connector_id") is not None:
-        return int(record["connector_id"])
-    if isinstance(start, dict) and start.get("connector_id") is not None:
-        return int(start["connector_id"])
-    meter_values = record.get("meter_values")
-    if isinstance(meter_values, list):
-        for payload in reversed(meter_values):
-            if isinstance(payload, dict) and payload.get("connector_id") is not None:
-                return int(payload["connector_id"])
-    stop = record.get("stop")
-    if isinstance(stop, dict) and stop.get("connector_id") is not None:
-        return int(stop["connector_id"])
-    return None
-
-
-def _id_tag(record: dict[str, Any]) -> str | None:
-    value = record.get("id_tag")
-    if isinstance(value, str):
-        return value
-    for field in ("start", "stop"):
-        payload = record.get(field)
-        if isinstance(payload, dict) and isinstance(payload.get("id_tag"), str):
-            return payload["id_tag"]
-    return None
 
 
 def _meter_times(record: dict[str, Any]) -> list[datetime]:
@@ -136,11 +108,13 @@ class TransactionView:
 
     @property
     def connector_id(self) -> int | None:
-        return _connector_id(self.record)
+        value = self.record.get("connector_id")
+        return int(value) if value is not None else None
 
     @property
     def id_tag(self) -> str | None:
-        return _id_tag(self.record)
+        value = self.record.get("id_tag")
+        return str(value) if value is not None else None
 
     @property
     def activity_at(self) -> datetime:
