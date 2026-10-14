@@ -166,8 +166,8 @@ async def test_legacy_config_positional_charger_is_recognized():
     ("active", "force", "keys", "expected_call", "expected_error", "records_decision"),
     [
         ({}, False, ["HeartbeatInterval"], ("config", ["HeartbeatInterval"]), None, False),
-        ({"charger-a": [17]}, False, None, None, "active_transaction", True),
-        ({"charger-a": [17]}, True, None, ("config", None), None, True),
+        ({"charger-a": [17]}, False, None, ("config", None), None, False),
+        ({"charger-a": [17]}, True, None, ("config", None), None, False),
         ({"charger-b": [88]}, False, None, ("config", None), None, False),
     ],
 )
@@ -505,3 +505,50 @@ async def test_a6_reconnected_registry_uses_live_state_not_old_transaction_ids()
     })
     assert allowed["ok"] is True
     assert session.calls == [("start", "REMOTE", 1)]
+
+
+class EvidenceRegistry(Registry):
+    def __init__(self, statuses, active=None):
+        super().__init__(Session(), active=active)
+        self.statuses = statuses
+
+    def connector_occupancy(self, charge_point_id):
+        return self.statuses
+
+
+@pytest.mark.asyncio
+async def test_historical_open_does_not_block_available_connector():
+    registry = EvidenceRegistry({1: "Available"}, active={"charger-a": [(17, 1)]})
+    response = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert response["ok"] is True
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+
+
+@pytest.mark.asyncio
+async def test_unknown_connector_warns_and_sends():
+    registry = EvidenceRegistry({})
+    response = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert response["ok"] is True
+    assert response["warnings"]
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+
+
+@pytest.mark.asyncio
+async def test_busy_connector_requires_explicit_force():
+    registry = EvidenceRegistry({1: "Charging"})
+    request = {"command": "start", "charger": "charger-a", "connector": 1,
+               "id_tag": "REMOTE", "timing": "now"}
+    blocked = await dispatch_control(registry, request)
+    assert blocked["error"] == "active_transaction"
+    assert registry.sessions["charger-a"].calls == []
+    sent = await dispatch_control(registry, {**request, "force": True})
+    assert sent["ok"] is True
+    assert sent["warnings"]
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+    assert registry.events[0]["event"] == "control_occupancy_override"
