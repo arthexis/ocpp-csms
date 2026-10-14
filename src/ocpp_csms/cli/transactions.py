@@ -121,7 +121,6 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     this parser only when the token following 'txn' names an operation.
     """
     from ocpp_csms.cli.control import _add_timing_options
-    from ocpp_csms.cli.recovery import add_recovery_parser
 
     parser = argparse.ArgumentParser(prog="ocpp-csms txn", description="Transaction operations")
     operations = parser.add_subparsers(dest="operation", required=True)
@@ -143,5 +142,4 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     explain.add_argument("--verbose", action="store_true")
     explain.add_argument("-j", "--json", action="store_true")
 
-    add_recovery_parser(operations)
     return parser
