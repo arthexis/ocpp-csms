@@ -282,6 +282,7 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
                 info = SchemaInfo(path=info.path, exists=True, version=5)
             if info.version == 5:
                 connection.executescript(_SCHEMA_6_ADDITIONS_SQL)
+                info = SchemaInfo(path=info.path, exists=True, version=6)
             if info.version == 6:
                 connection.executescript(_SCHEMA_7_ADDITIONS_SQL)
             connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
