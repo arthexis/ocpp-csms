@@ -154,12 +154,8 @@ class TransactionView:
         return self.received_activity_at if local_time else self.activity_at
 
     @property
-    def effective_stop_source(self) -> str | None:
-        return self.record.get("effective_stop_source")
-
-    @property
-    def effective_stop_at(self) -> str | None:
-        return self.record.get("effective_stop_at")
+    def next_start_received_at(self) -> str | None:
+        return self.record.get("next_start_received_at")
 
     @property
     def active(self) -> bool:
@@ -231,8 +227,6 @@ class TransactionQuery:
                 "stop_received_at": row["stop_received_at"],
                 "created_at": row["start_received_at"],
                 "updated_at": row["last_activity_at"],
-                "effective_stop_source": row["effective_stop_source"],
-                "effective_stop_at": row["effective_stop_at"],
                 "connector_id": row["connector_id"],
                 "energy_wh": row["energy_wh"],
                 "next_start_received_at": row["next_start_received_at"],
