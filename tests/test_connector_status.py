@@ -70,7 +70,7 @@ def test_detailed_status_prints_each_connector(tmp_path: Path):
         "charger-a",
         {"connector_id": 2, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
     )
-    _start(events, 7, 1)
+    transaction_id = _start(events, 1)
 
     text = format_status(appliance_status(tmp_path), charger_id="charger-a")
 
