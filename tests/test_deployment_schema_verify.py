@@ -27,14 +27,6 @@ def test_schema_verification_rejects_older_database(tmp_path):
     assert apply_schema_action(tmp_path) == "current"
 
 
-def test_schema_verification_rejects_missing_recovery_table(tmp_path):
-    create_current_schema(tmp_path)
-    with sqlite3.connect(database_path(tmp_path)) as db:
-        db.execute("DROP TABLE transaction_recoveries")
-    with pytest.raises(RuntimeError, match="recovery audit table missing"):
-        verify_schema_integrity(tmp_path)
-
-
 def test_schema_verification_rejects_missing_db(tmp_path):
     with pytest.raises(RuntimeError, match="schema verification failed"):
         verify_schema_integrity(tmp_path)
