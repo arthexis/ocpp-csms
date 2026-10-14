@@ -103,7 +103,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         result["chargers"] = charger_statuses(database, live_since_id=live_since_id)
         result["active_chargers"] = sorted({
             charger.charger_id for charger in result["chargers"]
-            if charger.connected and any(
+            if any(
                 connector.status in {"Charging", "SuspendedEV", "SuspendedEVSE"}
                 for connector in charger.connectors
             )
@@ -232,7 +232,10 @@ def _charger_status(
     summary_error = None
     summary_info = None
     if status_rows:
-        latest_status = max(status_rows, key=lambda row: row["received_at"])
+        # Prefer a currently reported busy physical connector over a generic
+        # charge-point/other-connector Available notification.
+        busy = [row for row in status_rows if int(row["connector_id"]) > 0 and row["status"] in {"Charging", "SuspendedEV", "SuspendedEVSE"}]
+        latest_status = max(busy or status_rows, key=lambda row: row["received_at"])
         summary_status = latest_status["status"]
         summary_error = latest_status["error_code"]
         summary_info = latest_status["info"]
