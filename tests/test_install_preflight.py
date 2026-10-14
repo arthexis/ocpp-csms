@@ -86,16 +86,15 @@ def test_active_transaction_blocks_service_handoff(tmp_path, monkeypatch):
     assert result.active_chargers == ()
 
 
-def test_sqlite_open_transaction_blocks_without_archive(tmp_path, monkeypatch):
+def test_sqlite_open_transaction_alone_does_not_block_without_archive(tmp_path, monkeypatch):
     _record_connection(tmp_path)
     _record_active_database(tmp_path)
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
 
     result = install_preflight.evaluate_preflight(tmp_path)
 
-    assert result.allowed is False
-    assert result.active_chargers == ("charger-a",)
-    assert "service handoff is blocked" in result.reason
+    assert result.allowed is True
+    assert result.active_chargers == ()
 
 
 def test_stale_open_archive_does_not_block_sqlite_idle_install(tmp_path, monkeypatch):
@@ -143,9 +142,9 @@ def test_newer_database_schema_is_blocked(tmp_path, monkeypatch):
 def _record_connector_status(tmp_path, status="Charging", charger_id="charger-a"):
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
         connection.execute(
-            """INSERT INTO connector_status (charger_id, connector_id, status, received_at)
-               VALUES (?, 1, ?, ?)""",
-            (charger_id, status, "2026-10-04T16:02:00Z"),
+            """INSERT INTO connector_status (charger_id, connector_id, status, received_at, event_timestamp)
+               VALUES (?, 1, ?, ?, ?)""",
+            (charger_id, status, "2026-10-04T16:02:00Z", "2026-10-04T16:02:00Z"),
         )
 
 
