@@ -100,3 +100,57 @@ def test_installer_storage_plan_rejects_downgrade(tmp_path, capsys):
     assert main(["storage-plan", "--storage-root", str(tmp_path),
                  "--active-data-dir", str(active)]) == 1
     assert "downgrade" in capsys.readouterr().out
+
+
+def test_discovery_finds_legacy_root_without_mutating_it(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    create_current_schema(tmp_path)
+    before = source_id(tmp_path)
+    assert discover_active_storage(tmp_path) == tmp_path
+    assert plan_storage(tmp_path, discover_active_storage(tmp_path)).action == "reuse"
+    assert source_id(tmp_path) == before
+    assert not (tmp_path / "schemas").exists()
+
+
+def test_discovery_finds_versioned_current_pointer(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    active = tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION)
+    create_current_schema(active)
+    (tmp_path / "current").symlink_to(active, target_is_directory=True)
+    assert discover_active_storage(tmp_path) == active
+    assert plan_storage(tmp_path, discover_active_storage(tmp_path)).action == "reuse"
+
+
+def test_discovery_rejects_broken_or_ambiguous_pointer(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    (tmp_path / "current").symlink_to(tmp_path / "missing")
+    with pytest.raises((OSError, RuntimeError)):
+        discover_active_storage(tmp_path)
+    (tmp_path / "current").unlink()
+    (tmp_path / "schemas").mkdir()
+    with pytest.raises(RuntimeError, match="without an active"):
+        discover_active_storage(tmp_path)
+
+
+def test_storage_prepare_does_not_activate_or_modify_legacy(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    legacy = tmp_path / "ocpp-csms.sqlite3"
+    with sqlite3.connect(legacy) as db:
+        db.execute("PRAGMA user_version = 7")
+    before = legacy.read_bytes()
+    plan = plan_storage(tmp_path, discover_active_storage(tmp_path))
+    prepare_storage(plan)
+    assert legacy.read_bytes() == before
+    assert not (tmp_path / "current").exists()
+    assert plan.target.is_dir()
+
+
+def test_ansible_storage_preparation_is_not_live_cutover():
+    from pathlib import Path
+    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
+    preparation = (tasks / "storage_prepare.yml").read_text()
+    assert "storage-plan" in preparation and "storage-prepare" in preparation
+    assert "ocpp_csms_data_dir" in preparation
+    assert "systemd_service" not in preparation
+    assert "storage_prepare.yml" not in (tasks / "main.yml").read_text()
+    assert "storage_prepare.yml" not in (tasks / "cutover.yml").read_text()
