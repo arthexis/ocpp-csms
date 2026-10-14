@@ -79,12 +79,14 @@ def test_existing_database_cutover_preserves_export_cursor_and_transaction_ident
         "connector_id": 1, "id_tag": "card-a", "meter_start": 100,
         "timestamp": "2026-10-03T10:00:00Z",
     })
+    # The deployed application normally uses WAL. Prepare the legacy journal
+    # state before opening export readers, then close the setup connection.
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
     before = export_contract(tmp_path, after=0, limit=100)["data"]
     original_source = source_id(tmp_path)
     original_ids = [event["id"] for event in before["events"]]
     original_cursor = before["cursor"]["next"]
-    with sqlite3.connect(database_path(tmp_path)) as db:
-        assert db.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
 
     assert schema_action(tmp_path) == "current"
     assert apply_schema_action(tmp_path) == "current"
