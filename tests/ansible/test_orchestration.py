@@ -93,7 +93,7 @@ def test_schema_upgrade_happens_only_after_old_service_stops():
     assert_task_order(
         cutover,
         "Stop existing OCPP CSMS service",
-        "Upgrade database schema after service stop",
+        "Upgrade schema and enable WAL after service stop",
         "Install live OCPP CSMS systemd unit",
     )
 
