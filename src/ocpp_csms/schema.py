@@ -353,10 +353,13 @@ def source_id(data_dir: str | Path) -> str:
     """Return the stable identity of this CSMS data store."""
     info = inspect_schema(data_dir)
     require_supported_schema(info)
-    with sqlite3.connect(f"file:{info.path}?mode=ro", uri=True) as connection:
+    connection = sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)
+    try:
         row = connection.execute(
             "SELECT value FROM appliance_metadata WHERE key = 'source_id'"
         ).fetchone()
+    finally:
+        connection.close()
     if row is None or not row[0]:
         raise RuntimeError("CSMS data store is missing source identity")
     return str(row[0])
