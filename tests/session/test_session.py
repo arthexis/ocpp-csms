@@ -96,7 +96,7 @@ async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
+async def test_stop_and_meter_values_remain_orphan_evidence(tmp_path):
     session, recorded = make_session(tmp_path)
 
     meter = await session.on_meter_values(
@@ -112,9 +112,15 @@ async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
     assert isinstance(meter, call_result.MeterValuesPayload)
     assert isinstance(stop, call_result.StopTransactionPayload)
     records = transaction_records(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == 999
-    assert records[0]["status"] == "stopped"
+    assert records == []
+    unresolved = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "transactions-unresolved").glob("*/*.json")
+    ]
+    assert {entry["message_type"] for entry in unresolved} == {
+        "MeterValues", "StopTransaction"
+    }
+    assert all(entry["transaction_id"] == 999 for entry in unresolved)
     assert [(entry[0], entry[2]) for entry in recorded] == [
         ("MeterValues", "in"),
         ("StopTransaction", "in"),
