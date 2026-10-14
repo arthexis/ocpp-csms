@@ -269,3 +269,75 @@ def test_reporting_does_not_depend_on_optional_json_archives(tmp_path):
     snapshot = export_contract(tmp_path)["data"]["transactions"]
     assert len(snapshot) == 1
     assert snapshot[0]["id"] == transaction_id
+
+
+def test_cursor_pages_replay_retries_and_orphan_evidence_without_gaps(tmp_path):
+    store = EventStore(tmp_path)
+    start = {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    }
+    transaction_id = store.commit_start("charger-a", start)
+    assert store.commit_start("charger-a", start) == transaction_id
+    store.commit_transaction_evidence("charger-a", "MeterValues", {
+        "connector_id": 1, "transaction_id": 99999, "meter_value": [],
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": 99999, "meter_stop": 150,
+        "timestamp": "2026-10-03T10:10:00Z",
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 200,
+        "timestamp": "2026-10-03T10:15:00Z",
+    })
+
+    cursor = 0
+    collected = []
+    while True:
+        page = export_contract(tmp_path, after=cursor, limit=2)["data"]
+        replay = export_contract(tmp_path, after=cursor, limit=2)["data"]
+        assert replay["events"] == page["events"]
+        assert replay["cursor"] == page["cursor"]
+        ids = [event["id"] for event in page["events"]]
+        assert ids == sorted(ids)
+        assert all(event_id > cursor for event_id in ids)
+        collected.extend(page["events"])
+        assert page["cursor"]["next"] == (ids[-1] if ids else cursor)
+        cursor = page["cursor"]["next"]
+        if not page["cursor"]["more"]:
+            break
+
+    assert len(collected) == 5
+    assert len({event["id"] for event in collected}) == 5
+    assert [event["action"] for event in collected] == [
+        "StartTransaction", "StartTransaction", "MeterValues",
+        "StopTransaction", "StopTransaction",
+    ]
+    assert [event["transaction_id"] for event in collected] == [
+        transaction_id, transaction_id, 99999, 99999, transaction_id,
+    ]
+    assert export_contract(tmp_path, after=cursor, limit=2)["data"]["events"] == []
+
+
+def test_late_stop_after_previous_cursor_is_exported_as_new_evidence(tmp_path):
+    store = EventStore(tmp_path)
+    first = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-B", "meter_start": 200,
+        "timestamp": "2026-10-03T10:05:00Z",
+    })
+    prior = export_contract(tmp_path, after=0, limit=10)["data"]
+    cursor = prior["cursor"]["next"]
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": first, "meter_stop": 180,
+        "timestamp": "2026-10-03T10:04:00Z",
+    })
+    new = export_contract(tmp_path, after=cursor, limit=10)["data"]
+    assert len(new["events"]) == 1
+    assert new["events"][0]["action"] == "StopTransaction"
+    assert new["events"][0]["transaction_id"] == first
+    assert new["cursor"]["next"] > cursor
+    assert export_contract(tmp_path, after=cursor, limit=10)["data"]["events"] == new["events"]
