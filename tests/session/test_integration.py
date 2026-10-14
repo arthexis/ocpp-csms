@@ -126,6 +126,18 @@ async def test_real_websocket_boot_and_charging_flow(tmp_path):
         ).fetchone()
     assert transaction == (transaction_id, "charger-a", "stopped", 130)
 
+    exported = export_contract(tmp_path, after=0, limit=100)["data"]
+    incoming = [event for event in exported["events"] if event["direction"] == "in"]
+    assert [event["action"] for event in incoming] == [
+        "BootNotification", "Authorize", "StartTransaction",
+        "MeterValues", "StopTransaction",
+    ]
+    assert exported["cursor"]["next"] == exported["events"][-1]["id"]
+    assert export_contract(tmp_path, after=0, limit=100)["data"]["events"] == exported["events"]
+    assert export_contract(tmp_path, after=exported["cursor"]["next"], limit=100)["data"]["events"] == []
+    assert exported["transactions"][0]["id"] == transaction_id
+    assert exported["transactions"][0]["state"] == "stopped"
+
     with server.events._connect() as connection:
         actions = connection.execute(
             "SELECT charger_id, action, direction FROM events ORDER BY id"
