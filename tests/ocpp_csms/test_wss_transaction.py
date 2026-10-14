@@ -104,9 +104,14 @@ async def test_claim_and_full_transaction_over_wss(tmp_path):
     finally:
         await listener.stop()
 
-    records = list((tmp_path / "transactions").glob("*/*.json"))
-    assert len(records) == 1
-    saved = json.loads(records[0].read_text())
-    assert saved["status"] == "stopped"
-    assert saved["charge_point_id"] == "ABB-SERIAL-001"
-    assert saved["transaction_id"] == txn_id
+    with EventStore(tmp_path)._connect() as connection:
+        saved = connection.execute(
+            "SELECT charger_id, transaction_id, state, meter_stop FROM transactions WHERE transaction_id = ?",
+            (txn_id,),
+        ).fetchone()
+        actions = connection.execute(
+            "SELECT action FROM events WHERE transaction_id = ? AND direction = 'in' ORDER BY id",
+            (txn_id,),
+        ).fetchall()
+    assert saved == ("ABB-SERIAL-001", txn_id, "stopped", 130)
+    assert [action for (action,) in actions] == ["StartTransaction", "MeterValues", "StopTransaction"]
