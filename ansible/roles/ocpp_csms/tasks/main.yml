@@ -83,7 +83,7 @@
       - python3
       - -m
       - ocpp_csms.install_preflight
-      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
+      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '') }}"
       - --data-dir
       - "{{ ocpp_csms_data_dir }}"
       - --json
@@ -116,6 +116,7 @@
           - python3
           - -m
           - ocpp_csms.install_preflight
+          - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '') }}"
           - --data-dir
           - "{{ ocpp_csms_data_dir }}"
           - --json
@@ -591,7 +592,7 @@
       - "{{ ocpp_csms_release_venv }}/bin/python"
       - -m
       - ocpp_csms.install_preflight
-      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
+      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '') }}"
       - --data-dir
       - "{{ ocpp_csms_data_dir }}"
       - --json
@@ -601,6 +602,13 @@
 - name: Capture final preflight state
   ansible.builtin.set_fact:
     ocpp_csms_final_preflight_result: "{{ ocpp_csms_final_preflight.stdout | from_json }}"
+
+- name: Report forced charging-safety handoff
+  ansible.builtin.debug:
+    msg: "FORCED HANDOFF: active charging on {{ ocpp_csms_final_preflight_result.active_chargers | join(', ') }}; proceeding at operator request."
+  when:
+    - ocpp_csms_force_handoff | bool
+    - ocpp_csms_final_preflight_result.active_chargers | length > 0
 
 # Identify an incumbent only from observed host-local OCPP traffic. Product
 # names and historical ports are intentionally irrelevant; the observed port is
