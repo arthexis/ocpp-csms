@@ -119,12 +119,12 @@ async def test_real_websocket_boot_and_charging_flow(tmp_path):
             )
             assert await result(websocket, "stop-1") == {}
 
-    transaction_files = list((tmp_path / "transactions").glob("*/*.json"))
-    assert len(transaction_files) == 1
-    transaction = json.loads(transaction_files[0].read_text(encoding="utf-8"))
-    assert transaction["transaction_id"] == transaction_id
-    assert transaction["charge_point_id"] == "charger-a"
-    assert transaction["status"] == "stopped"
+    with server.events._connect() as connection:
+        transaction = connection.execute(
+            "SELECT transaction_id, charger_id, state, meter_stop FROM transactions WHERE transaction_id = ?",
+            (transaction_id,),
+        ).fetchone()
+    assert transaction == (transaction_id, "charger-a", "stopped", 130)
 
     with server.events._connect() as connection:
         actions = connection.execute(
