@@ -48,9 +48,7 @@ def _live_active_chargers(data_dir: Path, connected: tuple[str, ...]) -> tuple[s
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         rows = connection.execute(
             """SELECT c.charger_id, c.status FROM connector_status c
-               WHERE c.connector_id > 0 AND c.charger_id IN
-                 (SELECT charger_id FROM runtime_events WHERE event = 'charger_connected')
-               AND c.received_at >= (
+               WHERE c.connector_id > 0 AND c.received_at >= (
                    SELECT MAX(r.occurred_at) FROM runtime_events r
                    WHERE r.charger_id = c.charger_id AND r.event = 'charger_connected'
                )"""
