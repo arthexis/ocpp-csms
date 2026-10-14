@@ -319,9 +319,9 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
 async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path):
     archive = TransactionArchive(tmp_path)
     payload = start()
-    transaction_id = await archive.start(CP, payload)
+    transaction_id = await commit_start_with_diagnostics(archive, CP, payload)
     before = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
-    assert await archive.start(CP, payload) == transaction_id
+    assert await commit_start_with_diagnostics(archive, CP, payload) == transaction_id
     after = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
     assert after["start"] == before["start"]
     assert after["start_received_at"] == before["start_received_at"]
@@ -379,7 +379,7 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
     """A late stop is authoritative even when a later start suggests a boundary."""
     archive = TransactionArchive(tmp_path)
     first = await commit_start_with_diagnostics(archive, CP, start(meter_start=1000))
-    await archive.start(CP, start(
+    await commit_start_with_diagnostics(archive, CP, start(
         timestamp="2026-10-03T10:05:00Z", meter_start=2000,
     ))
     EventStore(tmp_path).commit_transaction_evidence(CP, "StopTransaction", {
@@ -421,7 +421,7 @@ async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_
     second = await commit_start_with_diagnostics(archive, "charger-b", start(connector=1))
     third = await commit_start_with_diagnostics(archive, CP, start(connector=2))
     restarted = TransactionArchive(tmp_path)
-    fourth = await restarted.start("charger-b", start(
+    fourth = await commit_start_with_diagnostics(restarted, "charger-b", start(
         connector=2, timestamp="2026-10-03T10:01:00Z",
     ))
     assert [first, second, third, fourth] == sorted({first, second, third, fourth})
