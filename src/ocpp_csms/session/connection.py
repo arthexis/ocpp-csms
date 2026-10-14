@@ -63,22 +63,6 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
             transaction_id=transaction_id,
         )
 
-    def _record_recovery_decision(self, decision: dict[str, Any] | None) -> None:
-        if decision is None:
-            return
-        event = str(decision["event"])
-        details = {key: value for key, value in decision.items() if key != "event"}
-        try:
-            self.events.record_runtime(event, charger_id=self.id, details=details)
-            if event == "historical_transaction_id_collision":
-                self.events.record_runtime(
-                    "unresolved_queued_message_preserved",
-                    charger_id=self.id,
-                    details=details,
-                )
-        except Exception:
-            LOGGER.exception("frame %s", self.connection.last_frame)
-
     def _rfid_status(self, id_tag: str) -> str:
         policy = load_rfid_authorization(self.transactions.data_dir)
         if not policy.valid:
