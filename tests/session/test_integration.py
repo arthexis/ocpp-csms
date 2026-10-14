@@ -347,3 +347,50 @@ async def test_websocket_orphan_stop_then_valid_start_does_not_adopt_foreign_id(
         and item["message_type"] == "StopTransaction"
         for item in unresolved
     )
+
+
+@pytest.mark.asyncio
+async def test_websocket_start_retry_after_server_restart_commits_before_ack(tmp_path):
+    """Wire-level exact retry has one SQLite identity and two incoming receipts."""
+    import sqlite3
+
+    payload = {
+        "connectorId": 1, "idTag": "card-a", "meterStart": 100,
+        "timestamp": "2026-10-02T12:00:00Z",
+    }
+
+    async def start_once(message_id):
+        server = CSMSServer(
+            host="127.0.0.1", port=0,
+            transactions=TransactionArchive(tmp_path),
+            events=EventStore(tmp_path),
+        )
+        async with websockets.serve(
+            server.accept, "127.0.0.1", 0,
+            subprotocols=[OCPP_16_SUBPROTOCOL],
+        ) as listener:
+            port = listener.sockets[0].getsockname()[1]
+            async with websockets.connect(
+                f"ws://127.0.0.1:{port}/ocpp/charger-a",
+                subprotocols=[OCPP_16_SUBPROTOCOL],
+            ) as websocket:
+                await websocket.send(call(message_id, "StartTransaction", payload))
+                response = await result(websocket, message_id)
+                transaction_id = response["transactionId"]
+                # The database commit must be visible before the response is observed.
+                with sqlite3.connect(tmp_path / "ocpp-csms.sqlite3") as connection:
+                    assert connection.execute(
+                        "SELECT transaction_id FROM transactions WHERE transaction_id = ?",
+                        (transaction_id,),
+                    ).fetchone() == (transaction_id,)
+                    assert connection.execute(
+                        """SELECT COUNT(*) FROM events
+                           WHERE action = 'StartTransaction' AND direction = 'in'
+                             AND transaction_id = ?""",
+                        (transaction_id,),
+                    ).fetchone()[0] == (1 if message_id == "first" else 2)
+                return transaction_id
+
+    first = await start_once("first")
+    retry = await start_once("retry")
+    assert retry == first == 1
