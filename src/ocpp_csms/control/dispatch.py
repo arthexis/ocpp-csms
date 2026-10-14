@@ -359,8 +359,19 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         if session is None:
             return {"error": "charger_not_connected", "charger": charger}
 
-    if command == "stop" and request.get("force", False) is not False:
-        return {"error": "invalid_force"}
+    if command == "stop":
+        if timing_error is not None:
+            return timing_error
+        if request.get("force", False) is not False:
+            return {"error": "invalid_force"}
+        if timing == "after":
+            assert seconds is not None
+            await asyncio.sleep(seconds)
+            session = registry.session(charger)
+            if session is None:
+                return {"error": "charger_not_connected", "charger": charger}
+        elif timing == "within":
+            return {"error": "invalid_timing"}
 
     warnings: list[str] = []
     if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
