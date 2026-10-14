@@ -25,7 +25,12 @@
     state: absent
   loop: "{{ ocpp_csms_legacy_mail_units.results }}"
   when: item.stat.exists
-  notify: Reload systemd for retired mail units
+
+- name: Reload systemd after removing legacy mail units
+  become: true
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: ocpp_csms_legacy_mail_units.results | selectattr('stat.exists') | list | length > 0
 
 - name: Remove legacy OCPP CSMS mail configuration
   become: true
