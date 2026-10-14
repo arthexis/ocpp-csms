@@ -45,7 +45,6 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
 
 def test_charging_filter_uses_transaction_query_activity(tmp_path: Path):
     events = EventStore(tmp_path)
-    archive = TransactionArchive(tmp_path)
     for charger in ("charger-a", "charger-b"):
         events.record_runtime("charger_connected", charger_id=charger)
         events.record_connector_status(
@@ -53,20 +52,16 @@ def test_charging_filter_uses_transaction_query_activity(tmp_path: Path):
             {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
         )
 
-    active = asyncio.run(archive.start("charger-a", start_payload()))
-    finished = asyncio.run(
-        archive.start("charger-b", start_payload(timestamp="2026-10-01T14:00:00Z"))
-    )
-    asyncio.run(
-        archive.stop(
-            "charger-b",
+    active = events.commit_start("charger-a", start_payload())
+    finished = events.commit_start("charger-b", start_payload(timestamp="2026-10-01T14:00:00Z"))
+    events.commit_transaction_evidence(
+            "charger-b", "StopTransaction",
             {
                 "transaction_id": finished,
                 "meter_stop": 1200,
                 "timestamp": "2026-10-01T14:30:00Z",
             },
         )
-    )
 
     data = appliance_status(tmp_path)
 
