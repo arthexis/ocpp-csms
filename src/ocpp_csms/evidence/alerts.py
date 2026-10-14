@@ -1,7 +1,7 @@
 """Pure, read-only classification of exceptional stored OCPP evidence.
 
 This module intentionally does not send notifications or change charge authorization.
-Ordinary StartTransaction evidence is not an alert; later TOML mail rules may
+Ordinary StartTransaction evidence is not an alert; callers may
 subscribe to it independently.
 """
 from __future__ import annotations
