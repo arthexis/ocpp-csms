@@ -256,3 +256,36 @@ def test_new_database_gets_new_source_identity(tmp_path):
     create_current_schema(second_dir)
 
     assert source_id(first_dir) != source_id(second_dir)
+
+
+def test_explicit_upgrade_from_v6_preserves_high_water_and_existing_rows(tmp_path):
+    info = create_current_schema(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        connection.execute(
+            """INSERT INTO transactions
+               (transaction_id, charger_id, state, last_activity_at)
+               VALUES (241, 'charger-a', 'open', '2026-10-01T00:00:00Z')"""
+        )
+        connection.execute("DROP TABLE start_identities")
+        connection.execute("DROP TABLE transaction_allocator")
+        connection.execute("PRAGMA user_version = 6")
+    with pytest.raises(RuntimeError, match="explicit upgrade required"):
+        EventStore(tmp_path)
+    assert inspect_schema(tmp_path).version == 6
+    backup = schema_backup_path(inspect_schema(tmp_path))
+    upgraded = upgrade_schema(tmp_path)
+    assert upgraded.version == 7
+    assert backup.exists()
+    with sqlite3.connect(backup) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("SELECT transaction_id FROM transactions").fetchone() == (241,)
+    store = EventStore(tmp_path)
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "meter_start": 100, "timestamp": "2026-10-01T00:01:00Z",
+    }
+    assert store.commit_start("charger-a", payload) == 242
+    assert EventStore(tmp_path).commit_start("charger-a", payload) == 242
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("SELECT last_id FROM transaction_allocator").fetchone() == (242,)
+        assert connection.execute("SELECT transaction_id FROM transactions ORDER BY transaction_id").fetchall() == [(241,), (242,)]
