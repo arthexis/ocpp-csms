@@ -407,3 +407,76 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
     assert "Energy:       600 Wh" in detail
     assert view.effective_stop_source == "observed"
     assert view.effective_stop_at == "2026-10-03T10:10:30Z"
+
+
+@pytest.mark.asyncio
+async def test_retry_after_restart_preserves_first_receipt_and_archive(tmp_path, monkeypatch):
+    import ocpp_csms.transactions.archive as archive_module
+
+    times = iter(["2026-10-03T10:00:00+00:00", "2026-10-04T10:00:00+00:00"])
+    monkeypatch.setattr(archive_module, "utc_now_iso", lambda: next(times))
+    archive = TransactionArchive(tmp_path)
+    payload = start()
+    original_id = await archive.start(CP, payload)
+    original = next(row for row in archives(tmp_path) if row["transaction_id"] == original_id)
+    assert original["start_received_at"] == "2026-10-03T10:00:00+00:00"
+
+    real_datetime = archive_module.datetime
+
+    class NextDay(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime.now(tz) + timedelta(days=1)
+
+    monkeypatch.setattr(archive_module, "datetime", NextDay)
+    restarted = TransactionArchive(tmp_path)
+    assert await restarted.start(CP, payload) == original_id
+    assert archives(tmp_path) == [original]
+    assert original["start"] == payload
+    assert original["start_received_at"] == "2026-10-03T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start(connector=1))
+    second = await archive.start("charger-b", start(connector=1))
+    third = await archive.start(CP, start(connector=2))
+    restarted = TransactionArchive(tmp_path)
+    fourth = await restarted.start("charger-b", start(
+        connector=2, timestamp="2026-10-03T10:01:00Z",
+    ))
+    assert [first, second, third, fourth] == sorted({first, second, third, fourth})
+    records = {row["transaction_id"]: row for row in archives(tmp_path)}
+    assert len(records) == 4
+    assert [(records[transaction_id]["charge_point_id"],
+             records[transaction_id]["start"]["connector_id"])
+            for transaction_id in (first, second, third, fourth)] == [
+        (CP, 1), ("charger-b", 1), (CP, 2), ("charger-b", 2),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_atomic_replace_never_publishes_partial_transaction(tmp_path, monkeypatch):
+    import ocpp_csms.transactions.archive as archive_module
+
+    archive = TransactionArchive(tmp_path)
+    original_replace = archive_module.os.replace
+
+    def fail_replace(source, destination):
+        raise OSError("simulated interrupted atomic replacement")
+
+    monkeypatch.setattr(archive_module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="interrupted atomic replacement"):
+        await archive.start(CP, start())
+    assert archives(tmp_path) == []
+    assert list((tmp_path / "transactions").glob("*/*.json")) == []
+
+    monkeypatch.setattr(archive_module.os, "replace", original_replace)
+    restarted = TransactionArchive(tmp_path)
+    new_id = await restarted.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
+    assert new_id > 0
+    records = archives(tmp_path)
+    assert len(records) == 1
+    assert records[0]["transaction_id"] == new_id
+    assert records[0]["start"]["timestamp"] == "2026-10-03T10:00:01Z"
