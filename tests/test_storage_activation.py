@@ -1,4 +1,5 @@
 import pytest
+from ocpp_csms.install_cutover import checkpoint_stopped_storage
 from ocpp_csms.schema import create_current_schema
 from ocpp_csms.schema_storage import adopt_legacy_storage, activate_schema
 
@@ -7,6 +8,8 @@ def test_adopt_legacy_and_activate(tmp_path):
     create_current_schema(tmp_path)
     (tmp_path / "transactions").mkdir(exist_ok=True)
     (tmp_path / "transactions" / "historical.json").write_text("{}")
+    # Model the real cutover: stop the writer and checkpoint before moving files.
+    checkpoint_stopped_storage(tmp_path)
     adopted = adopt_legacy_storage(tmp_path)
     assert adopted == tmp_path / "schemas" / "8"
     assert (adopted / "transactions" / "historical.json").read_text() == "{}"
