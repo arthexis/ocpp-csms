@@ -139,8 +139,9 @@ class TransactionView:
 class TransactionQuery:
     """Read authoritative SQLite transaction state without mutating persistence."""
 
-    def __init__(self, data_dir: str | Path | None = None) -> None:
+    def __init__(self, data_dir: str | Path | None = None, *, connection: sqlite3.Connection | None = None) -> None:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
+        self._connection = connection
 
     def get(self, transaction_id: int) -> TransactionView | None:
         for view in self._views():
@@ -175,7 +176,8 @@ class TransactionQuery:
         path = database_path(self.data_dir)
         if not path.is_file():
             return ()
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+        connection = self._connection or sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
             connection.row_factory = sqlite3.Row
             rows = connection.execute("SELECT * FROM transaction_summary").fetchall()
             evidence = connection.execute(
@@ -184,6 +186,9 @@ class TransactionQuery:
                      AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
                    ORDER BY id"""
             ).fetchall()
+        finally:
+            if self._connection is None:
+                connection.close()
 
         grouped: dict[tuple[int, str], list[sqlite3.Row]] = {}
         for event in evidence:
