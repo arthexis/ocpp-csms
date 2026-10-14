@@ -152,9 +152,34 @@
         path: "{{ ocpp_csms_transactions_dir }}"
       register: ocpp_csms_transactions_state
 
-    - name: Verify OCPP CSMS data directory is writable
+    - name: Verify OCPP CSMS storage access as systemd service user
+      become: true
+      become_user: "{{ ocpp_csms_service_user }}"
       ansible.builtin.command:
-        argv: [test, -w, "{{ ocpp_csms_data_dir }}"]
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -c
+          - |
+            import os
+            import sqlite3
+            import sys
+            from pathlib import Path
+
+            data_dir, database, archives = map(Path, sys.argv[1:])
+            for directory in (data_dir, archives):
+                if not directory.is_dir() or not os.access(directory, os.R_OK | os.W_OK | os.X_OK):
+                    raise SystemExit(f"CSMS service cannot access directory: {directory}")
+            if not database.is_file() or not os.access(database, os.R_OK | os.W_OK):
+                raise SystemExit(f"CSMS service cannot access database: {database}")
+            connection = sqlite3.connect(database, timeout=1)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.rollback()
+            finally:
+                connection.close()
+          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_database_path }}"
+          - "{{ ocpp_csms_transactions_dir }}"
       changed_when: false
 
     - name: Assert initialized OCPP CSMS storage
