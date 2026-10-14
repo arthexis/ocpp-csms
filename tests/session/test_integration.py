@@ -230,3 +230,120 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
     ]
     assert len({event["id"] for event in incoming}) == 5
     assert exported["cursor"]["next"] == exported["events"][-1]["id"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_reconnect_and_server_restart_keep_distinct_session_identity(tmp_path):
+    """A new server instance must retain IDs and preserve an incomplete first session."""
+    payload_a = {
+        "connectorId": 1, "idTag": "card-a", "meterStart": 100,
+        "timestamp": "2026-10-02T12:00:00Z",
+    }
+    payload_b = {**payload_a, "meterStart": 200, "timestamp": "2026-10-02T12:05:00Z"}
+
+    async def exchange(server, frames):
+        responses = []
+        async with websockets.serve(
+            server.accept, "127.0.0.1", 0,
+            subprotocols=[OCPP_16_SUBPROTOCOL],
+        ) as listener:
+            port = listener.sockets[0].getsockname()[1]
+            async with websockets.connect(
+                f"ws://127.0.0.1:{port}/ocpp/charger-a",
+                subprotocols=[OCPP_16_SUBPROTOCOL],
+            ) as websocket:
+                for unique_id, action, payload in frames:
+                    await websocket.send(call(unique_id, action, payload))
+                    responses.append(await result(websocket, unique_id))
+        return responses
+
+    first_server = CSMSServer(
+        host="127.0.0.1", port=0,
+        transactions=TransactionArchive(tmp_path), events=EventStore(tmp_path),
+    )
+    [first] = await exchange(first_server, [
+        ("start-a", "StartTransaction", payload_a),
+    ])
+    first_id = first["transactionId"]
+
+    restarted = CSMSServer(
+        host="127.0.0.1", port=0,
+        transactions=TransactionArchive(tmp_path), events=EventStore(tmp_path),
+    )
+    retry, second, late_stop = await exchange(restarted, [
+        ("retry-a", "StartTransaction", payload_a),
+        ("start-b", "StartTransaction", payload_b),
+        ("late-stop-a", "StopTransaction", {
+            "transactionId": first_id, "meterStop": 150,
+            "timestamp": "2026-10-02T12:06:00Z",
+        }),
+    ])
+    assert retry["transactionId"] == first_id
+    second_id = second["transactionId"]
+    assert second_id > first_id
+    assert late_stop == {}
+
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "transactions").glob("*/*.json")
+    ]
+    assert len(records) == 2
+    assert {record["transaction_id"] for record in records} == {first_id, second_id}
+    assert TransactionQuery(tmp_path).get(first_id).effective_stop_source == "observed"
+    assert TransactionQuery(tmp_path).get(second_id).record["stop"] is None
+
+    exported = export_contract(tmp_path, after=0, limit=100)["data"]
+    starts = [
+        event for event in exported["events"]
+        if event["direction"] == "in" and event["action"] == "StartTransaction"
+    ]
+    assert len(starts) == 3
+    assert len({event["id"] for event in starts}) == 3
+    assert [event["transaction_id"] for event in starts] == [
+        first_id, first_id, second_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_websocket_orphan_stop_then_valid_start_does_not_adopt_foreign_id(tmp_path):
+    """Orphan evidence is acknowledged without creating a session or consuming its ID."""
+    server = CSMSServer(
+        host="127.0.0.1", port=0,
+        transactions=TransactionArchive(tmp_path), events=EventStore(tmp_path),
+    )
+    async with websockets.serve(
+        server.accept, "127.0.0.1", 0,
+        subprotocols=[OCPP_16_SUBPROTOCOL],
+    ) as listener:
+        port = listener.sockets[0].getsockname()[1]
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/ocpp/charger-a",
+            subprotocols=[OCPP_16_SUBPROTOCOL],
+        ) as websocket:
+            await websocket.send(call("orphan", "StopTransaction", {
+                "transactionId": 900000, "meterStop": 900,
+                "timestamp": "2026-10-02T12:00:00Z",
+            }))
+            assert await result(websocket, "orphan") == {}
+            await websocket.send(call("start", "StartTransaction", {
+                "connectorId": 1, "idTag": "card-a", "meterStart": 100,
+                "timestamp": "2026-10-02T12:01:00Z",
+            }))
+            valid_id = (await result(websocket, "start"))["transactionId"]
+
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "transactions").glob("*/*.json")
+    ]
+    assert len(records) == 1
+    assert records[0]["transaction_id"] == valid_id
+    assert valid_id != 900000
+    unresolved = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (tmp_path / "transactions-unresolved").glob("*/*.json")
+    ]
+    assert any(
+        item["transaction_id"] == 900000
+        and item["message_type"] == "StopTransaction"
+        for item in unresolved
+    )
