@@ -103,20 +103,13 @@ async def test_stop_and_meter_values_remain_orphan_evidence(tmp_path):
 
     assert isinstance(meter, call_result.MeterValuesPayload)
     assert isinstance(stop, call_result.StopTransactionPayload)
-    records = transaction_records(tmp_path)
-    assert records == []
-    unresolved = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in (tmp_path / "transactions-unresolved").glob("*/*.json")
-    ]
-    assert {entry["message_type"] for entry in unresolved} == {
-        "MeterValues", "StopTransaction"
-    }
-    assert all(entry["transaction_id"] == 999 for entry in unresolved)
-    assert [(entry[0], entry[2]) for entry in recorded] == [
-        ("MeterValues", "in"),
-        ("StopTransaction", "in"),
-    ]
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        rows = db.execute("SELECT action, transaction_id, payload_json FROM events ORDER BY id").fetchall()
+    assert [(action, tid) for action, tid, _ in rows] == [("MeterValues", 999), ("StopTransaction", 999)]
+    assert json.loads(rows[0][2])["meter_value"][0]["timestamp"] == "2026-10-01T15:05:00Z"
+    assert json.loads(rows[1][2])["meter_stop"] == 20
+
 
 
 @pytest.mark.asyncio
