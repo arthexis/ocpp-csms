@@ -161,10 +161,7 @@ WITH ordered AS (
 SELECT t.transaction_id, t.charger_id, t.connector_id,
        t.start_received_at, t.stop_received_at AS observed_stop_received_at,
        o.next_start_received_at,
-       CASE WHEN t.stop_received_at IS NOT NULL THEN 'observed'
-            WHEN o.next_start_received_at IS NOT NULL THEN 'next_start'
-            ELSE 'unresolved' END AS effective_stop_source,
-       COALESCE(t.stop_received_at, o.next_start_received_at) AS effective_stop_at
+       t.stop_received_at AS observed_stop_at
 FROM transactions AS t
 JOIN ordered AS o ON o.transaction_id = t.transaction_id;
 
@@ -178,7 +175,7 @@ SELECT t.transaction_id, t.charger_id, t.connector_id, t.id_tag,
                   AND t.meter_stop >= t.meter_start
             THEN t.meter_stop - t.meter_start END AS energy_wh,
        t.last_activity_at, t.start_received_at, t.stop_received_at,
-       b.next_start_received_at, b.effective_stop_source, b.effective_stop_at
+       b.next_start_received_at, b.observed_stop_at
 FROM transactions AS t
 JOIN transaction_boundaries AS b ON b.transaction_id = t.transaction_id;
 """
