@@ -114,18 +114,18 @@ def test_export_normalizes_meter_values_and_includes_source_event_identity(tmp_p
 
 def test_export_includes_current_snapshot_for_touched_transaction(tmp_path):
     store = EventStore(tmp_path)
-    _transaction(tmp_path, 7)
+    transaction_id = store.commit_start("charger-a", {"connector_id": 1, "id_tag": "CARD-A", "meter_start": 1000, "timestamp": "2026-10-07T12:00:00Z"})
     store.record_ocpp(
         "charger-a",
         "MeterValues",
-        {"connector_id": 1, "transaction_id": 7, "meter_value": []},
-        transaction_id=7,
+        {"connector_id": 1, "transaction_id": transaction_id, "meter_value": []},
+        transaction_id=transaction_id,
     )
 
     payload = export_contract(tmp_path, after=0, limit=10)
 
     [transaction] = payload["data"]["transactions"]
-    assert transaction["id"] == 7
+    assert transaction["id"] == transaction_id
     assert transaction["charger_id"] == "charger-a"
     assert transaction["connector_id"] == 1
     assert transaction["rfid"] == "CARD-A"
