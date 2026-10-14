@@ -6,7 +6,7 @@ import asyncio
 from ocpp_csms.control import send_control
 
 
-CONTROL_COMMANDS = ("reset",)
+CONTROL_COMMANDS = ("start", "reset",)
 
 
 def add_control_commands(
@@ -15,6 +15,14 @@ def add_control_commands(
     """Register charger control commands with the root CLI parser."""
     add = argparse.ArgumentParser.add_argument
 
+    start = subcommands.add_parser("start", help="Request a remote charging session")
+    add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
+    add(start, "--cp", dest="charger_option", help="Explicit charge point ID")
+    add(start, "--connector", type=int, help="Target connector ID; omit to let the charger choose")
+    add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
+    add(start, "--force", action="store_true", help="Override busy connector guard")
+    _add_timing_options(start)
+
     reset = subcommands.add_parser("reset", help="Request charger reset")
     add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
     add(reset, "--cp", dest="charger_option", help="Explicit charge point ID")
@@ -22,7 +30,7 @@ def add_control_commands(
     add(reset, "--force", action="store_true", help="Override active connector safety guard")
     _add_timing_options(reset)
 
-    return {"reset": reset}
+    return {"start": start, "reset": reset}
 
 
 def _add_timing_options(parser: argparse.ArgumentParser) -> None:
