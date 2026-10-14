@@ -5,6 +5,7 @@ from contextlib import closing
 import pytest
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 
 
 def database(tmp_path):
@@ -48,7 +49,7 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     )
     assert json.loads(event[4])["id_tag"] == "card-a"
     assert runtime == ("charger_connected", "charger-a")
-    assert version == 8
+    assert version == CURRENT_SCHEMA_VERSION
 
 
 def test_event_store_does_not_wait_for_locked_database(tmp_path):
