@@ -529,7 +529,6 @@ Default CSMS data:
   ocpp-csms.sqlite3
   ocpp-csms.sqlite3.schema-<old-version>.bak
   transactions/
-  transactions-unresolved/
 ```
 
 SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and diagnostic state. JSON transaction archives remain directly readable.
