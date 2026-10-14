@@ -19,7 +19,6 @@ from ocpp_csms.cli.inspect import add_inspect_command, run_inspect
 from ocpp_csms.cli.inspection import add_inspection_commands, run_inspection
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.maintenance import COMMANDS as MAINTENANCE_COMMANDS, add_maintenance_commands, run_maintenance
-from ocpp_csms.cli.mail import add_mail_command, run_mail
 from ocpp_csms.cli.report import add_report_command, run_report
 from ocpp_csms.cli.reservation import add_reservation_commands, run_reservation
 from ocpp_csms.cli.profile import add_profile_command, run_profile
@@ -53,7 +52,6 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["rfid"] = add_rfid_command(subcommands)
     commands["tls"] = add_tls_command(subcommands)
     commands["auth"] = add_auth_command(subcommands)
-    commands["mail"] = add_mail_command(subcommands)
     commands["report"] = add_report_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
@@ -132,7 +130,6 @@ def main() -> int:
         if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
         if args.command == "auth": return run_auth(args)
-        if args.command == "mail": return run_mail(args)
         if args.command == "report": return run_report(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
