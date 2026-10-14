@@ -321,3 +321,42 @@ def test_upgrade_schema_seven_drops_recovery_table(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
         ).fetchone() is None
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_wal_enabled_for_new_database_and_restarts(tmp_path):
+    store = EventStore(tmp_path)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    EventStore(tmp_path)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_existing_current_database_converts_to_wal_without_replacing_identity(tmp_path):
+    from ocpp_csms.schema import ensure_wal
+    info = create_current_schema(tmp_path)
+    original_id = source_id(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    ensure_wal(tmp_path)
+    assert source_id(tmp_path) == original_id
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_wal_conversion_refuses_active_reader_without_destroying_database(tmp_path):
+    from ocpp_csms.schema import ensure_wal
+    info = create_current_schema(tmp_path)
+    original_id = source_id(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        connection.execute("PRAGMA journal_mode=DELETE")
+    reader = sqlite3.connect(info.path)
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM appliance_metadata").fetchall()
+        with pytest.raises(RuntimeError, match="WAL readiness failed"):
+            ensure_wal(tmp_path)
+    finally:
+        reader.close()
+    assert source_id(tmp_path) == original_id
+    ensure_wal(tmp_path)
