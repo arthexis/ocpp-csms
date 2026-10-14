@@ -67,6 +67,7 @@ class SessionHandlers:
             await self.transactions.diagnostic_start(self.id, payload, transaction_id)
         except Exception:
             LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
+        self.live_transactions[transaction_id] = int(payload['connector_id'])
         return call_result.StartTransactionPayload(
             transaction_id=transaction_id,
             id_tag_info={"status": "Accepted"},
@@ -75,6 +76,7 @@ class SessionHandlers:
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
         self.events.commit_transaction_evidence(self.id, "StopTransaction", payload)
+        self.live_transactions.pop(int(payload["transaction_id"]), None)
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
