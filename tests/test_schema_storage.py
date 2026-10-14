@@ -88,7 +88,7 @@ def test_installer_storage_commands_are_separate_from_legacy_ansible(tmp_path, c
     prepared = json.loads(capsys.readouterr().out)
     assert prepared["target"] == planned["target"]
     assert main(["storage-prepare", "--storage-root", root]) == 1
-    assert "already exists" in capsys.readouterr().out
+    assert "versioned storage exists without an active current pointer" in capsys.readouterr().out
 
 
 def test_installer_storage_plan_rejects_downgrade(tmp_path, capsys):
