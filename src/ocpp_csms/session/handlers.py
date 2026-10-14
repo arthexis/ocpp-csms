@@ -60,22 +60,9 @@ class SessionHandlers:
                 id_tag_info={"status": authorization},
             )
 
-        transaction_id = None
-        try:
-            transaction_id = self.events.find_recent_start(self.id, payload)
-        except Exception:
-            LOGGER.exception("frame %s", self.connection.last_frame)
-
-        if transaction_id is None:
-            transaction_id = await self.transactions.start(self.id, payload)
-            try:
-                self.events.record_transaction_start(transaction_id, self.id, payload)
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
-        else:
-            LOGGER.info("deduplicated StartTransaction %s", transaction_id)
-
-        self._record("StartTransaction", payload, transaction_id=transaction_id)
+        # The event, exact-retry identity, and allocation commit together.
+        # Never acknowledge an uncommitted transaction or allocate from JSON.
+        transaction_id = self.events.commit_start(self.id, payload)
         return call_result.StartTransactionPayload(
             transaction_id=transaction_id,
             id_tag_info={"status": "Accepted"},
