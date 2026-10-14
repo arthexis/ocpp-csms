@@ -15,17 +15,16 @@ def start():
 
 def test_sqlite_retry_identity_survives_restart_without_json(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(41, "charger-a", start())
+    transaction_id = store.commit_start("charger-a", start())
     restarted = EventStore(tmp_path)
-    assert restarted.find_recent_start("charger-a", start(), window_seconds=10**10) == 41
+    assert restarted.commit_start("charger-a", start()) == transaction_id
     assert not list((tmp_path / "transactions").glob("*/*.json"))
 
 
 def test_sqlite_export_does_not_require_json_archive(tmp_path):
     store = EventStore(tmp_path)
     payload = start()
-    store.record_transaction_start(41, "charger-a", payload)
-    store.record_ocpp("charger-a", "StartTransaction", payload, transaction_id=41)
+    transaction_id = store.commit_start("charger-a", payload)
     events = export_contract(tmp_path, after=0, limit=100)["data"]["events"]
     assert any(event["action"] == "StartTransaction" for event in events)
     assert not list((tmp_path / "transactions").glob("*/*.json"))
@@ -38,12 +37,12 @@ def test_sqlite_exact_retry_lookup_has_no_time_window(tmp_path):
     with sqlite3.connect(store.path) as connection:
         connection.execute(
             "UPDATE transactions SET start_received_at = ? WHERE transaction_id = ?",
-            ("2020-01-01T00:00:00Z", 41),
+            ("2020-01-01T00:00:00Z", transaction_id),
         )
-    assert EventStore(tmp_path).find_recent_start("charger-a", start()) == 41
+    assert EventStore(tmp_path).commit_start("charger-a", start()) == transaction_id
 
 
 def test_sqlite_retry_identity_is_charge_point_scoped(tmp_path):
     store = EventStore(tmp_path)
     store.record_transaction_start(41, "charger-a", start())
-    assert store.find_recent_start("charger-b", start(), window_seconds=10**10) is None
+    assert store.commit_start("charger-b", start()) != transaction_id
