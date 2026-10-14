@@ -75,19 +75,11 @@ class SessionHandlers:
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
         self.events.commit_transaction_evidence(self.id, "StopTransaction", payload)
-        try:
-            await self.transactions.stop(self.id, payload)
-        except Exception:
-            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
         self.events.commit_transaction_evidence(self.id, "MeterValues", payload)
-        try:
-            await self.transactions.meter_values(self.id, payload)
-        except Exception:
-            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.MeterValuesPayload()
 
     @on("DiagnosticsStatusNotification")
