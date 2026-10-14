@@ -59,4 +59,4 @@ def prepare_storage(plan: StoragePlan) -> SchemaInfo:
         raise RuntimeError(f"target schema directory already exists: {plan.target}")
     # create_current_schema is exclusive about the SQLite file; directory-level
     # exclusivity is enforced above. Deployment must serialize preparation.
-    return create_current_schema(plan.target)
+    # Reserve the directory exclusively so concurrent preparations cannot reuse it.\n    plan.target.mkdir(parents=True, exist_ok=False)\n    return create_current_schema(plan.target)
