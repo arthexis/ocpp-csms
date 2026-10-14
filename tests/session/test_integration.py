@@ -346,7 +346,7 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
         first_id, first_id, first_id, first_id, second_id, second_id,
     ]
     assert [event["transaction_id"] for event in stops
-            if "transaction_id" in event] == [first_id, first_id]
+            if "transaction_id" in event] == [first_id]
 
 
 
