@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from contextlib import closing
 import time
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def verify_schema_integrity(data_dir: str | Path) -> None:
     info = inspect_schema(data_dir)
     if info.version != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"schema verification failed: expected {CURRENT_SCHEMA_VERSION}, got {info.version}")
-    with sqlite3.connect(f"file:{info.path}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)) as connection:
         mode = connection.execute("PRAGMA journal_mode").fetchone()
         if mode is None or str(mode[0]).lower() != "wal":
             raise RuntimeError(f"database WAL verification failed: {mode}")
@@ -66,7 +67,7 @@ def connection_markers(data_dir: str | Path, expected: tuple[str, ...]) -> dict[
     markers = {charger: 0 for charger in expected}
     if not expected or not database.exists():
         return markers
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         for charger in expected:
             row = connection.execute(
                 """
@@ -84,7 +85,7 @@ def _freshly_connected(data_dir: Path, markers: dict[str, int]) -> set[str]:
     if not database.exists():
         return set()
     connected: set[str] = set()
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
         for charger, marker in markers.items():
             row = connection.execute(
                 """
