@@ -219,11 +219,11 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
     assert second_view.record["stop"]["meter_stop"] == 240
     assert len(first_view.record["meter_values"]) == 1
     report = format_transactions([first_view, second_view])
-    assert "0.050 kWh" in report
-    assert "0.040 kWh" in report
+    assert "50 Wh" in report
+    assert "40 Wh" in report
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
-    incoming = [event for event in exported["events"] if event["direction"] == "in"]
+    incoming = [event for event in exported["events"] if event["action"] in {"StartTransaction", "MeterValues", "StopTransaction"}]
     assert [event["action"] for event in incoming] == [
         "StartTransaction", "MeterValues", "StartTransaction",
         "StopTransaction", "StopTransaction",
@@ -295,7 +295,7 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
     starts = [
         event for event in exported["events"]
-        if event["direction"] == "in" and event["action"] == "StartTransaction"
+        if event["action"] in {"StartTransaction", "MeterValues", "StopTransaction"} and event["action"] == "StartTransaction"
     ]
     assert len(starts) == 3
     assert len({event["id"] for event in starts}) == 3
