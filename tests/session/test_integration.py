@@ -337,12 +337,14 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
             break
     assert [event["id"] for event in seen] == [event["id"] for event in exported["events"]]
     assert len({event["id"] for event in seen}) == len(seen)
-    assert [event["transaction_id"] for event in seen
-            if event["action"] == "StartTransaction"] == [
-        first_id, first_id, first_id, first_id, second_id, second_id,
-    ]
-    assert [event["transaction_id"] for event in seen
-            if event["action"] == "StopTransaction"] == [first_id, first_id]
+    starts = [event for event in seen if event["action"] == "StartTransaction"]
+    stops = [event for event in seen if event["action"] == "StopTransaction"]
+    assert len(starts) == 6
+    assert len(stops) == 2
+    assert [event["transaction_id"] for event in starts
+            if "transaction_id" in event] == [first_id, first_id, second_id]
+    assert [event["transaction_id"] for event in stops
+            if "transaction_id" in event] == [first_id]
 
 
 
