@@ -178,8 +178,8 @@ async def test_query_derives_next_start_boundary_without_mutating_archive(tmp_pa
     assert before["status"] == "open"
     assert second["start_received_at"] is not None
     # Reporting derives the boundary without writing synthetic evidence.
-    assert view.effective_stop_source == "next_start"
-    assert view.effective_stop_at == second["start_received_at"]
+    assert view.next_start_received_at is not None
+    assert view.next_start_received_at == TransactionQuery(tmp_path).get(second["transaction_id"]).record["start_received_at"]
     assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == before
 
 
@@ -190,7 +190,7 @@ async def test_late_real_stop_takes_precedence_over_derived_boundary(tmp_path):
     await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
     EventStore(tmp_path).commit_transaction_evidence(CP, "StopTransaction", stop(first))
     view = TransactionQuery(tmp_path).get(first)
-    assert view.effective_stop_source == "observed"
+    assert view.status == "stopped"
     assert view.record["stop"]["transaction_id"] == first
 
 
@@ -206,8 +206,8 @@ async def test_new_start_on_other_connector_does_not_infer_stop(tmp_path):
     assert view.record["start"] == before["start"]
     assert view.status == "open"
     assert before["stop"] is None
-    assert view.effective_stop_source == "unresolved"
-    assert view.effective_stop_at is None
+    assert view.next_start_received_at is None
+    assert view.next_start_received_at is None
     assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == before
 
 
@@ -245,7 +245,7 @@ async def test_distinct_start_on_other_charge_point_cannot_infer_boundary(tmp_pa
     first = await archive.start(CP, start())
     await archive.start("charger-b", start(timestamp="2026-10-03T10:05:00Z"))
     view = TransactionQuery(tmp_path).get(first)
-    assert view.effective_stop_source == "unresolved"
+    assert view.next_start_received_at is None
 
 
 @pytest.mark.asyncio
@@ -269,8 +269,8 @@ async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, m
     assert view is not None
     assert view.record["transaction_id"] == first
     assert view.record["start"] == records[first]["start"]
-    assert view.effective_stop_source == "next_start"
-    assert view.effective_stop_at == successor["start_received_at"]
+    assert view.next_start_received_at is not None
+    assert view.next_start_received_at == TransactionQuery(tmp_path).get(successor["transaction_id"]).record["start_received_at"]
     assert records[first]["stop"] is None
     assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == records[first]
 
@@ -306,7 +306,7 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
     first = await archive.start(CP, start())
     await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
     view = TransactionQuery(tmp_path).get(first)
-    assert view.effective_stop_source == "next_start"
+    assert view.next_start_received_at is not None
     assert view.record["stop"] is None
     assert view.record.get("meter_values", []) == []
     assert view.record.get("stop") is None
@@ -403,7 +403,7 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
     assert "Stopped:      2026-10-03T10:10:30Z" in detail
     assert "Duration:     10m 30s" in detail
     assert "Energy:       600 Wh" in detail
-    assert view.effective_stop_source == "observed"
+    assert view.status == "stopped"
     assert view.record["stop"]["timestamp"] == "2026-10-03T10:10:30Z"
 
 
