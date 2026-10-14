@@ -1,0 +1,30 @@
+---
+# B1 preparation only. B3 will invoke this from the coordinated cutover.
+# Never use the candidate directory for preflight or the live service here.
+- name: Plan schema-versioned storage without mutation
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - storage-plan
+      - --storage-root
+      - "{{ ocpp_csms_data_dir }}"
+  register: ocpp_csms_storage_plan
+  changed_when: false
+
+- name: Capture schema-versioned storage plan
+  ansible.builtin.set_fact:
+    ocpp_csms_storage_selection: "{{ ocpp_csms_storage_plan.stdout | from_json }}"
+
+- name: Prepare new schema storage without activating it
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - storage-prepare
+      - --storage-root
+      - "{{ ocpp_csms_data_dir }}"
+  when: ocpp_csms_storage_selection.action == 'create'
+  changed_when: true
