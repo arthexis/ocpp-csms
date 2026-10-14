@@ -244,7 +244,7 @@ class TransactionQuery:
                     record["start"] = payload
                 elif event["action"] == "StopTransaction":
                     # The first committed stop is authoritative, not a later retry.
-                    if event["received_at"] == row["stop_received_at"]:
+                    if event["received_at"] == row["stop_received_at"] and record["stop"] is None:
                         record["stop"] = payload
                 elif event["action"] == "MeterValues":
                     record["meter_values"].append(payload)
