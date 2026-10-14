@@ -289,3 +289,34 @@ def test_explicit_upgrade_from_v6_preserves_high_water_and_existing_rows(tmp_pat
     with sqlite3.connect(info.path) as connection:
         assert connection.execute("SELECT last_id FROM transaction_allocator").fetchone() == (242,)
         assert connection.execute("SELECT transaction_id FROM transactions ORDER BY transaction_id").fetchall() == [(241,), (242,)]
+
+
+def test_fresh_schema_has_no_recovery_table(tmp_path):
+    import sqlite3
+    from ocpp_csms.schema import create_current_schema, database_path
+
+    create_current_schema(tmp_path)
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
+        ).fetchone() is None
+
+
+def test_upgrade_schema_eight_drops_recovery_table(tmp_path):
+    import sqlite3
+    from ocpp_csms.schema import create_current_schema, database_path, upgrade_schema
+
+    create_current_schema(tmp_path)
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        db.execute(
+            "CREATE TABLE transaction_recoveries (transaction_id INTEGER PRIMARY KEY, reason TEXT)"
+        )
+        db.execute("INSERT INTO transaction_recoveries VALUES (42, 'legacy')")
+        db.execute("PRAGMA user_version = 8")
+    upgraded = upgrade_schema(tmp_path)
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
+        ).fetchone() is None
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
