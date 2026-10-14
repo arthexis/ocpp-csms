@@ -6,8 +6,22 @@ import ocpp_csms.cli.rfid as rfid_module
 from ocpp_csms.cli import build_parser
 from ocpp_csms.cli.rfid import run_rfid, run_rfid_edit
 from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot
-from ocpp_csms.transactions.archive import TransactionArchive
+from ocpp_csms.evidence.store import EventStore
 from tests.rfid.helpers import cache_state, report_args as args, start_payload, stop_payload
+
+
+
+class SQLiteTransactions:
+    """RFID reporting fixtures commit through the authoritative event store."""
+
+    def __init__(self, data_dir):
+        self.store = EventStore(data_dir)
+
+    async def start(self, charge_point_id, payload):
+        return self.store.commit_start(charge_point_id, payload)
+
+    async def stop(self, charge_point_id, payload):
+        self.store.commit_transaction_evidence(charge_point_id, "StopTransaction", payload)
 
 
 def test_parser_accepts_rfid_report_with_optional_tag():
@@ -68,7 +82,7 @@ def test_rfid_edit_falls_back_to_nano_and_propagates_failure(monkeypatch, tmp_pa
 
 @pytest.mark.asyncio
 async def test_report_lists_transactions_and_sums_complete_energy(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     first = await archive.start("charger-a", start_payload(meter_start=1000, timestamp="2026-10-06T10:00:00Z"))
     await archive.stop("charger-a", stop_payload(first, meter_stop=2500, timestamp="2026-10-06T10:30:00Z"))
     second = await archive.start("charger-a", start_payload(meter_start=3000, timestamp="2026-10-06T11:00:00Z"))
@@ -86,7 +100,7 @@ async def test_report_lists_transactions_and_sums_complete_energy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_report_qualifies_energy_only_when_transaction_energy_is_missing(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     complete = await archive.start("charger-a", start_payload(meter_start=1000))
     await archive.stop("charger-a", stop_payload(complete, meter_stop=2500))
     await archive.start("charger-a", start_payload(meter_start=3000, timestamp="2026-10-06T11:00:00Z"))
@@ -105,7 +119,7 @@ def test_report_for_unseen_rfid_is_empty(tmp_path):
 
 @pytest.mark.asyncio
 async def test_report_without_tag_summarizes_observed_rfids(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     a1 = await archive.start(
         "charger-a",
         start_payload(id_tag="card-a", meter_start=1000, timestamp="2026-10-06T10:00:00Z"),
@@ -146,7 +160,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
         "rfid,name,enabled\ncard-a,Alice,true\ncard-b,Former,false\n",
         encoding="utf-8",
     )
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     for index, tag in enumerate(("card-a", "card-b", "card-c"), start=1):
         transaction_id = await archive.start(
             "charger-a",
@@ -180,7 +194,7 @@ async def test_summary_adds_allow_and_name_only_when_authorization_file_exists(t
 
 @pytest.mark.asyncio
 async def test_summary_marks_incomplete_energy_per_rfid(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     complete = await archive.start("charger-a", start_payload(id_tag="card-a", meter_start=1000))
     await archive.stop("charger-a", stop_payload(complete, meter_stop=2500))
     await archive.start(
@@ -195,7 +209,7 @@ async def test_summary_marks_incomplete_energy_per_rfid(tmp_path):
 
 @pytest.mark.asyncio
 async def test_summary_last_seen_uses_latest_activity_even_when_transaction_open(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     first = await archive.start(
         "charger-a", start_payload(id_tag="card-a", timestamp="2026-10-06T09:00:00Z"),
     )
@@ -218,7 +232,7 @@ def test_summary_with_no_captured_rfids_is_empty(tmp_path):
 
 @pytest.mark.asyncio
 async def test_summary_uses_known_cache_as_allow_source_when_no_rfid_file(monkeypatch, tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start(
         "charger-a",
         start_payload(id_tag="card-a", meter_start=1000),
@@ -260,7 +274,7 @@ async def test_summary_shows_allow_and_cache_when_file_and_known_cache_both_exis
         "rfid,name,enabled\ncard-a,Alice,true\ncard-b,Bob,false\ncard-c,Carol,true\n",
         encoding="utf-8",
     )
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     for index, tag in enumerate(("card-a", "card-b", "card-c"), start=1):
         transaction_id = await archive.start(
             "charger-a",
@@ -311,7 +325,7 @@ async def test_summary_shows_allow_and_cache_when_file_and_known_cache_both_exis
 @pytest.mark.asyncio
 async def test_summary_shows_unknown_cache_when_connected_version_is_not_in_history(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -330,7 +344,7 @@ async def test_summary_shows_unknown_cache_when_connected_version_is_not_in_hist
 @pytest.mark.asyncio
 async def test_summary_omits_cache_when_charger_is_disconnected(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -345,7 +359,7 @@ async def test_summary_omits_cache_when_charger_is_disconnected(monkeypatch, tmp
 
 @pytest.mark.asyncio
 async def test_summary_ignores_connected_charger_cache_when_we_have_no_history(monkeypatch, tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -367,7 +381,7 @@ async def test_summary_reports_current_sync_when_file_hash_matches_known_cache(m
         "rfid,name,enabled\ncard-a,Alice,true\ncard-b,Bob,false\n",
         encoding="utf-8",
     )
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -393,7 +407,7 @@ async def test_summary_reports_current_sync_when_file_hash_matches_known_cache(m
 @pytest.mark.asyncio
 async def test_summary_reports_differs_when_file_hash_differs_from_known_cache(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -416,7 +430,7 @@ async def test_summary_reports_differs_when_file_hash_differs_from_known_cache(m
 @pytest.mark.asyncio
 async def test_summary_reports_unknown_sync_for_unrecognized_live_cache(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -434,7 +448,7 @@ async def test_summary_reports_unknown_sync_for_unrecognized_live_cache(monkeypa
 
 @pytest.mark.asyncio
 async def test_summary_with_cache_but_no_file_omits_sync_line(monkeypatch, tmp_path):
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -456,7 +470,7 @@ async def test_summary_with_cache_but_no_file_omits_sync_line(monkeypatch, tmp_p
 @pytest.mark.asyncio
 async def test_summary_without_live_cache_omits_cache_summary(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
@@ -471,7 +485,7 @@ async def test_summary_without_live_cache_omits_cache_summary(monkeypatch, tmp_p
 @pytest.mark.asyncio
 async def test_summary_with_no_cache_history_omits_cache_summary(monkeypatch, tmp_path):
     (tmp_path / "rfid.csv").write_text("card-a,Alice,true\n", encoding="utf-8")
-    archive = TransactionArchive(tmp_path)
+    archive = SQLiteTransactions(tmp_path)
     transaction_id = await archive.start("charger-a", start_payload(id_tag="card-a"))
     await archive.stop("charger-a", stop_payload(transaction_id, meter_stop=2000))
 
