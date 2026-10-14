@@ -12,6 +12,7 @@ from ocpp_csms.schema import (
     create_current_schema,
     inspect_schema,
     require_supported_schema,
+    upgrade_schema,
 )
 from ocpp_csms.time import utc_now_iso
 
@@ -30,8 +31,8 @@ class EventStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=0)
-        connection.execute("PRAGMA busy_timeout = 0")
+        connection = sqlite3.connect(self.path, timeout=5)
+        connection.execute("PRAGMA busy_timeout = 5000")
         return connection
 
     def _initialize(self) -> None:
@@ -39,7 +40,10 @@ class EventStore:
         if not schema.exists:
             create_current_schema(self.data_dir)
             return
-        require_supported_schema(schema)
+        if schema.version is not None and schema.version < CURRENT_SCHEMA_VERSION:
+            upgrade_schema(self.data_dir)
+        else:
+            require_supported_schema(schema)
 
     def record_ocpp(
         self,
@@ -73,6 +77,55 @@ class EventStore:
                 ),
             )
 
+    def commit_start(self, charger_id: str, payload: dict[str, Any]) -> int:
+        """Commit exact retry identity and every received StartTransaction atomically."""
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        now = utc_now_iso()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT transaction_id FROM start_identities WHERE charger_id = ? AND payload_json = ?",
+                (charger_id, canonical),
+            ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    "SELECT last_id FROM transaction_allocator WHERE singleton = 1"
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("SQLite transaction allocator is missing")
+                next_id = int(row[0]) + 1
+                if next_id > 2147483647:
+                    raise OverflowError("OCPP transaction ID space exhausted")
+                connection.execute(
+                    "UPDATE transaction_allocator SET last_id = ? WHERE singleton = 1",
+                    (next_id,),
+                )
+                connection.execute(
+                    """INSERT INTO transactions (
+                        transaction_id, charger_id, connector_id, id_tag,
+                        meter_start, started_at, start_received_at, state, last_activity_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)""",
+                    (next_id, charger_id, int(payload["connector_id"]),
+                     str(payload["id_tag"]), int(payload["meter_start"]),
+                     str(payload["timestamp"]), now, now),
+                )
+                connection.execute(
+                    "INSERT INTO start_identities (charger_id, payload_json, transaction_id) VALUES (?, ?, ?)",
+                    (charger_id, canonical, next_id),
+                )
+                transaction_id = next_id
+            else:
+                transaction_id = int(row[0])
+            connection.execute(
+                """INSERT INTO events (
+                    received_at, charger_id, action, direction, transaction_id,
+                    id_tag, charger_timestamp, payload_json
+                ) VALUES (?, ?, 'StartTransaction', 'in', ?, ?, ?, ?)""",
+                (now, charger_id, transaction_id, str(payload["id_tag"]),
+                 str(payload["timestamp"]), json.dumps(payload, sort_keys=True, ensure_ascii=False)),
+            )
+        return transaction_id
+
     def find_recent_start(
         self,
         charger_id: str,
@@ -80,26 +133,11 @@ class EventStore:
         *,
         window_seconds: int = 60,
     ) -> int | None:
-        threshold = (
-            datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
-        ).isoformat(timespec="microseconds").replace("+00:00", "Z")
-        values = (
-            charger_id,
-            int(payload["connector_id"]),
-            str(payload["id_tag"]),
-            int(payload["meter_start"]),
-            str(payload["timestamp"]),
-            threshold,
-        )
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         with self._connect() as connection:
             row = connection.execute(
-                """
-                SELECT transaction_id FROM transactions
-                WHERE charger_id = ? AND connector_id = ? AND id_tag = ?
-                  AND meter_start = ? AND started_at = ? AND start_received_at >= ?
-                ORDER BY start_received_at DESC LIMIT 1
-                """,
-                values,
+                "SELECT transaction_id FROM start_identities WHERE charger_id = ? AND payload_json = ?",
+                (charger_id, canonical),
             ).fetchone()
         return int(row[0]) if row else None
 
