@@ -126,65 +126,6 @@ class EventStore:
             )
         return transaction_id
 
-    def find_recent_start(
-        self,
-        charger_id: str,
-        payload: dict[str, Any],
-        *,
-        window_seconds: int = 60,
-    ) -> int | None:
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT transaction_id FROM start_identities WHERE charger_id = ? AND payload_json = ?",
-                (charger_id, canonical),
-            ).fetchone()
-        return int(row[0]) if row else None
-
-    def record_transaction_start(
-        self,
-        transaction_id: int,
-        charger_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        now = utc_now_iso()
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                INSERT INTO transactions (
-                    transaction_id, charger_id, connector_id, id_tag,
-                    meter_start, started_at, start_received_at, state, last_activity_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-                """,
-                (
-                    transaction_id,
-                    charger_id,
-                    int(payload["connector_id"]),
-                    str(payload["id_tag"]),
-                    int(payload["meter_start"]),
-                    str(payload["timestamp"]),
-                    now,
-                    now,
-                ),
-            )
-            connection.execute(
-                "INSERT INTO start_identities (charger_id, payload_json, transaction_id) VALUES (?, ?, ?)",
-                (charger_id, canonical, int(transaction_id)),
-            )
-            connection.execute(
-                "UPDATE transaction_allocator SET last_id = MAX(last_id, ?) WHERE singleton = 1",
-                (int(transaction_id),),
-            )
-
-    def record_transaction_activity(self, transaction_id: int) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                "UPDATE transactions SET last_activity_at = ? WHERE transaction_id = ?",
-                (utc_now_iso(), int(transaction_id)),
-            )
-
     def commit_transaction_evidence(
         self, charger_id: str, action: str, payload: dict[str, Any]
     ) -> None:
