@@ -82,4 +82,6 @@ def test_query_committed_stop_overrides_later_retry(tmp_path):
     })
     view = TransactionQuery(tmp_path).get(transaction_id)
     assert view.record["stop"]["meter_stop"] == 200
-    assert view.record["effective_stop_source"] == "observed"
+    assert view.status == "stopped"
+    assert view.record["stop_received_at"] is not None
+    assert view.next_start_received_at is None
