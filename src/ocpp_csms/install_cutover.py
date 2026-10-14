@@ -7,6 +7,7 @@ from contextlib import closing
 import time
 from pathlib import Path
 
+from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
 from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage
 from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
@@ -164,6 +165,9 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--storage-root", required=True)
     prepare.add_argument("--active-data-dir")
 
+    evidence = subcommands.add_parser("storage-evidence")
+    evidence.add_argument("--data-dir", required=True)
+
     verify = subcommands.add_parser("schema-verify")
     verify.add_argument("--data-dir", required=True)
 
@@ -195,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"action": plan.action, "target": str(plan.target),
                               "active_schema": plan.active_schema,
                               "active": str(plan.active) if plan.active else None}, sort_keys=True))
+            return 0
+        if args.command == "storage-evidence":
+            committed = has_committed_ocpp_evidence(args.data_dir)
+            print(json.dumps({"committed_ocpp_evidence": committed}))
             return 0
         if args.command == "schema-check":
             print(schema_action(args.data_dir))
