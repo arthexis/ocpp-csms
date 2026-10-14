@@ -29,6 +29,7 @@ certbot_email=""
 no_certbot=0
 adopt=0
 uninstall=0
+force_handoff=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -57,6 +58,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --reconnect=*)
             reconnect_seconds=${1#--reconnect=}
+            shift
+            ;;
+        --force)
+            force_handoff=1
             shift
             ;;
         --stage-only)
@@ -143,7 +148,7 @@ if [ "$uninstall" -eq 1 ]; then
         printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
         exit 2
     fi
-    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+    if [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
         exit 2
     fi
@@ -246,6 +251,10 @@ fi
 if [ -n "$reconnect_seconds" ]; then
     validate_positive_seconds --reconnect "$reconnect_seconds"
     set -- -e "ocpp_csms_reconnect_timeout=$reconnect_seconds" "$@"
+fi
+
+if [ "$force_handoff" -eq 1 ]; then
+    set -- -e ocpp_csms_force_handoff=true "$@"
 fi
 
 if [ "$dev" -eq 1 ]; then
