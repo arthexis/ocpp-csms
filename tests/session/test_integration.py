@@ -321,6 +321,29 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
     assert [row[1] for row in starts] == [first_id, first_id, second_id]
     assert len([event for event in exported["events"] if event["action"] == "StartTransaction"]) == 6
 
+    # Restart and retry keep one transaction identity while each frame has its own cursor.
+    first_page = export_contract(tmp_path, after=0, limit=2)["data"]
+    replay = export_contract(tmp_path, after=0, limit=2)["data"]
+    assert replay["events"] == first_page["events"]
+    assert replay["cursor"] == first_page["cursor"]
+    assert first_page["cursor"]["more"] is True
+    cursor = first_page["cursor"]["next"]
+    seen = list(first_page["events"])
+    while True:
+        page = export_contract(tmp_path, after=cursor, limit=2)["data"]
+        seen.extend(page["events"])
+        cursor = page["cursor"]["next"]
+        if not page["cursor"]["more"]:
+            break
+    assert [event["id"] for event in seen] == [event["id"] for event in exported["events"]]
+    assert len({event["id"] for event in seen}) == len(seen)
+    assert [event["transaction_id"] for event in seen
+            if event["action"] == "StartTransaction"] == [
+        first_id, first_id, first_id, first_id, second_id, second_id,
+    ]
+    assert [event["transaction_id"] for event in seen
+            if event["action"] == "StopTransaction"] == [first_id, first_id]
+
 
 
 @pytest.mark.asyncio
