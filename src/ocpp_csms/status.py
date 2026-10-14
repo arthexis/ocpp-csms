@@ -9,7 +9,6 @@ from typing import Any
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
-from ocpp_csms.transactions.query import TransactionQuery
 
 
 @dataclass
@@ -57,13 +56,6 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     transactions = root / "transactions"
     running = process_is_running(root)
     rfid_authorization = load_rfid_authorization(root)
-    active_chargers = sorted(
-        {
-            view.charge_point_id
-            for view in TransactionQuery(root).active()
-            if view.charge_point_id
-        }
-    )
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
@@ -71,7 +63,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         "server": "running" if running else "stopped",
         "started_at": None,
         "chargers": [],
-        "active_chargers": active_chargers,
+        "active_chargers": [],
         "rfid_authorization": (
             None
             if rfid_authorization.allow_all
@@ -109,6 +101,13 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         result["transactions"] = "ok" if transactions.is_dir() else "error"
     if result["database"] == "ok":
         result["chargers"] = charger_statuses(database, live_since_id=live_since_id)
+        result["active_chargers"] = sorted({
+            charger.charger_id for charger in result["chargers"]
+            if charger.connected and any(
+                connector.status in {"Charging", "SuspendedEV", "SuspendedEVSE"}
+                for connector in charger.connectors
+            )
+        })
     return result
 
 
@@ -226,23 +225,17 @@ def _charger_status(
             )
         )
 
+    # Operational status comes from reported connector evidence, not historical
+    # SQLite transactions that may remain open indefinitely after power loss.
     transaction = transaction_rows[0] if transaction_rows else None
     summary_status = None
     summary_error = None
     summary_info = None
-    if transaction and transaction["connector_id"] is not None:
-        active_connector = statuses.get(int(transaction["connector_id"]))
-        if active_connector:
-            summary_status = active_connector["status"]
-            summary_error = active_connector["error_code"]
-            summary_info = active_connector['info']
-        else:
-            summary_status = "Charging"
-    elif status_rows:
+    if status_rows:
         latest_status = max(status_rows, key=lambda row: row["received_at"])
         summary_status = latest_status["status"]
         summary_error = latest_status["error_code"]
-        summary_info = latest_status['info']
+        summary_info = latest_status["info"]
 
     # An emergency fault on any physical connector must be visible at charger level,
     # even when connector 0 reports Available or no transaction ever existed.
@@ -303,7 +296,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
                     lines.append(f"  Info: {connector.info}")
                 lines.extend(
                     [
-                        f"  Charging: {'yes' if connector.transaction_id is not None else 'no'}",
+                        f"  Charging: {'yes' if connector.status == 'Charging' else 'no' if connector.status in {'Available', 'Finishing', 'Unavailable', 'Faulted'} else 'unknown'}",
                         f"  Transaction: {connector.transaction_id if connector.transaction_id is not None else '-'}",
                         f"  RFID: {connector.id_tag or '-'}",
                         f"  Started: {connector.started_at or '-'}",
