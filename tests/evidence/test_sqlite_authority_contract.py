@@ -44,5 +44,5 @@ def test_sqlite_exact_retry_lookup_has_no_time_window(tmp_path):
 
 def test_sqlite_retry_identity_is_charge_point_scoped(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(41, "charger-a", start())
+    transaction_id = store.commit_start("charger-a", start())
     assert store.commit_start("charger-b", start()) != transaction_id
