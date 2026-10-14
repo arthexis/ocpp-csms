@@ -22,8 +22,6 @@ def analyze_transaction(data_dir, transaction_id, *, context_minutes=0):
         finding("stop_recorded", "info", "observed", "StopTransaction is recorded")
     else:
         finding("missing_stop", "warning", "observed", "No StopTransaction is recorded; charging outcome is unknown")
-    if view.unresolved:
-        finding("unresolved_evidence", "warning", "observed", f"{len(view.unresolved)} unresolved evidence record(s)")
     if view.active and view.connector_id is not None:
         overlaps = sorted(other.transaction_id for other in TransactionQuery(data_dir).active(
             charger=view.charge_point_id, connector=view.connector_id
@@ -31,7 +29,7 @@ def analyze_transaction(data_dir, transaction_id, *, context_minutes=0):
         if overlaps:
             finding("overlapping_open_transactions", "warning", "observed",
                     f"Other open transactions on connector {view.connector_id}: {overlaps}")
-    # Compare archive meterStart/meterStop only when both are recorded. A lower
+    # Compare recorded meterStart/meterStop only when both are present. A lower
     # meterStop is anomalous, but meter rollover or reset remains possible.
     start_payload, stop_payload = record.get("start"), record.get("stop")
     if isinstance(start_payload, dict) and isinstance(stop_payload, dict):
