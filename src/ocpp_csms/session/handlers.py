@@ -63,6 +63,10 @@ class SessionHandlers:
         # The event, exact-retry identity, and allocation commit together.
         # Never acknowledge an uncommitted transaction or allocate from JSON.
         transaction_id = self.events.commit_start(self.id, payload)
+        try:
+            await self.transactions.diagnostic_start(self.id, payload, transaction_id)
+        except Exception:
+            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.StartTransactionPayload(
             transaction_id=transaction_id,
             id_tag_info={"status": "Accepted"},
