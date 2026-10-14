@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from ocpp_csms.transactions.archive import default_data_dir
+from ocpp_csms.schema import database_path
 
 _ACTIVE_STATUSES = {"open", "recovered"}
 
@@ -193,31 +195,73 @@ class TransactionQuery:
         return matches[0] if matches else None
 
     def _views(self) -> Iterable[TransactionView]:
-        unresolved = self._unresolved_by_transaction()
-        if not self.transactions_dir.exists():
+        """Read authoritative SQLite summaries and their recorded OCPP evidence."""
+        path = database_path(self.data_dir)
+        if not path.is_file():
             return ()
-        views: list[TransactionView] = []
-        for path in self.transactions_dir.glob("*/*.json"):
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-                transaction_id = int(record["transaction_id"])
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-                continue
-            views.append(TransactionView(record=record, path=path, unresolved=tuple(unresolved.get(transaction_id, ()))))
-        return views
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute("SELECT * FROM transaction_summary").fetchall()
+            evidence = connection.execute(
+                """SELECT transaction_id, action, payload_json, received_at
+                   FROM events WHERE direction = 'in' AND transaction_id IS NOT NULL
+                     AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
+                   ORDER BY id"""
+            ).fetchall()
 
-    def _unresolved_by_transaction(self) -> dict[int, list[dict[str, Any]]]:
-        grouped: dict[int, list[dict[str, Any]]] = {}
-        if not self.unresolved_dir.exists():
-            return grouped
-        for path in self.unresolved_dir.glob("*/*.json"):
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-                transaction_id = int(record["transaction_id"])
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-                continue
-            grouped.setdefault(transaction_id, []).append(record)
-        return grouped
+        grouped: dict[int, list[sqlite3.Row]] = {}
+        for event in evidence:
+            grouped.setdefault(int(event["transaction_id"]), []).append(event)
+
+        views: list[TransactionView] = []
+        for row in rows:
+            transaction_id = int(row["transaction_id"])
+            record: dict[str, Any] = {
+                "transaction_id": transaction_id,
+                "charge_point_id": row["charger_id"],
+                "status": row["state"],
+                "id_tag": row["id_tag"],
+                "start_received_at": row["start_received_at"],
+                "stop_received_at": row["stop_received_at"],
+                "created_at": row["start_received_at"],
+                "updated_at": row["last_activity_at"],
+                "effective_stop_source": row["effective_stop_source"],
+                "effective_stop_at": row["effective_stop_at"],
+                "connector_id": row["connector_id"],
+                "start": None,
+                "stop": None,
+                "meter_values": [],
+                "meter_values_received_at": [],
+            }
+            for event in grouped.get(transaction_id, ()):
+                try:
+                    payload = json.loads(event["payload_json"])
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if event["action"] == "StartTransaction" and record["start"] is None:
+                    record["start"] = payload
+                elif event["action"] == "StopTransaction" and record["stop"] is None and row["stop_received_at"] is not None:
+                    record["stop"] = payload
+                elif event["action"] == "MeterValues":
+                    record["meter_values"].append(payload)
+                    record["meter_values_received_at"].append(event["received_at"])
+            if record["start"] is None:
+                record["start"] = {
+                    "connector_id": row["connector_id"],
+                    "id_tag": row["id_tag"],
+                    "meter_start": row["meter_start"],
+                    "timestamp": row["started_at"],
+                }
+            if row["stop_received_at"] is not None:
+                record["stop"] = {
+                    "transaction_id": transaction_id,
+                    "meter_stop": row["meter_stop"],
+                    "timestamp": row["stopped_at"],
+                }
+            views.append(TransactionView(record=record, path=path))
+        return views
 
     @staticmethod
     def _coerce_time(value: datetime | str | None) -> datetime | None:
