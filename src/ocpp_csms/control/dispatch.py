@@ -338,7 +338,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         return {"error": "charger_not_connected", "charger": charger}
 
     timing, seconds, timing_error = _control_timing(request)
-    if command in {"start", "stop", "reset"}:
+    if command in {"start", "reset"}:
         if timing_error is not None:
             return timing_error
         assert timing is not None
@@ -358,6 +358,9 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         session = registry.session(charger)
         if session is None:
             return {"error": "charger_not_connected", "charger": charger}
+
+    if command == "stop" and request.get("force", False) is not False:
+        return {"error": "invalid_force"}
 
     warnings: list[str] = []
     if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
