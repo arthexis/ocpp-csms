@@ -964,7 +964,7 @@ ocpp-csms txn explain 42 --verbose
 ocpp-csms txn explain 42 --context 5
 ```
 
-`txn explain` analyzes archived StartTransaction/StopTransaction evidence, recovery state, overlapping open transactions, meter start/stop anomalies and transaction-related events. `--context MINUTES` adds nearby same-charger events, labeled contextual rather than conclusively associated. Findings distinguish observations from inferences. No active charger interrogation, new tables or automatic recovery are involved.
+`txn explain` analyzes recorded StartTransaction/StopTransaction evidence, overlapping open transactions, meter start/stop anomalies and transaction-related events. `--context MINUTES` adds nearby same-charger events, labeled contextual rather than conclusively associated. Findings distinguish observations from inferences. No active charger interrogation, new tables or automatic recovery are involved.
 
 ### List reservation evidence
 
@@ -1014,7 +1014,7 @@ Only the original *deployment identity* can be retained: satellite versus
 delegate cannot change in place, and changing an exposed hostname also requires
 uninstallation. An unexposed delegate can acquire `--expose` without reinstalling.
 
-Temporary `--diagnose`, `--recover`, `--stage-only`, `--dev`,
+Temporary `--diagnose`, `--stage-only`, `--dev`,
 `--observe` and `--reconnect` do not persist as future defaults.
 Arbitrary Ansible extra variables (especially tokens/secrets) are never
 recorded. Failed deployments never update the profile.
