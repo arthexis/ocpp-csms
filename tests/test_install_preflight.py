@@ -1,3 +1,4 @@
+import pytest
 import json
 import sqlite3
 
@@ -167,3 +168,31 @@ def test_available_connector_does_not_block_historical_open(tmp_path, monkeypatc
     _record_connector_status(tmp_path, "Available")
     monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
     assert install_preflight.evaluate_preflight(tmp_path).allowed is True
+
+
+@pytest.mark.parametrize("status", ["Charging", "SuspendedEV", "SuspendedEVSE", "Preparing", "Finishing", "Reserved"])
+def test_current_nonidle_states_block_without_force(tmp_path, monkeypatch, status):
+    _record_connection(tmp_path)
+    _record_connector_status(tmp_path, status)
+    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
+    assert install_preflight.evaluate_preflight(tmp_path).allowed is False
+    assert install_preflight.evaluate_preflight(tmp_path, force=True).allowed is True
+
+
+def test_reconnect_makes_prior_charging_evidence_unknown(tmp_path, monkeypatch):
+    _record_connection(tmp_path)
+    _record_connector_status(tmp_path, "Charging")
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
+        connection.execute(
+            "INSERT INTO runtime_events (occurred_at, event, charger_id) VALUES (?, 'charger_connected', ?)",
+            ("2026-10-04T16:03:00Z", "charger-a"),
+        )
+    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: True)
+    assert install_preflight.evaluate_preflight(tmp_path).allowed is True
+
+
+def test_force_does_not_bypass_incompatible_schema(tmp_path, monkeypatch):
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as connection:
+        connection.execute("PRAGMA user_version = 99")
+    monkeypatch.setattr(install_preflight, "process_is_running", lambda data_dir: False)
+    assert install_preflight.evaluate_preflight(tmp_path, force=True).allowed is False
