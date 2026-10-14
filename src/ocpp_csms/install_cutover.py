@@ -7,7 +7,7 @@ from contextlib import closing
 import time
 from pathlib import Path
 
-from ocpp_csms.schema_storage import plan_storage, prepare_storage
+from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage
 from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
@@ -187,11 +187,14 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command in ("storage-plan", "storage-prepare"):
-            plan = plan_storage(args.storage_root, args.active_data_dir)
+            active = (args.active_data_dir if args.active_data_dir is not None
+                      else discover_active_storage(args.storage_root))
+            plan = plan_storage(args.storage_root, active)
             if args.command == "storage-prepare":
                 prepare_storage(plan)
             print(json.dumps({"action": plan.action, "target": str(plan.target),
-                              "active_schema": plan.active_schema}, sort_keys=True))
+                              "active_schema": plan.active_schema,
+                              "active": str(plan.active) if plan.active else None}, sort_keys=True))
             return 0
         if args.command == "schema-check":
             print(schema_action(args.data_dir))
