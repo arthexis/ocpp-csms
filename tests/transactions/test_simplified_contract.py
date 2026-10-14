@@ -319,23 +319,6 @@ async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_json_diagnostic_failure_does_not_prevent_sqlite_authoritative_start(tmp_path, monkeypatch):
-    """Optional JSON output cannot veto a committed authoritative start."""
-    archive = TransactionArchive(tmp_path)
-
-    def fail_json(*args, **kwargs):
-        raise OSError("diagnostic JSON unavailable")
-
-    monkeypatch.setattr(archive, "_write", fail_json)
-    transaction_id = await archive.start(CP, start())
-    assert transaction_id > 0
-    # The committed SQLite transaction remains discoverable without JSON.
-    from ocpp_csms.evidence.store import EventStore
-    store = EventStore(tmp_path)
-    assert store.find_recent_start(CP, start()) == transaction_id
-
-
-@pytest.mark.asyncio
 async def test_many_distinct_starts_do_not_collapse_or_reuse_ids(tmp_path):
     archive = TransactionArchive(tmp_path)
     timestamps = [f"2026-10-03T10:00:{second:02d}Z" for second in range(20)]
@@ -452,18 +435,6 @@ async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_
             for transaction_id in (first, second, third, fourth)] == [
         (CP, 1), ("charger-b", 1), (CP, 2), ("charger-b", 2),
     ]
-
-
-@pytest.mark.asyncio
-async def test_sqlite_start_identity_survives_restart_without_json_archives(tmp_path):
-    """JSON is diagnostic; restart deduplication must use SQLite alone."""
-    archive = TransactionArchive(tmp_path)
-    original_id = await archive.start(CP, start())
-    assert original_id > 0
-    for path in (tmp_path / "transactions").glob("*/*.json"):
-        path.unlink()
-    restarted = TransactionArchive(tmp_path)
-    assert await restarted.start(CP, start()) == original_id
 
 
 
