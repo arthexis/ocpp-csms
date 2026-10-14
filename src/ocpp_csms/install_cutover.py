@@ -12,6 +12,7 @@ from ocpp_csms.schema import (
     DATABASE_FILENAME,
     can_upgrade_schema,
     inspect_schema,
+    ensure_wal,
     upgrade_schema,
 )
 
@@ -40,6 +41,8 @@ def apply_schema_action(data_dir: str | Path) -> str:
     action = schema_action(data_dir)
     if action == "upgrade":
         upgrade_schema(data_dir)
+    if action != "create":
+        ensure_wal(data_dir)
     return action
 
 
@@ -49,6 +52,9 @@ def verify_schema_integrity(data_dir: str | Path) -> None:
     if info.version != CURRENT_SCHEMA_VERSION:
         raise RuntimeError(f"schema verification failed: expected {CURRENT_SCHEMA_VERSION}, got {info.version}")
     with sqlite3.connect(f"file:{info.path}?mode=ro", uri=True) as connection:
+        mode = connection.execute("PRAGMA journal_mode").fetchone()
+        if mode is None or str(mode[0]).lower() != "wal":
+            raise RuntimeError(f"database WAL verification failed: {mode}")
         integrity = connection.execute("PRAGMA integrity_check").fetchone()
         if integrity is None or integrity[0] != "ok":
             raise RuntimeError(f"database integrity check failed: {integrity}")
