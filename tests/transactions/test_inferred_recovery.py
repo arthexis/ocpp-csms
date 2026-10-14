@@ -4,7 +4,7 @@ import json
 import sqlite3
 
 from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.schema import database_path, inspect_schema
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, database_path, inspect_schema
 from ocpp_csms.transactions.archive import TransactionArchive
 from ocpp_csms.transactions.query import TransactionQuery
 
@@ -46,4 +46,4 @@ def test_inferred_stop_archive_and_database_then_reconcile(tmp_path):
 
 def test_schema_v6_initialization(tmp_path):
     EventStore(tmp_path)
-    assert inspect_schema(tmp_path).version == 8
+    assert inspect_schema(tmp_path).version == CURRENT_SCHEMA_VERSION
