@@ -260,27 +260,6 @@ class EventStore:
                     str(payload['info']) if payload.get('info') is not None else None,
                 ),
             )
-            if status in {"Finishing", "Available"}:
-                transaction = connection.execute(
-                    """
-                    SELECT transaction_id, started_at FROM transactions
-                    WHERE charger_id = ? AND connector_id = ? AND state = 'open'
-                    ORDER BY start_received_at DESC LIMIT 1
-                    """,
-                    (charger_id, connector_id),
-                ).fetchone()
-                if transaction:
-                    belongs_to_session = True
-                    if charger_timestamp is not None and transaction[1] is not None:
-                        belongs_to_session = _timestamp(str(charger_timestamp)) >= _timestamp(str(transaction[1]))
-                    if belongs_to_session:
-                        connection.execute(
-                            """
-                            UPDATE transactions SET state = 'ended', last_activity_at = ?
-                            WHERE transaction_id = ? AND state = 'open'
-                            """,
-                            (received_at, int(transaction[0])),
-                        )
         return True
 
 
