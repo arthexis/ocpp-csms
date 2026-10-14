@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,7 @@ class EventStore:
                 pass
         id_tag = payload.get("id_tag")
         charger_timestamp = payload.get("timestamp")
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO events (
