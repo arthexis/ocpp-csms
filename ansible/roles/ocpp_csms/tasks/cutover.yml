@@ -216,6 +216,7 @@
 
     - name: Verify previously connected chargers reconnect
       ansible.builtin.include_tasks: reconnect.yml
+      when: not (ocpp_csms_offline | bool)
 
     - name: Point previous at successfully active release
       ansible.builtin.file:
