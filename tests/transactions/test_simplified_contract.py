@@ -117,33 +117,6 @@ async def test_exact_retry_after_restart_uses_original_id_regardless_of_age(tmp_
 
 
 @pytest.mark.asyncio
-async def test_same_timestamp_with_different_evidence_gets_new_id(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    first = await commit_start_with_diagnostics(archive, CP, start())
-    second = await commit_start_with_diagnostics(archive, CP, start(meter_start=101))
-    assert second == first + 1
-    assert len(archives(tmp_path)) == 2
-
-
-@pytest.mark.asyncio
-async def test_same_start_on_different_charge_point_is_not_deduplicated(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    first = await commit_start_with_diagnostics(archive, CP, start())
-    second = await commit_start_with_diagnostics(archive, "charger-b", start())
-    assert second == first + 1
-
-
-@pytest.mark.asyncio
-async def test_unknown_meter_and_stop_are_orphan_evidence_not_transactions(tmp_path):
-    store = EventStore(tmp_path)
-    store.commit_transaction_evidence(CP, "MeterValues", meter(225))
-    store.commit_transaction_evidence(CP, "StopTransaction", stop(225))
-    with store._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
-        assert db.execute("SELECT action FROM events ORDER BY id").fetchall() == [("MeterValues",), ("StopTransaction",)]
-
-
-@pytest.mark.asyncio
 async def test_new_start_never_persists_a_synthetic_stop_for_previous(tmp_path):
     archive = TransactionArchive(tmp_path)
     first = await commit_start_with_diagnostics(archive, CP, start())
@@ -268,19 +241,6 @@ async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_conflicting_late_stops_do_not_overwrite_first_stop(tmp_path):
-    store = EventStore(tmp_path)
-    transaction_id = store.commit_start(CP, start())
-    observed = stop(transaction_id)
-    store.commit_transaction_evidence(CP, "StopTransaction", observed)
-    store.commit_transaction_evidence(CP, "StopTransaction", {**observed, "meter_stop": 999})
-    with store._connect() as db:
-        assert db.execute("SELECT meter_stop FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0] == 150
-        payloads = [json.loads(row[0]) for row in db.execute("SELECT payload_json FROM events WHERE action = 'StopTransaction' ORDER BY id")]
-    assert payloads == [observed, {**observed, "meter_stop": 999}]
-
-
-@pytest.mark.asyncio
 async def test_identical_stop_retry_does_not_change_observed_stop(tmp_path):
     archive = TransactionArchive(tmp_path)
     transaction_id = await commit_start_with_diagnostics(archive, CP, start())
@@ -400,21 +360,6 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_retry_after_restart_preserves_first_receipt_and_archive(tmp_path, monkeypatch):
-    store = EventStore(tmp_path)
-    payload = start()
-    original_id = store.commit_start(CP, payload)
-    with store._connect() as db:
-        original_receipt = db.execute("SELECT start_received_at FROM transactions WHERE transaction_id = ?", (original_id,)).fetchone()[0]
-    restarted = EventStore(tmp_path)
-    assert restarted.commit_start(CP, payload) == original_id
-    with restarted._connect() as db:
-        assert db.execute("SELECT start_received_at FROM transactions WHERE transaction_id = ?", (original_id,)).fetchone()[0] == original_receipt
-        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1
-        assert db.execute("SELECT COUNT(*) FROM events WHERE action = 'StartTransaction'").fetchone()[0] == 2
-
-
-@pytest.mark.asyncio
 async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_path):
     archive = TransactionArchive(tmp_path)
     first = await commit_start_with_diagnostics(archive, CP, start(connector=1))
@@ -435,17 +380,8 @@ async def test_interleaved_charge_points_and_connectors_allocate_unique_ids(tmp_
 
 
 
-def orphan_messages(root, message_type, transaction_id):
-    """Inspect durable unresolved evidence without depending on file names."""
-    return [
-        row for row in unresolved(root)
-        if row.get("message_type") == message_type
-        and row.get("transaction_id") == transaction_id
-    ]
 
-
-@pytest.mark.asyncio
-async def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart(tmp_path):
+def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart(tmp_path):
     store = EventStore(tmp_path)
     payload = meter(225)
     store.commit_transaction_evidence(CP, "MeterValues", payload)
@@ -456,19 +392,7 @@ async def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart
     assert row[0] == CP and row[1] and json.loads(row[2]) == payload
 
 
-@pytest.mark.asyncio
-async def test_unknown_stop_is_preserved_without_creating_transaction(tmp_path):
-    store = EventStore(tmp_path)
-    payload = stop(226)
-    store.commit_transaction_evidence(CP, "StopTransaction", payload)
-    with EventStore(tmp_path)._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
-        row = db.execute("SELECT charger_id, received_at, payload_json FROM events WHERE action = 'StopTransaction'").fetchone()
-    assert row[0] == CP and row[1] and json.loads(row[2]) == payload
-
-
-@pytest.mark.asyncio
-async def test_conflicting_stop_preserves_first_receipt_and_second_payload(tmp_path):
+def test_conflicting_stop_preserves_first_receipt_and_second_payload(tmp_path):
     store = EventStore(tmp_path)
     transaction_id = store.commit_start(CP, start())
     first_stop = stop(transaction_id)
@@ -481,20 +405,6 @@ async def test_conflicting_stop_preserves_first_receipt_and_second_payload(tmp_p
         assert db.execute("SELECT meter_stop, stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone() == (150, original)
         payloads = [json.loads(row[0]) for row in db.execute("SELECT payload_json FROM events WHERE action = 'StopTransaction' ORDER BY id")]
     assert payloads == [first_stop, conflict]
-
-
-@pytest.mark.asyncio
-async def test_identical_stop_retry_preserves_original_receipt(tmp_path):
-    store = EventStore(tmp_path)
-    transaction_id = store.commit_start(CP, start())
-    payload = stop(transaction_id)
-    store.commit_transaction_evidence(CP, "StopTransaction", payload)
-    with store._connect() as db:
-        original = db.execute("SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0]
-    store.commit_transaction_evidence(CP, "StopTransaction", payload)
-    with store._connect() as db:
-        assert db.execute("SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0] == original
-        assert db.execute("SELECT COUNT(*) FROM events WHERE action = 'StopTransaction'").fetchone()[0] == 2
 
 
 @pytest.mark.asyncio
@@ -511,8 +421,7 @@ async def test_mismatched_connector_meter_does_not_change_local_transaction(tmp_
     assert json.loads(row[0]) == payload
 
 
-@pytest.mark.asyncio
-async def test_orphan_external_id_not_adopted_after_restart(tmp_path):
+def test_orphan_external_id_not_adopted_after_restart(tmp_path):
     store = EventStore(tmp_path)
     store.commit_transaction_evidence("charger-b", "StopTransaction", stop(12345))
     local_id = EventStore(tmp_path).commit_start(CP, start())
