@@ -178,7 +178,7 @@ async def test_committed_start_survives_json_diagnostic_failure(tmp_path, monkey
     }
     response = await session.on_start_transaction(**payload)
     assert response.transaction_id == 1
-    assert events.find_recent_start("charger-a", payload) == 1
+    assert events.commit_start("charger-a", payload) == 1
     assert event_directions(tmp_path, "StartTransaction") == [("in",)]
     assert transaction_records(tmp_path) == []
 
@@ -197,7 +197,7 @@ async def test_start_commit_precedes_response_and_retry_survives_restart(tmp_pat
     observed = []
     original = archive.diagnostic_start
     async def inspect_committed(charger, start, transaction_id):
-        assert events.find_recent_start(charger, start) == transaction_id
+        assert events.commit_start(charger, start) == transaction_id
         assert event_directions(tmp_path, "StartTransaction") == [("in",)]
         observed.append(transaction_id)
         await original(charger, start, transaction_id)
