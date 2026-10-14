@@ -66,7 +66,7 @@ def test_exact_retry_is_not_a_new_boundary_and_real_stop_wins(tmp_path):
 
 def test_summary_and_index_available_on_current_schema(tmp_path):
     EventStore(tmp_path)
-    assert inspect_schema(tmp_path).version == CURRENT_SCHEMA_VERSION == 8
+    assert inspect_schema(tmp_path).version == CURRENT_SCHEMA_VERSION
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
         views = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'view'")}
         indexes = {row[1] for row in db.execute("PRAGMA index_list(transactions)")}
