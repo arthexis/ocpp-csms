@@ -197,7 +197,8 @@ async def test_start_commit_precedes_response_and_retry_survives_restart(tmp_pat
     observed = []
     original = archive.diagnostic_start
     async def inspect_committed(charger, start, transaction_id):
-        assert events.commit_start(charger, start) == transaction_id
+        with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+            assert db.execute("SELECT transaction_id FROM transactions WHERE charger_id = ?", (charger,)).fetchone()[0] == transaction_id
         assert event_directions(tmp_path, "StartTransaction") == [("in",)]
         observed.append(transaction_id)
         await original(charger, start, transaction_id)
