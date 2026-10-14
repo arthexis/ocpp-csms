@@ -496,9 +496,8 @@ async def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart
     archive = TransactionArchive(tmp_path)
     payload = meter(225)
     await archive.meter_values(CP, payload)
-    restarted = TransactionArchive(tmp_path)
+    TransactionArchive(tmp_path)
     assert archives(tmp_path) == []
-    assert restarted is not None
     evidence = orphan_messages(tmp_path, "MeterValues", 225)
     assert len(evidence) == 1
     assert evidence[0]["charge_point_id"] == CP
