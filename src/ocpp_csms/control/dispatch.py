@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from .protocols import Session, SessionRegistry
+from ocpp_csms.occupancy import BUSY_STATUSES
 
 def _response_payload(response: Any) -> dict[str, Any]:
     payload = getattr(response, "__dict__", None)
@@ -253,7 +254,7 @@ def _occupancy(registry: SessionRegistry, charger: str, connector: int | None) -
     ids = [connector] if connector is not None and connector > 0 else registry.physical_connector_ids(charger)
     if not ids:
         return [], ["Connector occupancy unknown; command sent without confirmed availability"]
-    busy = [cid for cid in ids if statuses.get(cid) in {"Charging", "SuspendedEV", "SuspendedEVSE", "Preparing", "Finishing", "Reserved"}]
+    busy = [cid for cid in ids if statuses.get(cid) in BUSY_STATUSES]
     unknown = [cid for cid in ids if cid not in statuses]
     warnings = [f"Connector {cid} occupancy unknown since connection; proceeding" for cid in unknown]
     return busy, warnings
