@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -217,7 +218,7 @@ def ensure_wal(data_dir: str | Path) -> None:
     if not path.exists():
         raise RuntimeError(f"events database does not exist: {path}")
     try:
-        with sqlite3.connect(path, timeout=5) as connection:
+        with closing(sqlite3.connect(path, timeout=5)) as connection:
             mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
             if mode is None or str(mode[0]).lower() != "wal":
                 raise RuntimeError(f"cannot enable WAL for events database: {mode}")
@@ -231,7 +232,7 @@ def create_current_schema(data_dir: str | Path) -> SchemaInfo:
     if path.exists():
         raise RuntimeError(f"events database already exists: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.executescript(CURRENT_SCHEMA_SQL)
         connection.execute(
             "INSERT INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
@@ -283,7 +284,7 @@ def _backup_database(info: SchemaInfo) -> Path:
         raise RuntimeError(f"schema backup already exists: {backup}")
     source = sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)
     try:
-        with sqlite3.connect(backup) as destination:
+        with closing(sqlite3.connect(backup)) as destination:
             source.backup(destination)
     finally:
         source.close()
@@ -308,7 +309,7 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
 
     _backup_database(info)
     try:
-        with sqlite3.connect(info.path) as connection:
+        with closing(sqlite3.connect(info.path)) as connection, connection:
             if info.version == 1:
                 connection.executescript(_SCHEMA_2_ADDITIONS_SQL)
                 connection.execute("PRAGMA user_version = 2")
