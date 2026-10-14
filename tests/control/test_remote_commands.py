@@ -125,7 +125,7 @@ async def test_remote_start_remains_available_with_historical_open_transaction(
 
 
 @pytest.mark.asyncio
-async def test_a6_restarted_server_does_not_treat_historical_open_as_live(tmp_path):
+async def test_restarted_server_keeps_historical_open_distinct_from_connections(tmp_path):
     from ocpp_csms.evidence.store import EventStore
     from ocpp_csms.server import CSMSServer
 
@@ -141,8 +141,9 @@ async def test_a6_restarted_server_does_not_treat_historical_open_as_live(tmp_pa
         events=EventStore(tmp_path),
     )
     assert restarted.connected_chargers() == []
-    assert restarted.active_transactions("charger-a") == []
-    assert restarted.active_transaction_ids("charger-a") == []
+    # This API reports SQLite history, not live connector occupancy.
+    assert restarted.active_transactions("charger-a") == [(old_id, 1)]
+    assert restarted.active_transaction_ids("charger-a") == [old_id]
 
 
 @pytest.mark.asyncio
