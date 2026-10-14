@@ -341,3 +341,34 @@ def test_late_stop_after_previous_cursor_is_exported_as_new_evidence(tmp_path):
     assert new["events"][0]["transaction_id"] == first
     assert new["cursor"]["next"] > cursor
     assert export_contract(tmp_path, after=cursor, limit=10)["data"]["events"] == new["events"]
+
+
+def test_export_uses_one_sqlite_snapshot_for_events_and_transactions(tmp_path, monkeypatch):
+    """A concurrent stop committed after the page read must wait for the next export."""
+    import ocpp_csms.export_contract as exporter
+
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    original = exporter._event_rows
+
+    def read_then_commit(connection, *, after, limit):
+        rows, more = original(connection, after=after, limit=limit)
+        store.commit_transaction_evidence("charger-a", "StopTransaction", {
+            "transaction_id": transaction_id, "meter_stop": 250,
+            "timestamp": "2026-10-03T11:00:00Z",
+        })
+        return rows, more
+
+    monkeypatch.setattr(exporter, "_event_rows", read_then_commit)
+    first = exporter.export_contract(tmp_path)["data"]
+    assert [event["action"] for event in first["events"]] == ["StartTransaction"]
+    assert first["transactions"][0]["state"] == "open"
+    assert first["transactions"][0]["stopped_at"] is None
+
+    monkeypatch.setattr(exporter, "_event_rows", original)
+    later = exporter.export_contract(tmp_path, after=first["cursor"]["next"])["data"]
+    assert [event["action"] for event in later["events"]] == ["StopTransaction"]
+    assert later["transactions"][0]["state"] == "stopped"
