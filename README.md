@@ -531,7 +531,7 @@ Default CSMS data:
   transactions/
 ```
 
-SQLite stores append-oriented OCPP evidence, runtime events, transaction state, connector status, and diagnostic state. JSON transaction archives remain directly readable.
+SQLite is authoritative for transaction identities, received OCPP evidence, transaction state, and reporting queries. Start retries retain their SQLite transaction identity while each received OCPP frame remains distinct evidence. Stop and meter evidence is retained even when its transaction is unknown; a later stop does not rewrite previously exported events. JSON transaction archives are optional diagnostics, not a fallback authority for transaction queries or exports. Export consumers advance using the SQLite-backed event cursor and may replay pages safely.
 
 Schema versions are independent from application releases. Startup does not silently upgrade an old database. Deployment performs explicit compatibility inspection and creates a SQLite-safe backup before a supported upgrade.
 
