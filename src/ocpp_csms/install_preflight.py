@@ -8,7 +8,6 @@ from pathlib import Path
 
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, inspect_schema
-from ocpp_csms.transactions.query import TransactionQuery
 
 
 @dataclass(frozen=True)
@@ -41,25 +40,13 @@ def _connected_chargers(data_dir: Path, schema_version: int | None) -> tuple[str
     return tuple(sorted(charger for charger, event in latest.items() if event == "charger_connected"))
 
 
-def _archive_active_chargers(data_dir: Path) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            {
-                view.charge_point_id
-                for view in TransactionQuery(data_dir).active()
-                if view.charge_point_id
-            }
-        )
-    )
-
-
 def _database_active_chargers(data_dir: Path, schema_version: int | None) -> tuple[str, ...] | None:
     if schema_version is None or schema_version < 2:
         return None
     database = inspect_schema(data_dir).path
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         rows = connection.execute(
-            "SELECT DISTINCT charger_id FROM transactions WHERE state IN ('open', 'recovered')"
+            "SELECT DISTINCT charger_id FROM transactions WHERE state = 'open'"
         ).fetchall()
     return tuple(sorted(str(row[0]) for row in rows if row[0]))
 
@@ -78,25 +65,14 @@ def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
             f"events database schema {schema.version} is newer than supported {CURRENT_SCHEMA_VERSION}",
         )
 
-    active_archive = _archive_active_chargers(root)
     active_database = _database_active_chargers(root, schema.version)
     connected = _connected_chargers(root, schema.version)
-
-    if active_database is not None and active_database != active_archive:
-        active = tuple(sorted(set(active_database) | set(active_archive)))
+    if active_database:
         return InstallPreflight(
             False,
             connected,
-            active,
-            "active transaction state disagrees between SQLite and transaction archive",
-        )
-
-    if active_archive:
-        return InstallPreflight(
-            False,
-            connected,
-            active_archive,
-            "active charging detected; service handoff is blocked; inspect with ocpp-csms transactions recover --dry-run and recover eligible transactions while CSMS is stopped",
+            active_database,
+            "active charging detected; service handoff is blocked until transactions stop",
         )
 
     return InstallPreflight(True, connected, ())
