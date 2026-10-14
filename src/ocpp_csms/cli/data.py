@@ -60,7 +60,10 @@ def _remove_cp_from_copy(root: Path, cp: str) -> None:
         # Clear references by transaction identity; do not reuse IDs.
         if ids:
             placeholders = ",".join("?" for _ in ids)
-            db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
+            # Historical upgraded databases may retain the obsolete audit table.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
+                db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
+            db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({placeholders})", ids)
         db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
                    "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
         for table in ("events", "runtime_events", "connector_status",
