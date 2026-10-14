@@ -99,7 +99,7 @@ async def test_remote_start_remains_available_with_historical_open_transaction(
 ):
     """Historical incomplete transactions cannot veto a legitimate live remote start."""
     archive = TransactionArchive(tmp_path)
-    first = await archive.start("charger-a", {
+    first = EventStore(tmp_path).commit_start("charger-a", {
         "connector_id": 1,
         "id_tag": "OLD",
         "meter_start": 100,
@@ -127,7 +127,7 @@ async def test_a6_restarted_server_does_not_treat_historical_open_as_live(tmp_pa
     from ocpp_csms.server import CSMSServer
 
     archive = TransactionArchive(tmp_path)
-    old_id = await archive.start("charger-a", {
+    old_id = EventStore(tmp_path).commit_start("charger-a", {
         "connector_id": 1, "id_tag": "OLD", "meter_start": 100,
         "timestamp": "2026-10-02T12:00:00Z",
     })
