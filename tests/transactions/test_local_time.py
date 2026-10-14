@@ -5,6 +5,7 @@ import pytest
 
 import ocpp_csms.transactions.archive as transactions_module
 from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.transactions.archive import TransactionArchive
 
 
@@ -17,7 +18,9 @@ async def test_archive_persists_receive_time_for_each_event(tmp_path, monkeypatc
     ))
     monkeypatch.setattr(transactions_module, "utc_now_iso", lambda: next(times))
     archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start("charger-a", {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"})
+    payload = {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"}
+    transaction_id = EventStore(tmp_path).commit_start("charger-a", payload)
+    await archive.diagnostic_start("charger-a", payload, transaction_id)
     await archive.meter_values("charger-a", {"transaction_id": transaction_id, "connector_id": 1, "meter_value": [{"timestamp": "2020-01-01T00:05:00Z"}]})
     await archive.stop("charger-a", {"transaction_id": transaction_id, "timestamp": "2020-01-01T00:10:00Z"})
 
