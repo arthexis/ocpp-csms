@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ocpp_csms.occupancy import BUSY_STATUSES, connector_occupancy
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, inspect_schema
 
@@ -16,6 +17,7 @@ class InstallPreflight:
     connected_chargers: tuple[str, ...]
     active_chargers: tuple[str, ...]
     reason: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def _connected_chargers(data_dir: Path, schema_version: int | None) -> tuple[str, ...]:
@@ -40,22 +42,16 @@ def _connected_chargers(data_dir: Path, schema_version: int | None) -> tuple[str
     return tuple(sorted(charger for charger, event in latest.items() if event == "charger_connected"))
 
 
-def _live_active_chargers(data_dir: Path, connected: tuple[str, ...]) -> tuple[str, ...]:
-    """Only current-connection connector evidence can prove charging activity."""
-    if not connected:
-        return ()
-    database = inspect_schema(data_dir).path
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-        rows = connection.execute(
-            """SELECT c.charger_id, c.status FROM connector_status c
-               WHERE c.connector_id > 0 AND c.received_at >= (
-                   SELECT MAX(r.occurred_at) FROM runtime_events r
-                   WHERE r.charger_id = c.charger_id AND r.event = 'charger_connected'
-               )"""
-        ).fetchall()
-    return tuple(sorted({str(charger) for charger, status in rows
-                         if charger in connected and status in
-                         {"Charging", "SuspendedEV", "SuspendedEVSE", "Preparing", "Finishing", "Reserved"}}))
+def _live_occupancy(data_dir: Path, connected: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    busy = []
+    warnings = []
+    for charger in connected:
+        statuses = connector_occupancy(data_dir, charger)
+        if any(status in BUSY_STATUSES for status in statuses.values()):
+            busy.append(charger)
+        if not statuses:
+            warnings.append(f"{charger}: connector occupancy unknown since connection; proceeding")
+    return tuple(busy), tuple(warnings)
 
 
 def evaluate_preflight(data_dir: str | Path, *, force: bool = False) -> InstallPreflight:
@@ -73,16 +69,19 @@ def evaluate_preflight(data_dir: str | Path, *, force: bool = False) -> InstallP
         )
 
     connected = _connected_chargers(root, schema.version)
-    active_database = _live_active_chargers(root, connected) if schema.version is not None else ()
+    active_database, warnings = _live_occupancy(root, connected) if schema.version is not None else ((), ())
     if active_database and not force:
         return InstallPreflight(
             False,
             connected,
             active_database,
             "active charging detected; service handoff is blocked until transactions stop",
+            warnings,
         )
 
-    return InstallPreflight(True, connected, active_database, "charging safety override" if active_database else None)
+    if active_database and force:
+        warnings += ("FORCED HANDOFF: active charging on " + ", ".join(active_database),)
+    return InstallPreflight(True, connected, active_database, "charging safety override" if active_database else None, warnings)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -98,7 +97,10 @@ def main(argv: list[str] | None = None) -> int:
     result = evaluate_preflight(args.data_dir, force=args.force)
     if args.json:
         print(json.dumps(asdict(result), sort_keys=True))
-    elif not result.allowed:
+    else:
+        for warning in result.warnings:
+            print(f'warning: {warning}')
+    if not args.json and not result.allowed:
         print(f"Installation refused: {result.reason}")
         if result.connected_chargers:
             print("Connected charger(s): " + ", ".join(result.connected_chargers))
