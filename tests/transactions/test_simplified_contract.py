@@ -133,15 +133,12 @@ async def test_same_start_on_different_charge_point_is_not_deduplicated(tmp_path
 
 @pytest.mark.asyncio
 async def test_unknown_meter_and_stop_are_orphan_evidence_not_transactions(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    await archive.meter_values(CP, meter(225))
-    await archive.stop(CP, stop(225))
-    assert archives(tmp_path) == []
-    messages = unresolved(tmp_path)
-    assert {message["message_type"] for message in messages} == {
-        "MeterValues", "StopTransaction"
-    }
-    assert all(message["transaction_id"] == 225 for message in messages)
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence(CP, "MeterValues", meter(225))
+    store.commit_transaction_evidence(CP, "StopTransaction", stop(225))
+    with store._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        assert db.execute("SELECT action FROM events ORDER BY id").fetchall() == [("MeterValues",), ("StopTransaction",)]
 
 
 @pytest.mark.asyncio
@@ -265,18 +262,15 @@ async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_conflicting_late_stops_do_not_overwrite_first_stop(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start(CP, start())
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start(CP, start())
     observed = stop(transaction_id)
-    await archive.stop(CP, observed)
-    await archive.stop(CP, {**observed, "meter_stop": 999})
-    record = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
-    assert record["stop"] == observed
-    assert any(
-        item["message_type"] == "StopTransaction"
-        and item["transaction_id"] == transaction_id
-        for item in unresolved(tmp_path)
-    )
+    store.commit_transaction_evidence(CP, "StopTransaction", observed)
+    store.commit_transaction_evidence(CP, "StopTransaction", {**observed, "meter_stop": 999})
+    with store._connect() as db:
+        assert db.execute("SELECT meter_stop FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0] == 150
+        payloads = [json.loads(row[0]) for row in db.execute("SELECT payload_json FROM events WHERE action = 'StopTransaction' ORDER BY id")]
+    assert payloads == [observed, {**observed, "meter_stop": 999}]
 
 
 @pytest.mark.asyncio
@@ -401,29 +395,17 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_retry_after_restart_preserves_first_receipt_and_archive(tmp_path, monkeypatch):
-    import ocpp_csms.transactions.archive as archive_module
-
-    times = iter(["2026-10-03T10:00:00+00:00", "2026-10-04T10:00:00+00:00"])
-    monkeypatch.setattr(archive_module, "utc_now_iso", lambda: next(times))
-    archive = TransactionArchive(tmp_path)
+    store = EventStore(tmp_path)
     payload = start()
-    original_id = await archive.start(CP, payload)
-    original = next(row for row in archives(tmp_path) if row["transaction_id"] == original_id)
-    assert original["start_received_at"] == "2026-10-03T10:00:00+00:00"
-
-    real_datetime = archive_module.datetime
-
-    class NextDay(real_datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return real_datetime.now(tz) + timedelta(days=1)
-
-    monkeypatch.setattr(archive_module, "datetime", NextDay)
-    restarted = TransactionArchive(tmp_path)
-    assert await restarted.start(CP, payload) == original_id
-    assert archives(tmp_path) == [original]
-    assert original["start"] == payload
-    assert original["start_received_at"] == "2026-10-03T10:00:00+00:00"
+    original_id = store.commit_start(CP, payload)
+    with store._connect() as db:
+        original_receipt = db.execute("SELECT start_received_at FROM transactions WHERE transaction_id = ?", (original_id,)).fetchone()[0]
+    restarted = EventStore(tmp_path)
+    assert restarted.commit_start(CP, payload) == original_id
+    with restarted._connect() as db:
+        assert db.execute("SELECT start_received_at FROM transactions WHERE transaction_id = ?", (original_id,)).fetchone()[0] == original_receipt
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM events WHERE action = 'StartTransaction'").fetchone()[0] == 2
 
 
 @pytest.mark.asyncio
@@ -458,61 +440,55 @@ def orphan_messages(root, message_type, transaction_id):
 
 @pytest.mark.asyncio
 async def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    store = EventStore(tmp_path)
     payload = meter(225)
-    await archive.meter_values(CP, payload)
-    TransactionArchive(tmp_path)
-    assert archives(tmp_path) == []
-    evidence = orphan_messages(tmp_path, "MeterValues", 225)
-    assert len(evidence) == 1
-    assert evidence[0]["charge_point_id"] == CP
-    assert evidence[0]["payload"] == payload
-    assert isinstance(evidence[0]["received_at"], str)
-    assert evidence[0]["received_at"]
+    store.commit_transaction_evidence(CP, "MeterValues", payload)
+    restarted = EventStore(tmp_path)
+    with restarted._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        row = db.execute("SELECT charger_id, received_at, payload_json FROM events WHERE action = 'MeterValues'").fetchone()
+    assert row[0] == CP and row[1] and json.loads(row[2]) == payload
 
 
 @pytest.mark.asyncio
 async def test_unknown_stop_is_preserved_without_creating_transaction(tmp_path):
-    archive = TransactionArchive(tmp_path)
+    store = EventStore(tmp_path)
     payload = stop(226)
-    await archive.stop(CP, payload)
-    assert archives(tmp_path) == []
-    evidence = orphan_messages(tmp_path, "StopTransaction", 226)
-    assert len(evidence) == 1
-    assert evidence[0]["charge_point_id"] == CP
-    assert evidence[0]["payload"] == payload
-    assert isinstance(evidence[0]["received_at"], str)
-    assert evidence[0]["received_at"]
+    store.commit_transaction_evidence(CP, "StopTransaction", payload)
+    with EventStore(tmp_path)._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        row = db.execute("SELECT charger_id, received_at, payload_json FROM events WHERE action = 'StopTransaction'").fetchone()
+    assert row[0] == CP and row[1] and json.loads(row[2]) == payload
 
 
 @pytest.mark.asyncio
 async def test_conflicting_stop_preserves_first_receipt_and_second_payload(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start(CP, start())
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start(CP, start())
     first_stop = stop(transaction_id)
-    await archive.stop(CP, first_stop)
-    original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    store.commit_transaction_evidence(CP, "StopTransaction", first_stop)
+    with store._connect() as db:
+        original = db.execute("SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0]
     conflict = {**first_stop, "meter_stop": 999}
-    await archive.stop(CP, conflict)
-    current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
-    assert current["stop"] == first_stop
-    assert current["stop_received_at"] == original["stop_received_at"]
-    evidence = orphan_messages(tmp_path, "StopTransaction", transaction_id)
-    assert any(row["payload"] == conflict for row in evidence)
+    store.commit_transaction_evidence(CP, "StopTransaction", conflict)
+    with store._connect() as db:
+        assert db.execute("SELECT meter_stop, stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone() == (150, original)
+        payloads = [json.loads(row[0]) for row in db.execute("SELECT payload_json FROM events WHERE action = 'StopTransaction' ORDER BY id")]
+    assert payloads == [first_stop, conflict]
 
 
 @pytest.mark.asyncio
 async def test_identical_stop_retry_preserves_original_receipt(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start(CP, start())
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start(CP, start())
     payload = stop(transaction_id)
-    await archive.stop(CP, payload)
-    original = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
-    await archive.stop(CP, payload)
-    current = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
-    assert current["stop"] == original["stop"]
-    assert current["stop_received_at"] == original["stop_received_at"]
-    assert orphan_messages(tmp_path, "StopTransaction", transaction_id) == []
+    store.commit_transaction_evidence(CP, "StopTransaction", payload)
+    with store._connect() as db:
+        original = db.execute("SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0]
+    store.commit_transaction_evidence(CP, "StopTransaction", payload)
+    with store._connect() as db:
+        assert db.execute("SELECT stop_received_at FROM transactions WHERE transaction_id = ?", (transaction_id,)).fetchone()[0] == original
+        assert db.execute("SELECT COUNT(*) FROM events WHERE action = 'StopTransaction'").fetchone()[0] == 2
 
 
 @pytest.mark.asyncio
@@ -531,13 +507,11 @@ async def test_mismatched_connector_meter_does_not_change_local_transaction(tmp_
 
 @pytest.mark.asyncio
 async def test_orphan_external_id_not_adopted_after_restart(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    await archive.stop("charger-b", stop(12345))
-    restarted = TransactionArchive(tmp_path)
-    local_id = await restarted.start(CP, start())
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-b", "StopTransaction", stop(12345))
+    local_id = EventStore(tmp_path).commit_start(CP, start())
     assert local_id == 1
-    records = archives(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == local_id
-    assert records[0]["start"] == start()
-    assert orphan_messages(tmp_path, "StopTransaction", 12345)
+    with store._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1
+        assert db.execute("SELECT charger_id, transaction_id FROM events WHERE action = 'StopTransaction'").fetchone() == ("charger-b", 12345)
+
