@@ -36,7 +36,15 @@ def test_text_and_json_use_identical_transaction_selection(parse_cli, tmp_path, 
 
     json_args = parse_cli(*base, *selector, "--json")
     assert run_transactions_json(json_args) == 0
-    assert observed == text_calls
+    if selector == ("--since", "7D"):
+        # Relative time is resolved independently for each invocation.
+        assert [(method, args) for method, args, _ in observed] == [(method, args) for method, args, _ in text_calls]
+        for (_, _, actual), (_, _, expected) in zip(observed, text_calls):
+            assert actual.keys() == expected.keys()
+            assert all(actual[key] == expected[key] for key in actual if key != "since")
+            assert abs((actual["since"] - expected["since"]).total_seconds()) < 1
+    else:
+        assert observed == text_calls
     payload = json.loads(capsys.readouterr().out)
     assert payload["schema"] == "ocpp-csms/transactions/v1"
 
