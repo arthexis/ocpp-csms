@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 8
 
 _SCHEMA_1_SQL = """
 CREATE TABLE events (
@@ -169,6 +169,8 @@ FROM transactions AS t
 JOIN ordered AS o ON o.transaction_id = t.transaction_id;
 
 DROP VIEW IF EXISTS transaction_summary;
+DROP TABLE IF EXISTS transaction_recoveries;
+
 CREATE VIEW transaction_summary AS
 SELECT t.transaction_id, t.charger_id, t.connector_id, t.id_tag,
        t.started_at, t.stopped_at, t.state, t.meter_start, t.meter_stop,
@@ -181,15 +183,11 @@ FROM transactions AS t
 JOIN transaction_boundaries AS b ON b.transaction_id = t.transaction_id;
 """
 
-_SCHEMA_9_ADDITIONS_SQL = """
-DROP TABLE IF EXISTS transaction_recoveries;
-"""
-
 CURRENT_SCHEMA_SQL = (_SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
-                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_7_ADDITIONS_SQL + _SCHEMA_8_ADDITIONS_SQL + _SCHEMA_9_ADDITIONS_SQL).replace(
+                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_7_ADDITIONS_SQL + _SCHEMA_8_ADDITIONS_SQL).replace(
     'CREATE TABLE IF NOT EXISTS connector_status (',
     'CREATE TABLE IF NOT EXISTS connector_status (\n    info TEXT,', 1)
-_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9}
+_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8}
 
 
 @dataclass(frozen=True)
@@ -329,8 +327,6 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
                 info = SchemaInfo(path=info.path, exists=True, version=7)
             if info.version == 7:
                 connection.executescript(_SCHEMA_8_ADDITIONS_SQL)
-            if info.version <= 8:
-                connection.executescript(_SCHEMA_9_ADDITIONS_SQL)
             connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.
