@@ -1,5 +1,4 @@
 """Query selection must not read unrelated OCPP evidence."""
-from datetime import datetime, timezone
 import sqlite3
 
 from ocpp_csms.evidence.store import EventStore
@@ -80,7 +79,7 @@ def test_targeted_evidence_query_plan_uses_transaction_index(tmp_path):
     assert any("idx_events_transaction" in str(row) for row in plan)
 
 
-def test_query_owns_consistent_snapshot_across_summary_and_evidence(tmp_path, monkeypatch):
+def test_query_owns_consistent_snapshot_across_summary_and_evidence(tmp_path):
     store = EventStore(tmp_path)
     txn_id = store.commit_start("cp-a", {
         "connector_id": 1, "id_tag": "A", "meter_start": 10,
@@ -108,7 +107,6 @@ def test_standalone_query_reads_summary_and_evidence_from_same_wal_snapshot(tmp_
     class InterleavedConnection:
         def __init__(self, underlying):
             self.underlying = underlying
-            self.injected = False
 
         def execute(self, sql, params=()):
             if "FROM events WHERE direction" in sql and not injected_once[0]:
