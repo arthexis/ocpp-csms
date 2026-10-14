@@ -178,7 +178,8 @@ async def test_committed_start_survives_json_diagnostic_failure(tmp_path, monkey
     }
     response = await session.on_start_transaction(**payload)
     assert response.transaction_id == 1
-    assert events.commit_start("charger-a", payload) == 1
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+        assert db.execute("SELECT transaction_id FROM transactions WHERE charger_id = ?", ("charger-a",)).fetchone()[0] == 1
     assert event_directions(tmp_path, "StartTransaction") == [("in",)]
     assert transaction_records(tmp_path) == []
 
