@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DATABASE_FILENAME = "ocpp-csms.sqlite3"
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 _SCHEMA_1_SQL = """
 CREATE TABLE events (
@@ -144,11 +144,47 @@ INSERT OR IGNORE INTO transaction_allocator (singleton, last_id)
 SELECT 1, COALESCE(MAX(transaction_id), 0) FROM transactions;
 """
 
+_SCHEMA_8_ADDITIONS_SQL = """
+CREATE INDEX IF NOT EXISTS idx_transactions_boundary
+    ON transactions (charger_id, connector_id, start_received_at, transaction_id);
+
+CREATE VIEW transaction_boundaries AS
+WITH ordered AS (
+    SELECT transaction_id,
+           LEAD(start_received_at) OVER (
+               PARTITION BY charger_id, connector_id
+               ORDER BY start_received_at, transaction_id
+           ) AS next_start_received_at
+    FROM transactions
+)
+SELECT t.transaction_id, t.charger_id, t.connector_id,
+       t.start_received_at, t.stop_received_at AS observed_stop_received_at,
+       o.next_start_received_at,
+       CASE WHEN t.stop_received_at IS NOT NULL THEN 'observed'
+            WHEN o.next_start_received_at IS NOT NULL THEN 'next_start'
+            ELSE 'unresolved' END AS effective_stop_source,
+       COALESCE(t.stop_received_at, o.next_start_received_at) AS effective_stop_at
+FROM transactions AS t
+JOIN ordered AS o ON o.transaction_id = t.transaction_id;
+
+DROP VIEW IF EXISTS transaction_summary;
+CREATE VIEW transaction_summary AS
+SELECT t.transaction_id, t.charger_id, t.connector_id, t.id_tag,
+       t.started_at, t.stopped_at, t.state, t.meter_start, t.meter_stop,
+       CASE WHEN t.meter_start IS NOT NULL AND t.meter_stop IS NOT NULL
+                  AND t.meter_stop >= t.meter_start
+            THEN t.meter_stop - t.meter_start END AS energy_wh,
+       t.last_activity_at, t.start_received_at, t.stop_received_at,
+       b.next_start_received_at, b.effective_stop_source, b.effective_stop_at
+FROM transactions AS t
+JOIN transaction_boundaries AS b ON b.transaction_id = t.transaction_id;
+"""
+
 CURRENT_SCHEMA_SQL = (_SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITIONS_SQL
-                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_5_ADDITIONS_SQL + _SCHEMA_7_ADDITIONS_SQL).replace(
+                      + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_5_ADDITIONS_SQL + _SCHEMA_7_ADDITIONS_SQL + _SCHEMA_8_ADDITIONS_SQL).replace(
     'CREATE TABLE IF NOT EXISTS connector_status (',
     'CREATE TABLE IF NOT EXISTS connector_status (\n    info TEXT,', 1)
-_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7}
+_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8}
 
 
 @dataclass(frozen=True)
@@ -285,7 +321,7 @@ def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
                 info = SchemaInfo(path=info.path, exists=True, version=6)
             if info.version == 6:
                 connection.executescript(_SCHEMA_7_ADDITIONS_SQL)
-            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
+            if info.version == 7:\n                connection.executescript(_SCHEMA_8_ADDITIONS_SQL)\n            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     except Exception:
         # Keep the backup as evidence/recovery material if the upgrade fails.
         raise
