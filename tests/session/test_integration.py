@@ -127,10 +127,12 @@ async def test_real_websocket_boot_and_charging_flow(tmp_path):
     assert transaction == (transaction_id, "charger-a", "stopped", 130)
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
-    incoming = [event for event in exported["events"] if event["direction"] == "in"]
-    assert [event["action"] for event in incoming] == [
-        "BootNotification", "Authorize", "StartTransaction",
-        "MeterValues", "StopTransaction",
+    assert [event["action"] for event in exported["events"]] == [
+        "BootNotification", "BootNotification",
+        "Authorize", "Authorize",
+        "StartTransaction", "StartTransaction",
+        "MeterValues", "MeterValues",
+        "StopTransaction", "StopTransaction",
     ]
     assert exported["cursor"]["next"] == exported["events"][-1]["id"]
     assert export_contract(tmp_path, after=0, limit=100)["data"]["events"] == exported["events"]
