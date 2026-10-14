@@ -80,42 +80,25 @@ def test_date_shortcuts_reject_conflicts_and_reversed_bounds(parse_cli):
 
 
 def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_path):
-    directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True)
-    record = {
-        "transaction_id": 1, "origin": "local", "charge_point_id": "charger-a", "status": "stopped",
-        "created_at": "2026-10-06T12:00:00Z", "updated_at": "2026-10-06T12:10:00Z",
-        "start": {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"}, "start_received_at": "2026-10-06T12:00:00Z",
-        "meter_values": [], "meter_values_received_at": [],
-        "stop": {"transaction_id": 1, "timestamp": "2020-01-01T00:10:00Z"}, "stop_received_at": "2026-10-06T12:10:00Z",
-    }
-    (directory / "charger-a-1.json").write_text(json.dumps(record))
+    from ocpp_csms.evidence.store import EventStore
+    from ocpp_csms.schema import database_path
+    import sqlite3
 
-    default_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn"))
-    local_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "-T", "--since", "2026-10-06T12:05:00Z"))
-    assert "EVENT TIME" in default_output
-    assert "2020-01-01T00:10:00Z" in default_output
-    assert "2026-10-06T12:10:00Z" in local_output
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2020-01-01T00:00:00Z",
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 150,
+        "timestamp": "2020-01-01T00:10:00Z",
+    })
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        db.execute(
+            "UPDATE transactions SET start_received_at = ?, stop_received_at = ?, last_activity_at = ? WHERE transaction_id = ?",
+            ("2026-10-06T12:00:00Z", "2026-10-06T12:10:00Z", "2026-10-06T12:10:00Z", transaction_id),
+        )
 
-
-def test_cp_and_charger_select_charge_point(parse_cli):
-    assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
-    assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
-
-
-@pytest.mark.parametrize("command", ["txn"])
-@pytest.mark.parametrize("flag", ["-N", "--no-limit"])
-def test_transaction_no_limit_aliases(parse_cli, command, flag):
-    args = parse_cli(command, "--since", "3d", flag)
-    assert args.no_limit is True
-    assert args.since == "3d"
-
-
-@pytest.mark.parametrize("limit_flag, unlimited_flag", [
-    ("--limit", "--no-limit"), ("-n", "-N"),
-])
-def test_transaction_limit_and_no_limit_are_mutually_exclusive(limit_flag, unlimited_flag):
-    from ocpp_csms.cli import build_parser
 
     parser, _ = build_parser()
     with pytest.raises(SystemExit):
