@@ -73,13 +73,12 @@ def test_start_retry_returns_existing_transaction(tmp_path):
         "timestamp": "2026-10-01T17:28:16Z",
     }
 
-    store.record_transaction_start(227, "charger-a", payload)
-
-    assert store.find_recent_start("charger-a", payload) == 227
+    transaction_id = store.commit_start("charger-a", payload)
+    assert store.commit_start("charger-a", payload) == transaction_id
     assert fetchall(
         tmp_path,
         "SELECT transaction_id, state FROM transactions",
-    ) == [(227, "open")]
+    ) == [(transaction_id, "open")]
 
 
 def test_equal_timestamp_later_receipt_wins(tmp_path):
@@ -137,7 +136,7 @@ def test_terminal_status_does_not_mutate_transaction_history(tmp_path):
         "meter_start": 18462750,
         "timestamp": "2026-10-01T17:28:16Z",
     }
-    store.record_transaction_start(227, "charger-a", start)
+    transaction_id = store.commit_start("charger-a", start)
 
     store.record_connector_status(
         "charger-a",
@@ -151,14 +150,13 @@ def test_terminal_status_does_not_mutate_transaction_history(tmp_path):
 
     assert fetchone(
         tmp_path,
-        "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227",
+        f"SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = {transaction_id}",
     ) == ("open", None, None)
 
 
 def test_status_notifications_never_close_transaction_history(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(
-        7,
+    transaction_id = store.commit_start(
         "charger-a",
         {
             "connector_id": 1,
@@ -178,7 +176,7 @@ def test_status_notifications_never_close_transaction_history(tmp_path):
     ) is True
     assert fetchone(
         tmp_path,
-        "SELECT state FROM transactions WHERE transaction_id = 7",
+        f"SELECT state FROM transactions WHERE transaction_id = {transaction_id}",
     ) == ("open",)
 
     assert store.record_connector_status(
@@ -201,8 +199,7 @@ def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
         (1, "2026-10-01T15:00:00Z"),
         (2, "2026-10-01T15:10:00Z"),
     ):
-        store.record_transaction_start(
-            transaction_id,
+        allocated_id = store.commit_start(
             "charger-a",
             {
                 "connector_id": 1,
@@ -229,8 +226,7 @@ def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(
-        140,
+    transaction_id = store.commit_start(
         "charger-a",
         {
             "connector_id": 1,
@@ -240,7 +236,7 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
         },
     )
     stop = {
-        "transaction_id": 140,
+        "transaction_id": transaction_id,
         "meter_stop": 21499690,
         "timestamp": "2026-06-18T17:44:40Z",
     }
@@ -250,7 +246,7 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
 
     assert fetchone(
         tmp_path,
-        "SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = 140",
+        f"SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = {transaction_id}",
     ) == ("stopped", 1170)
 
 
