@@ -420,3 +420,24 @@ def test_export_reader_does_not_block_concurrent_charger_commit(tmp_path, monkey
     second = exporter.export_contract(tmp_path, after=first["cursor"]["next"])["data"]
     assert [event["action"] for event in second["events"]] == ["StopTransaction"]
     assert second["transactions"][0]["state"] == "stopped"
+
+def test_export_status_uses_same_sqlite_snapshot_as_events(tmp_path, monkeypatch):
+    """Status must not see evidence committed after the event page snapshot."""
+    import ocpp_csms.export_contract as exporter
+
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "BootNotification", {"charge_point_vendor": "Example"})
+    original = exporter._event_rows
+
+    def read_then_connect(connection, *, after, limit):
+        result = original(connection, after=after, limit=limit)
+        store.record_runtime("charger_connected", charger_id="charger-b")
+        return result
+
+    monkeypatch.setattr(exporter, "_event_rows", read_then_connect)
+    first = exporter.export_contract(tmp_path)["data"]
+    assert "charger-b" not in {charger["id"] for charger in first["status"]["chargers"]}
+
+    monkeypatch.setattr(exporter, "_event_rows", original)
+    second = exporter.export_contract(tmp_path)["data"]
+    assert "charger-b" in {charger["id"] for charger in second["status"]["chargers"]}
