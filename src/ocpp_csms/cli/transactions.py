@@ -90,27 +90,32 @@ def run_transactions(args: argparse.Namespace) -> str:
     if args.transaction_id is not None and (args.active or args.last or filtered or (args.limit is not None or getattr(args, "no_limit", False))):
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
 
-    query = TransactionQuery(args.data_dir)
+    views = select_transaction_views(args)
     if args.transaction_id is not None:
-        view = query.get(args.transaction_id)
-        if view is None:
+        if not views:
             return f"Transaction {args.transaction_id} not found."
-        detail = format_transaction(view, local_time=args.local_time)
+        detail = format_transaction(views[0], local_time=args.local_time)
         if not args.events:
             return detail
         timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events")
         return f"{detail}\n\n{timeline}"
+    return format_transactions(views, local_time=args.local_time)
 
+
+def select_transaction_views(args: argparse.Namespace) -> list:
+    """Shared read-only selection for text and JSON transaction presentations."""
+    query = TransactionQuery(args.data_dir)
+    if args.transaction_id is not None:
+        view = query.get(args.transaction_id)
+        return [view] if view is not None else []
     since, until = _time_filters(args)
     filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": since, "until": until, "local_time": args.local_time}
     if args.active:
-        views = query.active(**filters)
-    elif args.last:
+        return query.active(**filters)
+    if args.last:
         view = query.last(**filters)
-        views = [view] if view is not None else []
-    else:
-        views = query.list(limit=None if getattr(args, "no_limit", False) else (20 if args.limit is None else args.limit), **filters)
-    return format_transactions(views, local_time=args.local_time)
+        return [view] if view is not None else []
+    return query.list(limit=None if getattr(args, "no_limit", False) else (20 if args.limit is None else args.limit), **filters)
 
 
 def build_txn_operations_parser() -> argparse.ArgumentParser:
