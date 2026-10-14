@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.transactions.archive import TransactionArchive
 
 import pytest
@@ -99,12 +100,14 @@ async def test_remote_start_remains_available_with_historical_open_transaction(
 ):
     """Historical incomplete transactions cannot veto a legitimate live remote start."""
     archive = TransactionArchive(tmp_path)
-    first = EventStore(tmp_path).commit_start("charger-a", {
+    payload = {
         "connector_id": 1,
         "id_tag": "OLD",
         "meter_start": 100,
         "timestamp": "2026-10-02T12:00:00Z",
-    })
+    }
+    first = EventStore(tmp_path).commit_start("charger-a", payload)
+    await archive.diagnostic_start("charger-a", payload, first)
     assert first > 0
     assert archive._paths[first].exists()
 
