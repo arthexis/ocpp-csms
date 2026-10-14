@@ -41,7 +41,7 @@ def test_current_schema_is_created_directly_at_version_eight(tmp_path):
         }
         version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-    assert version == 8
+    assert version == CURRENT_SCHEMA_VERSION
     assert ("table", "events") in objects
     assert ("table", "runtime_events") in objects
     assert ("table", "transactions") in objects
@@ -111,10 +111,10 @@ def test_upgrade_schema_one_to_seven_preserves_evidence_and_creates_backup(tmp_p
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 8
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
     assert backup.exists()
     with sqlite3.connect(schema_one) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert connection.execute(
             "SELECT event, charger_id FROM runtime_events"
         ).fetchone() == ("legacy_evidence", "charger-a")
@@ -226,7 +226,7 @@ def test_schema_two_upgrades_to_seven_with_rfid_history_and_metadata(tmp_path):
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 8
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
     with sqlite3.connect(path) as connection:
         tables = {
             row[0]
@@ -274,7 +274,7 @@ def test_explicit_upgrade_from_v6_preserves_high_water_and_existing_rows(tmp_pat
     assert inspect_schema(tmp_path).version == 6
     backup = schema_backup_path(inspect_schema(tmp_path))
     upgraded = upgrade_schema(tmp_path)
-    assert upgraded.version == 8
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
     assert backup.exists()
     with sqlite3.connect(backup) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
