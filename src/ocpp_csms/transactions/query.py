@@ -73,7 +73,7 @@ def _meter_times(record: dict[str, Any]) -> list[datetime]:
 
 
 def _activity_at(record: dict[str, Any]) -> datetime:
-    """Newest charger-reported OCPP event time, with archive fallback."""
+    """Newest charger-reported OCPP event time, falling back to SQLite receipt."""
     candidates: list[datetime] = []
     stop = record.get("stop")
     if isinstance(stop, dict):
@@ -88,10 +88,10 @@ def _activity_at(record: dict[str, Any]) -> datetime:
             candidates.append(parsed)
     if candidates:
         return max(candidates)
-    return _archive_time(record)
+    return _sqlite_activity_time(record)
 
 
-def _archive_time(record: dict[str, Any]) -> datetime:
+def _sqlite_activity_time(record: dict[str, Any]) -> datetime:
     for value in (record.get("updated_at"), record.get("created_at")):
         parsed = _parse_time(value)
         if parsed is not None:
@@ -101,7 +101,7 @@ def _archive_time(record: dict[str, Any]) -> datetime:
 
 def _received_activity_at(record: dict[str, Any]) -> datetime:
     """Newest SQLite receive evidence, independent of diagnostic archives."""
-    candidates: list[datetime] = [_archive_time(record)]
+    candidates: list[datetime] = [_sqlite_activity_time(record)]
     for field in ("start_received_at", "stop_received_at"):
         parsed = _parse_time(record.get(field))
         if parsed is not None:
@@ -132,9 +132,7 @@ class TransactionView:
     @property
     def status(self) -> str:
         state = str(self.record.get("status", ""))
-        # Preserve the durable recovery state and audit trail; expose a clear
-        # operational label in CLI and machine-readable transaction reports.
-        return "disconnected" if state == "inferred_stopped" else state
+        return state
 
     @property
     def connector_id(self) -> int | None:
@@ -154,6 +152,14 @@ class TransactionView:
 
     def event_time(self, *, local_time: bool = False) -> datetime:
         return self.received_activity_at if local_time else self.activity_at
+
+    @property
+    def effective_stop_source(self) -> str | None:
+        return self.record.get("effective_stop_source")
+
+    @property
+    def effective_stop_at(self) -> str | None:
+        return self.record.get("effective_stop_at")
 
     @property
     def active(self) -> bool:
