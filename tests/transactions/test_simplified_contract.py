@@ -4,7 +4,7 @@ These tests deliberately describe behavior not yet implemented on main.
 Do not xfail/skip them: CI should stay red until the production refactor.
 """
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 
@@ -269,3 +269,63 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
     assert view.effective_stop_source == "next_start"
     assert view.record["stop"] is None
     assert view.record.get("meter_values", []) == []
+    assert view.record.get("stop") is None
+    # meter_start alone cannot establish delivered energy without an end reading.
+    assert getattr(view, "energy_wh", None) is None
+
+
+@pytest.mark.asyncio
+async def test_exact_start_retry_does_not_change_archived_first_receipt(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    payload = start()
+    transaction_id = await archive.start(CP, payload)
+    before = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert await archive.start(CP, payload) == transaction_id
+    after = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert after["start"] == before["start"]
+    assert after["start_received_at"] == before["start_received_at"]
+    assert len(archives(tmp_path)) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_start_write_does_not_publish_id_or_partial_transaction(tmp_path, monkeypatch):
+    archive = TransactionArchive(tmp_path)
+    original_write = archive._write
+
+    def fail_write(path, record):
+        raise OSError("simulated interrupted archive write")
+
+    monkeypatch.setattr(archive, "_write", fail_write)
+    with pytest.raises(OSError, match="interrupted archive write"):
+        await archive.start(CP, start())
+    assert archives(tmp_path) == []
+
+    monkeypatch.setattr(archive, "_write", original_write)
+    first = await archive.start(CP, start(timestamp="2026-10-03T10:00:01Z"))
+    assert first > 0
+    assert len(archives(tmp_path)) == 1
+
+
+@pytest.mark.asyncio
+async def test_many_distinct_starts_do_not_collapse_or_reuse_ids(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    timestamps = [f"2026-10-03T10:00:{second:02d}Z" for second in range(20)]
+    ids = [await archive.start(CP, start(timestamp=timestamp)) for timestamp in timestamps]
+    assert len(set(ids)) == len(timestamps)
+    assert ids == sorted(ids)
+    assert len(archives(tmp_path)) == len(timestamps)
+
+
+@pytest.mark.asyncio
+async def test_unknown_stop_on_another_charge_point_never_changes_local_transaction(tmp_path):
+    archive = TransactionArchive(tmp_path)
+    transaction_id = await archive.start(CP, start())
+    before = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    await archive.stop("charger-b", stop(transaction_id))
+    after = next(row for row in archives(tmp_path) if row["transaction_id"] == transaction_id)
+    assert after == before
+    assert any(
+        entry["charge_point_id"] == "charger-b"
+        and entry["transaction_id"] == transaction_id
+        for entry in unresolved(tmp_path)
+    )
