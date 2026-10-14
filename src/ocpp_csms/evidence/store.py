@@ -10,6 +10,7 @@ from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
     create_current_schema,
+    ensure_wal,
     inspect_schema,
     require_supported_schema,
 )
@@ -32,6 +33,7 @@ class EventStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA synchronous = FULL")
         return connection
 
     def _initialize(self) -> None:
@@ -40,6 +42,7 @@ class EventStore:
             create_current_schema(self.data_dir)
             return
         require_supported_schema(schema)
+        ensure_wal(self.data_dir)
 
     def record_ocpp(
         self,
