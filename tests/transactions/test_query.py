@@ -99,7 +99,9 @@ def test_list_filters_time_and_limit(tmp_path):
             CHARGER_A,
             start_payload(timestamp=f"2026-10-03T{hour:02d}:00:00Z", id_tag=f"card-{hour}"),
         )
-        store.commit_transaction_evidence(CHARGER_A, "StopTransaction", stop_payload(transaction_id, timestamp=f"2026-10-03T{hour:02d}:30:00Z"),
+        store.commit_transaction_evidence(
+            CHARGER_A, "StopTransaction",
+            stop_payload(transaction_id, timestamp=f"2026-10-03T{hour:02d}:30:00Z"),
         )
         ids.append(transaction_id)
 
