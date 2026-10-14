@@ -161,12 +161,7 @@ class CSMSServer:
                         )
                         LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
-                        worker = asyncio.create_task(recovery_loop(self))
-                        try:
-                            await asyncio.Future()
-                        finally:
-                            worker.cancel()
-                            await asyncio.gather(worker, return_exceptions=True)
+                        await asyncio.Future()
                     finally:
                         object.__setattr__(self, "_tls_listener", None)
                         await tls.stop()
