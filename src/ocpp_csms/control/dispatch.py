@@ -55,7 +55,7 @@ def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tupl
 def _config_guard(registry: SessionRegistry, charger: str, force: Any, *, change: bool) -> dict[str, Any] | None:
     if not isinstance(force, bool):
         return {"error": "invalid_force"}
-    active_transactions = registry.active_transaction_ids(charger)
+    active_transactions = (_occupancy(registry, charger, None)[0] if hasattr(registry, "connector_occupancy") else registry.active_transaction_ids(charger))
     if active_transactions and not force:
         registry.record_control_event(
             "configuration_change_blocked" if change else "configuration_query_blocked",
@@ -513,9 +513,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             keys = _configuration_keys(request)
             if keys is _INVALID:
                 return {"error": "invalid_keys"}
-            guard = _config_guard(registry, charger, request.get("force", False), change=False)
-            if guard is not None:
-                return guard
             response = await session.get_configuration(keys)
         elif command == "config_set":
             key = request.get("key")
