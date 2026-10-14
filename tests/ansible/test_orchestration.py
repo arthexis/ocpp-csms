@@ -377,3 +377,17 @@ def test_wal_preparation_runs_for_existing_current_schema_before_activation():
         "Verify database schema and SQLite integrity before activation",
         "Install live OCPP CSMS systemd unit",
     )
+
+
+def test_converged_deployment_verifies_wal_without_live_conversion():
+    cutover = TASKS / "cutover.yml"
+    verify = task_by_name(cutover, "Verify converged database WAL and SQLite integrity")
+    assert verify["when"] == "not (ocpp_csms_activation_required | bool)"
+    assert verify["changed_when"] is False
+    assert "schema-verify" in verify["ansible.builtin.command"]["argv"]
+    assert_task_order(
+        read(cutover),
+        "Ensure converged OCPP CSMS service is enabled and running",
+        "Verify converged OCPP CSMS application status",
+        "Verify converged database WAL and SQLite integrity",
+    )
