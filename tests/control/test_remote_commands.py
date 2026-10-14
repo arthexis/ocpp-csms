@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from ocpp_csms.transactions.archive import TransactionArchive
+
 import pytest
 from ocpp.v16 import call
 
@@ -89,3 +91,31 @@ async def test_get_configuration_preserves_key_selection(charge_point_session, k
     assert len(sent) == 1
     assert isinstance(sent[0], call.GetConfigurationPayload)
     assert sent[0].key == expected_keys
+
+
+@pytest.mark.asyncio
+async def test_remote_start_remains_available_with_historical_open_transaction(
+    charge_point_session, tmp_path,
+):
+    """Historical incomplete transactions cannot veto a legitimate live remote start."""
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start("charger-a", {
+        "connector_id": 1,
+        "id_tag": "OLD",
+        "meter_start": 100,
+        "timestamp": "2026-10-02T12:00:00Z",
+    })
+    assert first > 0
+    assert archive._paths[first].exists()
+
+    session = charge_point_session
+    session.transactions = archive
+    sent = capture_calls(session)
+    response = await session.remote_start(id_tag="NEW", connector_id=1)
+
+    assert response.status == "Accepted"
+    assert len(sent) == 1
+    assert isinstance(sent[0], call.RemoteStartTransactionPayload)
+    assert sent[0].id_tag == "NEW"
+    assert sent[0].connector_id == 1
+    assert archive._paths[first].exists()
