@@ -175,3 +175,44 @@ def test_derived_transaction_boundary_does_not_create_ocpp_export_event(tmp_path
     assert first["cursor"]["next"] == 2
     assert replay["events"] == first["events"]
     assert replay["cursor"] == first["cursor"]
+
+
+def test_later_distinct_start_preserves_open_state_and_missing_stop_in_export(tmp_path):
+    store = EventStore(tmp_path)
+    first = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    second = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-B", "meter_start": 200,
+        "timestamp": "2026-10-03T10:05:00Z",
+    })
+
+    data = export_contract(tmp_path, after=0, limit=20)["data"]
+    transactions = {item["id"]: item for item in data["transactions"]}
+    assert first != second
+    assert transactions[first]["state"] == "open"
+    assert transactions[first]["stopped_at"] is None
+    assert transactions[first]["energy_wh"] is None
+    assert transactions[first]["stop_received_at"] is None
+    assert transactions[first]["quality"]["incomplete"] is True
+    assert all(event["action"] != "StopTransaction" for event in data["events"])
+
+
+def test_export_cursor_advances_for_late_real_stop_evidence(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    first_page = export_contract(tmp_path, after=0, limit=20)["data"]
+    first_cursor = first_page["cursor"]["next"]
+    store.record_ocpp("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 250,
+        "timestamp": "2026-10-03T11:00:00Z",
+    }, transaction_id=transaction_id)
+    later_page = export_contract(tmp_path, after=first_cursor, limit=20)["data"]
+    assert len(later_page["events"]) == 1
+    assert later_page["events"][0]["action"] == "StopTransaction"
+    assert later_page["cursor"]["next"] > first_cursor
+    assert export_contract(tmp_path, after=first_cursor, limit=20)["data"]["events"] == later_page["events"]
