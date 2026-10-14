@@ -189,12 +189,13 @@ def test_status_notifications_never_close_transaction_history(tmp_path):
     ) is True
     assert fetchone(
         tmp_path,
-        "SELECT state FROM transactions WHERE transaction_id = 7",
+        f"SELECT state FROM transactions WHERE transaction_id = {transaction_id}",
     ) == ("open",)
 
 
 def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
     store = EventStore(tmp_path)
+    allocated_ids = []
     for transaction_id, timestamp in (
         (1, "2026-10-01T15:00:00Z"),
         (2, "2026-10-01T15:10:00Z"),
@@ -208,6 +209,7 @@ def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
                 "timestamp": timestamp,
             },
         )
+        allocated_ids.append(allocated_id)
 
     store.record_connector_status(
         "charger-a",
@@ -221,7 +223,7 @@ def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
     assert fetchall(
         tmp_path,
         "SELECT transaction_id, state FROM transactions ORDER BY transaction_id",
-    ) == [(1, "open"), (2, "open")]
+    ) == [(transaction_id, "open") for transaction_id in allocated_ids]
 
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
