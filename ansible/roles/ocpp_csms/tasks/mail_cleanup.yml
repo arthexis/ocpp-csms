@@ -1,0 +1,34 @@
+---
+# Retire previously installed mail units without touching notification history.
+- name: Check for legacy OCPP CSMS mail systemd units
+  become: true
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
+  loop:
+    - ocpp-csms-mail-report.timer
+    - ocpp-csms-mail-report.service
+  register: ocpp_csms_legacy_mail_units
+
+- name: Stop and disable installed legacy mail timer and service
+  become: true
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ ocpp_csms_legacy_mail_units.results }}"
+  when: item.stat.exists
+
+- name: Remove legacy OCPP CSMS mail systemd unit files
+  become: true
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.item }}"
+    state: absent
+  loop: "{{ ocpp_csms_legacy_mail_units.results }}"
+  when: item.stat.exists
+  notify: Reload systemd for retired mail units
+
+- name: Remove legacy OCPP CSMS mail configuration
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms/mail.toml
+    state: absent
