@@ -373,3 +373,50 @@ def test_export_uses_one_sqlite_snapshot_for_events_and_transactions(tmp_path, m
     later = exporter.export_contract(tmp_path, after=first["cursor"]["next"])["data"]
     assert [event["action"] for event in later["events"]] == ["StopTransaction"]
     assert later["transactions"][0]["state"] == "stopped"
+
+
+def test_export_reader_does_not_block_concurrent_charger_commit(tmp_path, monkeypatch):
+    """A held WAL snapshot must not delay a separate charger write."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    import ocpp_csms.export_contract as exporter
+
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    })
+    snapshot_ready = Event()
+    release_snapshot = Event()
+    original = exporter._event_rows
+
+    def held_snapshot(connection, *, after, limit):
+        result = original(connection, after=after, limit=limit)
+        snapshot_ready.set()
+        if not release_snapshot.wait(timeout=10):
+            raise AssertionError("timed out waiting to release export snapshot")
+        return result
+
+    monkeypatch.setattr(exporter, "_event_rows", held_snapshot)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            export_future = executor.submit(exporter.export_contract, tmp_path)
+            assert snapshot_ready.wait(timeout=10)
+            writer_future = executor.submit(
+                store.commit_transaction_evidence, "charger-a", "StopTransaction",
+                {"transaction_id": transaction_id, "meter_stop": 200,
+                 "timestamp": "2026-10-03T10:10:00Z"},
+            )
+            # The writer must finish while the read transaction is still open.
+            writer_future.result(timeout=5)
+            release_snapshot.set()
+            first = export_future.result(timeout=10)["data"]
+    finally:
+        release_snapshot.set()
+        monkeypatch.setattr(exporter, "_event_rows", original)
+
+    assert [event["action"] for event in first["events"]] == ["StartTransaction"]
+    assert first["transactions"][0]["state"] == "open"
+    second = exporter.export_contract(tmp_path, after=first["cursor"]["next"])["data"]
+    assert [event["action"] for event in second["events"]] == ["StopTransaction"]
+    assert second["transactions"][0]["state"] == "stopped"
