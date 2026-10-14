@@ -32,19 +32,12 @@ async def test_start_transaction_is_permissive_without_rfid_file(tmp_path):
     records = transaction_records(tmp_path)
     assert len(records) == 1
     assert records[0]["id_tag"] == "card-a"
-    assert recorded == [
-        (
-            "StartTransaction",
-            {
-                "connector_id": 1,
-                "id_tag": "card-a",
-                "timestamp": "2026-10-01T15:00:00Z",
-                "meter_start": 10,
-            },
-            "in",
-            1,
-        )
-    ]
+    # Accepted starts commit their incoming event directly in SQLite.
+    assert recorded == []
+    assert session.events.find_recent_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-01T15:00:00Z", "meter_start": 10,
+    }) == 1
 
 
 @pytest.mark.asyncio
