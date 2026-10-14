@@ -2,11 +2,11 @@
 
 ## Existing contract: ocpp-csms/export/v1
 
-The CSMS export command owns all reads of operational SQLite and transaction archives. OCPP Reports consumes the command's JSON output; it must not open CSMS files or write to CSMS databases.
+The CSMS export command owns all reads of authoritative operational SQLite evidence. JSON transaction archives are optional diagnostics, not an export source. OCPP Reports consumes the command's JSON output; it must not open CSMS files or write to CSMS databases.
 
 The persisted `source_id` identifies the CSMS data store. `cursor.after` is the exclusive lower bound on OCPP event IDs; `cursor.next` is the last returned ID (or `after` for an empty page); `cursor.more` indicates another visible event. Events are ascending and limited by `limit`. Event IDs need not be contiguous. `after >= 0`, `limit >= 1`. A repeated request may return the same event identities, but transaction snapshots are not immutable across requests.
 
-`events` contains OCPP frames from the operational event table, and `energy` contains samples derived from the page's MeterValues. `transactions` contains current archive snapshots for transaction IDs referenced by the event page. The exporter also returns `status`. These reads are not an atomic cross-store snapshot. The export is read-only and does not change the operational SQLite journal mode.
+`events` contains OCPP frames from the operational event table, and `energy` contains samples derived from the page's MeterValues. `transactions` contains SQLite-derived snapshots for transaction IDs referenced by the event page. SQLite-derived `status` fields, events, and transaction snapshots are read from the same SQLite read transaction. Non-database status inputs (such as process liveness and RFID configuration) are sampled independently and are not transactionally synchronized with SQLite. The export is read-only and does not change the operational SQLite journal mode.
 
 ## Additive metadata (chunk B)
 
