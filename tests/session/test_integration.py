@@ -331,22 +331,19 @@ async def test_websocket_orphan_stop_then_valid_start_does_not_adopt_foreign_id(
             }))
             valid_id = (await result(websocket, "start"))["transactionId"]
 
-    records = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in (tmp_path / "transactions").glob("*/*.json")
-    ]
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == valid_id
-    assert valid_id != 900000
-    unresolved = [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in (tmp_path / "transactions-unresolved").glob("*/*.json")
-    ]
-    assert any(
-        item["transaction_id"] == 900000
-        and item["message_type"] == "StopTransaction"
-        for item in unresolved
-    )
+    with server.events._connect() as db:
+        transactions = db.execute(
+            "SELECT transaction_id, charger_id FROM transactions ORDER BY transaction_id"
+        ).fetchall()
+        orphan = db.execute(
+            "SELECT charger_id, transaction_id, payload_json FROM events "
+            "WHERE action = 'StopTransaction' AND direction = 'in'"
+        ).fetchone()
+    assert transactions == [(valid_id, "charger-a")]
+    assert valid_id == 1
+    assert orphan[0:2] == ("charger-a", 900000)
+    assert json.loads(orphan[2])["meter_stop"] == 900
+
 
 
 @pytest.mark.asyncio
