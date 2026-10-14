@@ -33,7 +33,7 @@ def test_sqlite_export_does_not_require_json_archive(tmp_path):
 
 def test_sqlite_exact_retry_lookup_has_no_time_window(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(41, "charger-a", start())
+    transaction_id = store.commit_start("charger-a", start())
     with sqlite3.connect(store.path) as connection:
         connection.execute(
             "UPDATE transactions SET start_received_at = ? WHERE transaction_id = ?",
