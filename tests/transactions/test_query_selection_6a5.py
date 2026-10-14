@@ -124,6 +124,14 @@ def test_standalone_query_reads_summary_and_evidence_from_same_wal_snapshot(tmp_
                     )
             return self.underlying.execute(sql, params)
 
+        @property
+        def row_factory(self):
+            return self.underlying.row_factory
+
+        @row_factory.setter
+        def row_factory(self, factory):
+            self.underlying.row_factory = factory
+
         def __getattr__(self, name):
             return getattr(self.underlying, name)
 
