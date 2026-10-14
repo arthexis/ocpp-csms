@@ -152,6 +152,15 @@
         path: "{{ ocpp_csms_transactions_dir }}"
       register: ocpp_csms_transactions_state
 
+    - name: Assert initialized OCPP CSMS storage
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_database_state.stat.exists | default(false)
+          - ocpp_csms_database_state.stat.isreg | default(false)
+          - ocpp_csms_transactions_state.stat.exists | default(false)
+          - ocpp_csms_transactions_state.stat.isdir | default(false)
+        fail_msg: OCPP CSMS init did not produce expected storage.
+
     - name: Verify OCPP CSMS storage access as systemd service user
       become: true
       become_user: "{{ ocpp_csms_service_user }}"
@@ -171,7 +180,7 @@
                     raise SystemExit(f"CSMS service cannot access directory: {directory}")
             if not database.is_file() or not os.access(database, os.R_OK | os.W_OK):
                 raise SystemExit(f"CSMS service cannot access database: {database}")
-            connection = sqlite3.connect(database, timeout=1)
+            connection = sqlite3.connect(database.resolve().as_uri() + "?mode=rw", uri=True, timeout=1)
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.rollback()
@@ -181,15 +190,6 @@
           - "{{ ocpp_csms_database_path }}"
           - "{{ ocpp_csms_transactions_dir }}"
       changed_when: false
-
-    - name: Assert initialized OCPP CSMS storage
-      ansible.builtin.assert:
-        that:
-          - ocpp_csms_database_state.stat.exists | default(false)
-          - ocpp_csms_database_state.stat.isreg | default(false)
-          - ocpp_csms_transactions_state.stat.exists | default(false)
-          - ocpp_csms_transactions_state.stat.isdir | default(false)
-        fail_msg: OCPP CSMS init did not produce expected storage.
 
     - name: Enable and start candidate OCPP CSMS service
       become: true
