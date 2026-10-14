@@ -19,13 +19,7 @@ from ocpp_csms.transactions.export_metadata import transaction_export_metadata
 SCHEMA = "ocpp-csms/export/v1"
 
 
-def _event_rows(data_dir: str | Path, *, after: int, limit: int) -> tuple[list[sqlite3.Row], bool]:
-    database = Path(data_dir).expanduser() / DATABASE_FILENAME
-    if not database.exists():
-        return [], False
-    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
-    connection.row_factory = sqlite3.Row
-    try:
+def _event_rows(connection: sqlite3.Connection, *, after: int, limit: int) -> tuple[list[sqlite3.Row], bool]:
         rows = connection.execute(
             """
             SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
@@ -37,8 +31,6 @@ def _event_rows(data_dir: str | Path, *, after: int, limit: int) -> tuple[list[s
             """,
             (after, limit + 1),
         ).fetchall()
-    finally:
-        connection.close()
     return rows[:limit], len(rows) > limit
 
 
@@ -105,9 +97,31 @@ def export_contract(
     if limit < 1:
         raise ValueError("--limit must be at least 1")
 
-    rows, more = _event_rows(data_dir, after=after, limit=limit)
+    database = Path(data_dir).expanduser() / DATABASE_FILENAME
+    if database.exists():
+        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN")
+            rows, more = _event_rows(connection, after=after, limit=limit)
+            transactions = _transaction_snapshots(data_dir, rows, connection)
+    else:
+        rows, more, transactions = [], False, []
     next_cursor = int(rows[-1]["id"]) if rows else after
 
+    status = status_contract(appliance_status(data_dir))["data"]
+    data = {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "source_id": source_id(data_dir),
+        "cursor": {"after": after, "next": next_cursor, "more": more},
+        "events": [event_record(row) for row in rows],
+        "energy": _energy_samples(rows),
+        "transactions": transactions,
+        "status": status,
+    }
+    return json_command_result(data, schema=SCHEMA)
+
+
+def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connection: sqlite3.Connection) -> list[dict[str, Any]]:
     transaction_ids = sorted(
         {
             int(row["transaction_id"])
@@ -115,25 +129,11 @@ def export_contract(
             if row["transaction_id"] is not None
         }
     )
-    query = TransactionQuery(data_dir)
+    query = TransactionQuery(data_dir, connection=connection)
     transactions = []
     for transaction_id in transaction_ids:
         view = query.get(transaction_id)
         if view is not None:
             transactions.append({**transaction_item(view, local_time=True), **transaction_export_metadata(view.record)})
 
-    status = status_contract(appliance_status(data_dir))["data"]
-    data = {
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "source_id": source_id(data_dir),
-        "cursor": {
-            "after": after,
-            "next": next_cursor,
-            "more": more,
-        },
-        "events": [event_record(row) for row in rows],
-        "energy": _energy_samples(rows),
-        "transactions": transactions,
-        "status": status,
-    }
-    return json_command_result(data, schema=SCHEMA)
+    return transactions
