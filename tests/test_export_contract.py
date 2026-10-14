@@ -130,3 +130,48 @@ def test_export_includes_current_snapshot_for_touched_transaction(tmp_path):
     assert transaction["connector_id"] == 1
     assert transaction["rfid"] == "CARD-A"
     assert transaction["active"] is True
+
+
+def test_repeated_real_start_frames_have_distinct_export_event_ids(tmp_path):
+    """Deduplicating transaction identity must not deduplicate received OCPP evidence."""
+    store = EventStore(tmp_path)
+    start = {
+        "connector_id": 1,
+        "id_tag": "CARD-A",
+        "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    }
+    store.record_ocpp("charger-a", "StartTransaction", start, transaction_id=7)
+    store.record_ocpp("charger-a", "StartTransaction", start, transaction_id=7)
+
+    exported = export_contract(tmp_path, after=0, limit=10)["data"]
+    starts = [event for event in exported["events"] if event["action"] == "StartTransaction"]
+    assert len(starts) == 2
+    assert starts[0]["id"] != starts[1]["id"]
+    assert exported["cursor"]["next"] == starts[-1]["id"]
+
+
+def test_derived_transaction_boundary_does_not_create_ocpp_export_event(tmp_path):
+    """The report may derive a boundary; the replication cursor tracks real OCPP only."""
+    store = EventStore(tmp_path)
+    start = {
+        "connector_id": 1,
+        "id_tag": "CARD-A",
+        "meter_start": 100,
+        "timestamp": "2026-10-03T10:00:00Z",
+    }
+    store.record_ocpp("charger-a", "StartTransaction", start, transaction_id=1)
+    store.record_ocpp(
+        "charger-a",
+        "StartTransaction",
+        {**start, "timestamp": "2026-10-03T10:05:00Z"},
+        transaction_id=2,
+    )
+    first = export_contract(tmp_path, after=0, limit=10)["data"]
+    replay = export_contract(tmp_path, after=0, limit=10)["data"]
+    assert [event["action"] for event in first["events"]] == [
+        "StartTransaction", "StartTransaction"
+    ]
+    assert first["cursor"]["next"] == 2
+    assert replay["events"] == first["events"]
+    assert replay["cursor"] == first["cursor"]
