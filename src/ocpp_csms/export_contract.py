@@ -105,11 +105,12 @@ def export_contract(
             connection.execute("BEGIN")
             rows, more = _event_rows(connection, after=after, limit=limit)
             transactions = _transaction_snapshots(data_dir, rows, connection)
+            status = status_contract(appliance_status(data_dir, connection=connection))["data"]
     else:
         rows, more, transactions = [], False, []
+        status = status_contract(appliance_status(data_dir))["data"]
     next_cursor = int(rows[-1]["id"]) if rows else after
 
-    status = status_contract(appliance_status(data_dir))["data"]
     data = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "source_id": source_id(data_dir),
