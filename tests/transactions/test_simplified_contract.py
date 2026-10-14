@@ -150,12 +150,18 @@ async def test_query_derives_next_start_boundary_without_mutating_archive(tmp_pa
     archive = TransactionArchive(tmp_path)
     first = await archive.start(CP, start())
     await archive.start(CP, start(timestamp="2026-10-03T10:05:00Z"))
+    before = next(row for row in archives(tmp_path) if row["transaction_id"] == first)
+    second = next(row for row in archives(tmp_path) if row["transaction_id"] != first)
     view = TransactionQuery(tmp_path).get(first)
     assert view is not None
-    # Effective boundaries are report-only; never a synthetic StopTransaction.
+    assert view.record == before
+    assert before["stop"] is None
+    assert before["status"] == "open"
+    assert second["start_received_at"] is not None
+    # Reporting derives the boundary without writing synthetic evidence.
     assert view.effective_stop_source == "next_start"
-    assert view.effective_stop_at is not None
-    assert next(row for row in archives(tmp_path) if row["transaction_id"] == first)["stop"] is None
+    assert view.effective_stop_at == second["start_received_at"]
+    assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == before
 
 
 @pytest.mark.asyncio
@@ -174,8 +180,14 @@ async def test_new_start_on_other_connector_does_not_infer_stop(tmp_path):
     archive = TransactionArchive(tmp_path)
     first = await archive.start(CP, start(connector=1))
     await archive.start(CP, start(connector=2, timestamp="2026-10-03T10:05:00Z"))
+    before = next(row for row in archives(tmp_path) if row["transaction_id"] == first)
     view = TransactionQuery(tmp_path).get(first)
+    assert view is not None
+    assert view.record == before
+    assert before["stop"] is None
     assert view.effective_stop_source is None
+    assert view.effective_stop_at is None
+    assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == before
 
 
 @pytest.mark.asyncio
@@ -227,9 +239,18 @@ async def test_inferred_boundary_uses_receipt_time_not_charger_clock(tmp_path, m
     archive = TransactionArchive(tmp_path)
     first = await archive.start(CP, start(timestamp="2026-10-03T10:00:00Z"))
     await archive.start(CP, start(timestamp="2026-10-03T09:59:00Z"))
+    records = {row["transaction_id"]: row for row in archives(tmp_path)}
+    assert records[first]["start_received_at"] == "2026-10-03T10:01:00+00:00"
+    successor = next(row for transaction_id, row in records.items() if transaction_id != first)
+    assert successor["start_received_at"] == "2026-10-03T10:07:00+00:00"
+    assert successor["start"]["timestamp"] == "2026-10-03T09:59:00Z"
     view = TransactionQuery(tmp_path).get(first)
+    assert view is not None
+    assert view.record == records[first]
     assert view.effective_stop_source == "next_start"
-    assert view.effective_stop_at == "2026-10-03T10:07:00+00:00"
+    assert view.effective_stop_at == successor["start_received_at"]
+    assert records[first]["stop"] is None
+    assert next(row for row in archives(tmp_path) if row["transaction_id"] == first) == records[first]
 
 
 @pytest.mark.asyncio
