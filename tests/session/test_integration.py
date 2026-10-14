@@ -223,12 +223,16 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
     assert "40 Wh" in report
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
-    incoming = [event for event in exported["events"] if event["action"] in {"StartTransaction", "MeterValues", "StopTransaction"}]
-    assert [event["action"] for event in incoming] == [
+    with EventStore(tmp_path)._connect() as db:
+        incoming = db.execute(
+            "SELECT id, action FROM events WHERE direction = 'in' ORDER BY id"
+        ).fetchall()
+    assert [row[1] for row in incoming] == [
         "StartTransaction", "MeterValues", "StartTransaction",
         "StopTransaction", "StopTransaction",
     ]
-    assert len({event["id"] for event in incoming}) == 5
+    assert len({row[0] for row in incoming}) == 5
+    assert len(exported["events"]) == 10  # Five incoming calls and five outgoing replies.
     assert exported["cursor"]["next"] == exported["events"][-1]["id"]
 
 
@@ -293,15 +297,16 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
     assert TransactionQuery(tmp_path).get(second_id).record["stop"] is None
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
-    starts = [
-        event for event in exported["events"]
-        if event["action"] in {"StartTransaction", "MeterValues", "StopTransaction"} and event["action"] == "StartTransaction"
-    ]
+    with EventStore(tmp_path)._connect() as db:
+        starts = db.execute(
+            "SELECT id, transaction_id FROM events WHERE direction = 'in' "
+            "AND action = 'StartTransaction' ORDER BY id"
+        ).fetchall()
     assert len(starts) == 3
-    assert len({event["id"] for event in starts}) == 3
-    assert [event["transaction_id"] for event in starts] == [
-        first_id, first_id, second_id,
-    ]
+    assert len({row[0] for row in starts}) == 3
+    assert [row[1] for row in starts] == [first_id, first_id, second_id]
+    assert len([event for event in exported["events"] if event["action"] == "StartTransaction"]) == 6
+
 
 
 @pytest.mark.asyncio
