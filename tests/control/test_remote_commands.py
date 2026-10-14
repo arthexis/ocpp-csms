@@ -119,3 +119,48 @@ async def test_remote_start_remains_available_with_historical_open_transaction(
     assert sent[0].id_tag == "NEW"
     assert sent[0].connector_id == 1
     assert archive._paths[first].exists()
+
+
+@pytest.mark.asyncio
+async def test_a6_restarted_server_does_not_treat_historical_open_as_live(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    from ocpp_csms.server import CSMSServer
+
+    archive = TransactionArchive(tmp_path)
+    old_id = await archive.start("charger-a", {
+        "connector_id": 1, "id_tag": "OLD", "meter_start": 100,
+        "timestamp": "2026-10-02T12:00:00Z",
+    })
+    assert old_id > 0
+    restarted = CSMSServer(
+        host="127.0.0.1", port=0,
+        transactions=TransactionArchive(tmp_path),
+        events=EventStore(tmp_path),
+    )
+    assert restarted.connected_chargers() == []
+    assert restarted.active_transactions("charger-a") == []
+    assert restarted.active_transaction_ids("charger-a") == []
+
+
+@pytest.mark.asyncio
+async def test_a6_orphan_and_conflicting_evidence_cannot_create_live_occupancy(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    from ocpp_csms.server import CSMSServer
+
+    archive = TransactionArchive(tmp_path)
+    await archive.meter_values("charger-b", {
+        "transaction_id": 900000, "connector_id": 2,
+        "meter_value": [{"timestamp": "2026-10-02T12:01:00Z",
+                         "sampled_value": [{"value": "100"}]}],
+    })
+    await archive.stop("charger-b", {
+        "transaction_id": 900000, "meter_stop": 200,
+        "timestamp": "2026-10-02T12:02:00Z",
+    })
+    restarted = CSMSServer(
+        host="127.0.0.1", port=0,
+        transactions=TransactionArchive(tmp_path),
+        events=EventStore(tmp_path),
+    )
+    assert restarted.active_transactions("charger-a") == []
+    assert restarted.active_transactions("charger-b") == []
