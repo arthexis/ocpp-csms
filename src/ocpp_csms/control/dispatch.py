@@ -320,6 +320,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     command = request.get("command")
     if not isinstance(command, str) or not command:
         return {"error": "missing_command"}
+    if "force" in request and not isinstance(request["force"], bool):
+        return {"error": "invalid_force"}
     if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
         return await registry.tls_control(command.removeprefix("tls_"))
     charger, request, resolution_error = _resolve_charger(registry, request)
