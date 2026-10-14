@@ -251,3 +251,86 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
         tmp_path,
         "SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = 140",
     ) == ("stopped", 1170)
+
+
+def export_events(tmp_path, after_id=0, limit=100):
+    """Test-side model of the durable event cursor; not a consumer API."""
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
+        return connection.execute(
+            "SELECT id, action, transaction_id, payload_json FROM events "
+            "WHERE id > ? ORDER BY id LIMIT ?",
+            (after_id, limit),
+        ).fetchall()
+
+
+def test_a5_retransmissions_have_distinct_durable_event_ids(tmp_path):
+    payload = {"connector_id": 1, "id_tag": "card-a",
+               "meter_start": 100, "timestamp": "2026-10-03T10:00:00Z"}
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "StartTransaction", payload, transaction_id=41)
+    store.record_ocpp("charger-a", "StartTransaction", payload, transaction_id=41)
+    rows = export_events(tmp_path)
+    assert len(rows) == 2
+    assert rows[0][0] < rows[1][0]
+    assert [row[2] for row in rows] == [41, 41]
+    assert [json.loads(row[3]) for row in rows] == [payload, payload]
+    assert export_events(tmp_path, after_id=rows[0][0]) == rows[1:]
+
+
+def test_a5_cursor_pages_replay_identically_after_restart(tmp_path):
+    store = EventStore(tmp_path)
+    for n in range(7):
+        store.record_ocpp("charger-a", "MeterValues", {
+            "transaction_id": 41, "sequence": n,
+        })
+    expected = export_events(tmp_path)
+    cursor = 0
+    pages = []
+    while True:
+        page = export_events(tmp_path, after_id=cursor, limit=2)
+        if not page:
+            break
+        assert all(row[0] > cursor for row in page)
+        pages.extend(page)
+        cursor = page[-1][0]
+    assert pages == expected
+    EventStore(tmp_path)
+    assert export_events(tmp_path) == expected
+    assert export_events(tmp_path, after_id=expected[2][0]) == expected[3:]
+
+
+def test_a5_late_stop_is_new_event_not_rewrite(tmp_path):
+    store = EventStore(tmp_path)
+    start = {"connector_id": 1, "id_tag": "card-a",
+             "meter_start": 100, "timestamp": "2026-10-03T10:00:00Z"}
+    store.record_ocpp("charger-a", "StartTransaction", start, transaction_id=41)
+    previous = export_events(tmp_path)
+    stop = {"transaction_id": 41, "meter_stop": 150,
+            "timestamp": "2026-10-03T10:10:00Z"}
+    store.record_ocpp("charger-a", "StopTransaction", stop)
+    assert export_events(tmp_path)[:1] == previous
+    late = export_events(tmp_path, after_id=previous[-1][0])
+    assert len(late) == 1
+    assert late[0][1:3] == ("StopTransaction", 41)
+    assert json.loads(late[0][3]) == stop
+
+
+def test_a5_failed_event_insert_never_advances_durable_cursor(tmp_path, monkeypatch):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "Heartbeat", {})
+    before = export_events(tmp_path)
+    original_connect = store._connect
+
+    def fail_connect():
+        connection = original_connect()
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.close()
+        raise sqlite3.OperationalError("simulated write failure")
+
+    monkeypatch.setattr(store, "_connect", fail_connect)
+    with pytest.raises(sqlite3.OperationalError, match="simulated write failure"):
+        store.record_ocpp("charger-a", "MeterValues", {"transaction_id": 41})
+    assert export_events(tmp_path) == before
+    monkeypatch.setattr(store, "_connect", original_connect)
+    store.record_ocpp("charger-a", "MeterValues", {"transaction_id": 41})
+    assert len(export_events(tmp_path, after_id=before[-1][0])) == 1
