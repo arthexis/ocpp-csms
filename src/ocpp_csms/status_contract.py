@@ -34,6 +34,8 @@ def charger_status_data(charger: ChargerStatus) -> dict[str, Any]:
         "protocol": charger.subprotocol,
         "last_seen": charger.last_seen,
         "status": charger.status,
+        "availability": charger.availability,
+        "activity": charger.activity,
         "error_code": charger.error_code,
         "info": charger.info,
         "derived_status": charger.derived_status,
