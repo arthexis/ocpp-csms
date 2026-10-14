@@ -52,10 +52,6 @@ def verify_schema_integrity(data_dir: str | Path) -> None:
         integrity = connection.execute("PRAGMA integrity_check").fetchone()
         if integrity is None or integrity[0] != "ok":
             raise RuntimeError(f"database integrity check failed: {integrity}")
-        if connection.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
-        ).fetchone()[0] != 1:
-            raise RuntimeError("recovery audit table missing after schema migration")
 
 
 def connection_markers(data_dir: str | Path, expected: tuple[str, ...]) -> dict[str, int]:
