@@ -100,6 +100,32 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
         )
 
 
+    default_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn"))
+    local_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "-T", "--since", "2026-10-06T12:05:00Z"))
+    assert "EVENT TIME" in default_output
+    assert "2020-01-01T00:10:00Z" in default_output
+    assert "2026-10-06T12:10:00Z" in local_output
+
+
+def test_cp_and_charger_select_charge_point(parse_cli):
+    assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
+    assert parse_cli("txn", "--cp", "charger-a").charger == "charger-a"
+
+
+@pytest.mark.parametrize("command", ["txn"])
+@pytest.mark.parametrize("flag", ["-N", "--no-limit"])
+def test_transaction_no_limit_aliases(parse_cli, command, flag):
+    args = parse_cli(command, "--since", "3d", flag)
+    assert args.no_limit is True
+    assert args.since == "3d"
+
+
+@pytest.mark.parametrize("limit_flag, unlimited_flag", [
+    ("--limit", "--no-limit"), ("-n", "-N"),
+])
+def test_transaction_limit_and_no_limit_are_mutually_exclusive(limit_flag, unlimited_flag):
+    from ocpp_csms.cli import build_parser
+
     parser, _ = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["txn", limit_flag, "20", unlimited_flag])
