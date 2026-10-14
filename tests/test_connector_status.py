@@ -54,8 +54,11 @@ def test_open_transaction_uses_its_connector_state(tmp_path: Path):
 
     charger = appliance_status(tmp_path)["chargers"][0]
 
-    assert charger.status == "Preparing"
+    assert charger.status == "Available"
     assert charger.transaction_id == 7
+    assert charger.availability == "unknown"  # No live server connection established
+    assert charger.activity == "unknown"
+    assert [(item.connector_id, item.status) for item in charger.connectors] == [(1, "Preparing"), (2, "Available")]
 
 
 def test_detailed_status_prints_each_connector(tmp_path: Path):
@@ -75,3 +78,18 @@ def test_detailed_status_prints_each_connector(tmp_path: Path):
     assert "Connector 1: Charging" in text
     assert "Transaction: 7" in text
     assert "Connector 2: Available" in text
+
+
+def test_independent_customer_availability_and_operator_activity():
+    from ocpp_csms.status import ConnectorStatus, operational_state
+    connectors = [
+        ConnectorStatus(connector_id=1, status="Charging", error_code=None,
+                        transaction_id=12, id_tag="card", started_at=None),
+        ConnectorStatus(connector_id=2, status="Available", error_code=None,
+                        transaction_id=None, id_tag=None, started_at=None),
+    ]
+    assert operational_state(connectors) == ("available", "active")
+    connectors[0].status = "Preparing"
+    assert operational_state(connectors) == ("available", "unknown")
+    connectors[0].status = "Unavailable"
+    assert operational_state(connectors) == ("available", "inactive")
