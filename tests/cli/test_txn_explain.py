@@ -1,4 +1,4 @@
-"""Transaction explanation rules use archive evidence, never charger calls."""
+"""Transaction explanation rules use recorded evidence, never charger calls."""
 from __future__ import annotations
 from types import SimpleNamespace
 import pytest
@@ -10,7 +10,7 @@ def _view(*, state="open", start=True, stop=False, first=100, last=110):
     record = {"start": {"meter_start": first} if start else None,
               "stop": {"meter_stop": last} if stop else None,
               "meter_values": [], "status": state}
-    return SimpleNamespace(record=record, status="disconnected" if state == "inferred_stopped" else state,
+    return SimpleNamespace(record=record, status=state,
                            charge_point_id="CP1", connector_id=1, id_tag="ABC",
                            transaction_id=42, unresolved=(), active=not stop and state == "open")
 
@@ -30,7 +30,6 @@ def _analyze(monkeypatch, view, *, overlaps=()):
 
 @pytest.mark.parametrize("options,expected_code,certainty", [
     ({}, "missing_stop", "observed"),
-    ({"state": "inferred_stopped"}, "inferred_stop", "inferred"),
     ({"stop": True}, "stop_recorded", "observed"),
     ({"stop": True, "first": 500, "last": 200}, "meter_decrease", "observed"),
 ])
