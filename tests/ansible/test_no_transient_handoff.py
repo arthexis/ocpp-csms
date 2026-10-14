@@ -46,6 +46,4 @@ def test_systemd_units_are_explicitly_allowlisted():
     }
     assert units == {
         "ocpp-csms.service.j2",
-        "ocpp-csms-mail-report.service.j2",
-        "ocpp-csms-mail-report.timer.j2",
     }, "New services or timers require deliberate architecture review"
