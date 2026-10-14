@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -71,7 +72,7 @@ def _connect(database: Path) -> sqlite3.Connection:
     return connection
 
 
-def appliance_status(data_dir: str | Path) -> dict[str, Any]:
+def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | None = None) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
@@ -99,14 +100,14 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     live_since_id: int | None = None
     if database.exists():
         try:
-            with _connect(database) as connection:
-                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            with (nullcontext(connection) if connection is not None else _connect(database)) as db:
+                version = int(db.execute("PRAGMA user_version").fetchone()[0])
                 if version < 2:
                     result["database"] = "upgrade-needed"
                 else:
                     result["database"] = "ok"
                     if running:
-                        row = connection.execute(
+                        row = db.execute(
                             """
                             SELECT id, occurred_at FROM runtime_events
                             WHERE event = 'server_started'
@@ -121,7 +122,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     if transactions.exists():
         result["transactions"] = "ok" if transactions.is_dir() else "error"
     if result["database"] == "ok":
-        result["chargers"] = charger_statuses(database, live_since_id=live_since_id)
+        result["chargers"] = charger_statuses(database, live_since_id=live_since_id, connection=connection)
         result["active_chargers"] = sorted({
             charger.charger_id for charger in result["chargers"]
             if any(
@@ -137,12 +138,13 @@ def charger_statuses(
     charger_id: str | None = None,
     *,
     live_since_id: int | None = None,
+    connection: sqlite3.Connection | None = None,
 ) -> list[ChargerStatus]:
     if not database.exists():
         return []
-    with _connect(database) as connection:
+    with (nullcontext(connection) if connection is not None else _connect(database)) as db:
         if charger_id is None:
-            rows = connection.execute(
+            rows = db.execute(
                 """
                 SELECT charger_id FROM events
                 UNION SELECT charger_id FROM runtime_events WHERE charger_id IS NOT NULL
@@ -154,7 +156,7 @@ def charger_statuses(
         else:
             charger_ids = [charger_id]
         return [
-            _charger_status(connection, value, live_since_id=live_since_id)
+            _charger_status(db, value, live_since_id=live_since_id)
             for value in charger_ids
         ]
 
