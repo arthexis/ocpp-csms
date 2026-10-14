@@ -74,38 +74,20 @@ class SessionHandlers:
 
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
-        self._record("StopTransaction", payload)
-        decision = None
+        self.events.commit_transaction_evidence(self.id, "StopTransaction", payload)
         try:
-            decision = await self.transactions.stop(self.id, payload)
+            await self.transactions.stop(self.id, payload)
         except Exception:
-            LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        self._record_recovery_decision(decision)
-        if decision is None or decision.get("event") != "historical_transaction_id_collision":
-            try:
-                self.events.record_transaction_stop(self.id, payload)
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
+            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
-        self._record("MeterValues", payload)
-        decision = None
+        self.events.commit_transaction_evidence(self.id, "MeterValues", payload)
         try:
-            decision = await self.transactions.meter_values(self.id, payload)
+            await self.transactions.meter_values(self.id, payload)
         except Exception:
-            LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        self._record_recovery_decision(decision)
-        transaction_id = payload.get("transaction_id")
-        if (
-            transaction_id is not None
-            and (decision is None or decision.get("event") != "historical_transaction_id_collision")
-        ):
-            try:
-                self.events.record_transaction_activity(int(transaction_id))
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
+            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.MeterValuesPayload()
 
     @on("DiagnosticsStatusNotification")
