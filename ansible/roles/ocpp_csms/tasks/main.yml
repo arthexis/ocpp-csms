@@ -603,6 +603,11 @@
   ansible.builtin.set_fact:
     ocpp_csms_final_preflight_result: "{{ ocpp_csms_final_preflight.stdout | from_json }}"
 
+- name: Report connector occupancy warnings
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  loop: "{{ ocpp_csms_final_preflight_result.warnings | default([]) }}"
+
 - name: Report forced charging-safety handoff
   ansible.builtin.debug:
     msg: "FORCED HANDOFF: active charging on {{ ocpp_csms_final_preflight_result.active_chargers | join(', ') }}; proceeding at operator request."
