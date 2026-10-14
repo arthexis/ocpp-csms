@@ -31,7 +31,9 @@ def test_timestamp_provenance_and_quality_are_nullable_and_utc():
 def test_export_transaction_metadata_follows_event_cursor(tmp_path):
     store = EventStore(tmp_path)
     archive = TransactionArchive(tmp_path)
-    transaction_id = asyncio.run(archive.start("cp-a", {"timestamp": "2026-01-01T01:00:00+01:00", "meter_start": 1}))
+    payload = {"timestamp": "2026-01-01T01:00:00+01:00", "meter_start": 1}
+    transaction_id = store.commit_start("cp-a", payload)
+    asyncio.run(archive.diagnostic_start("cp-a", payload, transaction_id))
     store.record_ocpp("cp-a", "StartTransaction", {"transaction_id": transaction_id}, transaction_id=transaction_id)
     first = export_contract(tmp_path)["data"]
     assert first["transactions"][0]["start_event_at"] == "2026-01-01T00:00:00Z"
