@@ -276,6 +276,10 @@ def _blocking_transactions(
         return []
     if hasattr(registry, "connector_occupancy"):
         busy, _ = _occupancy(registry, charger, connector)
+        if connector is None or connector == 0:
+            ids = registry.physical_connector_ids(charger)
+            if ids and len(busy) < len(ids):
+                return []
         return busy
     active = registry.active_transactions(charger)
     if connector is None:
@@ -359,6 +363,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
         target = request.get("connector") if command == "start" else None
         busy, warnings = _occupancy(registry, charger, target)
+        if command == "start" and (target is None or target == 0):
+            ids = registry.physical_connector_ids(charger)
+            if ids and len(busy) < len(ids):
+                busy = []
         if request.get("force") and busy:
             warnings.append(f"Operator override: busy connectors {busy}")
             registry.record_control_event("control_occupancy_override", charger_id=charger, details={"command": command, "connectors": busy})
