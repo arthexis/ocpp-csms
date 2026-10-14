@@ -10,6 +10,7 @@ import pytest
 
 from ocpp_csms.transactions.archive import TransactionArchive
 from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.transactions.formatting import format_transaction, format_transactions, transaction_energy_wh
 
 
 CP = "charger-a"
@@ -291,8 +292,17 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
     assert view.record["stop"] is None
     assert view.record.get("meter_values", []) == []
     assert view.record.get("stop") is None
-    # meter_start alone cannot establish delivered energy without an end reading.
-    assert getattr(view, "energy_wh", None) is None
+    # An inferred end is not a fabricated meterStop or a measured zero.
+    assert transaction_energy_wh(view) is None
+    table = format_transactions([view])
+    header, row = table.splitlines()
+    assert "ENERGY" in header
+    assert row.split()[-2] == "-"
+    detail = format_transaction(view)
+    assert "Meter stop:   -" in detail
+    assert "Energy:" not in detail
+    assert "0 Wh" not in detail
+    assert "0.000 kWh" not in detail
 
 
 @pytest.mark.asyncio
@@ -350,3 +360,50 @@ async def test_unknown_stop_on_another_charge_point_never_changes_local_transact
         and entry["transaction_id"] == transaction_id
         for entry in unresolved(tmp_path)
     )
+
+
+@pytest.mark.asyncio
+async def test_completed_session_reports_measured_energy_consistently(tmp_path):
+    """The actual stop reading, not a prior inferred boundary, determines energy."""
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start(meter_start=1000))
+    await archive.stop(CP, {
+        "transaction_id": first, "meter_stop": 7420,
+        "timestamp": "2026-10-03T10:10:30Z",
+    })
+    view = TransactionQuery(tmp_path).get(first)
+    assert view is not None
+    assert transaction_energy_wh(view) == 6420
+    table = format_transactions([view])
+    assert "6.420 kWh" in table
+    detail = format_transaction(view)
+    assert "Energy:       6.420 kWh" in detail
+    assert "Meter start:  1000" in detail
+    assert "Meter stop:   7420" in detail
+    assert "Stopped:      2026-10-03T10:10:30Z" in detail
+    assert "Duration:     10m 30s" in detail
+
+
+@pytest.mark.asyncio
+async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
+    """A late stop is authoritative even when a later start suggests a boundary."""
+    archive = TransactionArchive(tmp_path)
+    first = await archive.start(CP, start(meter_start=1000))
+    await archive.start(CP, start(
+        timestamp="2026-10-03T10:05:00Z", meter_start=2000,
+    ))
+    await archive.stop(CP, {
+        "transaction_id": first, "meter_stop": 1600,
+        "timestamp": "2026-10-03T10:10:30Z",
+    })
+    view = TransactionQuery(tmp_path).get(first)
+    assert view is not None
+    assert view.record["stop"]["meter_stop"] == 1600
+    assert transaction_energy_wh(view) == 600
+    assert "600 Wh" in format_transactions([view])
+    detail = format_transaction(view)
+    assert "Stopped:      2026-10-03T10:10:30Z" in detail
+    assert "Duration:     10m 30s" in detail
+    assert "Energy:       600 Wh" in detail
+    assert view.effective_stop_source == "observed"
+    assert view.effective_stop_at == "2026-10-03T10:10:30Z"
