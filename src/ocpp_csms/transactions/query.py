@@ -27,6 +27,8 @@ def _parse_time(value: Any) -> datetime | None:
 
 def _connector_id(record: dict[str, Any]) -> int | None:
     start = record.get("start")
+    if record.get("connector_id") is not None:
+        return int(record["connector_id"])
     if isinstance(start, dict) and start.get("connector_id") is not None:
         return int(start["connector_id"])
     meter_values = record.get("meter_values")
@@ -98,7 +100,7 @@ def _archive_time(record: dict[str, Any]) -> datetime:
 
 
 def _received_activity_at(record: dict[str, Any]) -> datetime:
-    """Newest CSMS receive evidence, including legacy archive timestamps."""
+    """Newest SQLite receive evidence, independent of diagnostic archives."""
     candidates: list[datetime] = [_archive_time(record)]
     for field in ("start_received_at", "stop_received_at"):
         parsed = _parse_time(record.get(field))
@@ -155,16 +157,14 @@ class TransactionView:
 
     @property
     def active(self) -> bool:
-        return self.record.get("stop") is None and self.status in _ACTIVE_STATUSES
+        return self.record.get("stop_received_at") is None and self.status in _ACTIVE_STATUSES
 
 
 class TransactionQuery:
-    """Read archived transaction state without mutating persistence."""
+    """Read authoritative SQLite transaction state without mutating persistence."""
 
     def __init__(self, data_dir: str | Path | None = None) -> None:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
-        self.transactions_dir = self.data_dir / "transactions"
-        self.unresolved_dir = self.data_dir / "transactions-unresolved"
 
     def get(self, transaction_id: int) -> TransactionView | None:
         for view in self._views():
@@ -228,6 +228,8 @@ class TransactionQuery:
                 "effective_stop_source": row["effective_stop_source"],
                 "effective_stop_at": row["effective_stop_at"],
                 "connector_id": row["connector_id"],
+                "energy_wh": row["energy_wh"],
+                "next_start_received_at": row["next_start_received_at"],
                 "start": None,
                 "stop": None,
                 "meter_values": [],
