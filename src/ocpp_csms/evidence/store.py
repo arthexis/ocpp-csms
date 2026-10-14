@@ -144,7 +144,9 @@ class EventStore:
         payload: dict[str, Any],
     ) -> None:
         now = utc_now_iso()
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
                 INSERT INTO transactions (
@@ -162,6 +164,14 @@ class EventStore:
                     now,
                     now,
                 ),
+            )
+            connection.execute(
+                "INSERT INTO start_identities (charger_id, payload_json, transaction_id) VALUES (?, ?, ?)",
+                (charger_id, canonical, int(transaction_id)),
+            )
+            connection.execute(
+                "UPDATE transaction_allocator SET last_id = MAX(last_id, ?) WHERE singleton = 1",
+                (int(transaction_id),),
             )
 
     def record_transaction_activity(self, transaction_id: int) -> None:
