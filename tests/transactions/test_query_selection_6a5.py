@@ -104,14 +104,15 @@ def test_standalone_query_reads_summary_and_evidence_from_same_wal_snapshot(tmp_
         "timestamp": "2026-10-01T00:00:00Z",
     })
     original_connect = sqlite3.connect
+    injected_once = [False]
     class InterleavedConnection:
         def __init__(self, underlying):
             self.underlying = underlying
             self.injected = False
 
         def execute(self, sql, params=()):
-            if "FROM events WHERE direction" in sql and not self.injected:
-                self.injected = True
+            if "FROM events WHERE direction" in sql and not injected_once[0]:
+                injected_once[0] = True
                 with original_connect(database_path(tmp_path)) as writer:
                     writer.execute(
                         """INSERT INTO events
