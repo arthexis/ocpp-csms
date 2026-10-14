@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ocpp_csms.transactions.archive import default_data_dir
 from ocpp_csms.schema import database_path
@@ -187,6 +187,10 @@ class TransactionQuery:
         connection = self._connection or sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
             connection.row_factory = sqlite3.Row
+            # Keep summary and evidence reads on one snapshot. Export callers
+            # already own a transaction on their supplied connection.
+            if self._connection is None:
+                connection.execute("BEGIN")
             rows = connection.execute("SELECT * FROM transaction_summary" + where, params).fetchall()
             if not rows:
                 return []
