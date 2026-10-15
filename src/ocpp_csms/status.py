@@ -275,6 +275,11 @@ def _charger_status(
         summary_status, summary_error, summary_info = fault['status'], fault['error_code'], fault['info']
 
     availability, activity = operational_state(connectors)
+    # A connected charger with no contrary evidence is operationally available.
+    # Preserve the actual OCPP status separately; do not invent a notification.
+    assumed_available = connected and summary_status is None and not transaction_rows
+    if assumed_available:
+        availability, activity = "available", "inactive"
     return ChargerStatus(
         charger_id=charger_id,
         connected=connected,
@@ -284,7 +289,7 @@ def _charger_status(
         status=summary_status,
         error_code=summary_error,
         info=summary_info,
-        derived_status=derive_status(summary_status, summary_error, summary_info),
+        derived_status=("Available" if assumed_available else derive_status(summary_status, summary_error, summary_info)),
         transaction_id=int(transaction["transaction_id"]) if transaction else None,
         id_tag=transaction["id_tag"] if transaction else None,
         started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
@@ -313,7 +318,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             f"Protocol: {item.subprotocol or 'not negotiated'}",
             f"Last seen: {item.last_seen or '-'}",
             f"Status: {item.derived_status or item.status or 'Unknown'}",
-            *( [f"OCPP status: {item.status}"] if item.derived_status != item.status else [] ),
+            *( [f"OCPP status: {item.status or 'not reported'}"] if item.derived_status != item.status else [] ),
         ]
         if item.error_code and item.error_code != "NoError":
             lines.append(f"Error: {item.error_code}")
