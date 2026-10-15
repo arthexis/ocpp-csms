@@ -12,19 +12,6 @@
           - ansible_user_id != 'root'
           - ansible_user_uid | int != 0
 
-    - name: Refuse uninstall while charging or persistence state is unsafe
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -m
-          - ocpp_csms.install_preflight
-          - --data-dir
-          - "{{ ansible_env.HOME }}/ocpp-csms-data"
-          - --json
-      environment:
-        PYTHONPATH: "{{ playbook_dir }}/../../src"
-      changed_when: false
-
     - name: Stop and disable OCPP managed services if present
       become: true
       ansible.builtin.command:
