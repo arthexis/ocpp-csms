@@ -16,14 +16,12 @@ _ACTIONS = {"GetDiagnostics", "DiagnosticsStatusNotification"}
 def add_diagnostics_command(subcommands):
     parser = subcommands.add_parser("diagnose", help="Inspect diagnostic history or explicitly request charger diagnostics")
     parser.add_argument("--cp", "--charger", dest="charger", help="Charge point ID")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--now", action="store_true", help="Request a new charger diagnostics upload")
-    mode.add_argument("--list", action="store_true", help="Explicitly list stored diagnostics (default)")
-    parser.add_argument("--location", help="Charger-reachable HTTP(S)/FTP(S) upload URL; required with --now")
+    parser.add_argument("--list", action="store_true", help="Explicitly list stored diagnostics (default)")
+    parser.add_argument("--location", help="Charger-reachable HTTP(S)/FTP(S) upload URL; required to request an upload")
     parser.add_argument("--since", help="Diagnostic start time or history filter (ISO-8601 or relative)")
-    parser.add_argument("--until", help="Diagnostic stop time for --now")
-    parser.add_argument("--retries", type=int, help="Upload retries for --now")
-    parser.add_argument("--retry-interval", type=int, help="Retry interval in seconds for --now")
+    parser.add_argument("--until", help="Diagnostic stop time for upload requests")
+    parser.add_argument("--retries", type=int, help="Upload retries for upload requests")
+    parser.add_argument("--retry-interval", type=int, help="Retry interval in seconds for upload requests")
     parser.add_argument("-n", "--limit", type=int, default=100, help="Maximum history events (default: 100)")
     parser.add_argument("-j", "--json", action="store_true")
     return parser
@@ -39,7 +37,7 @@ def _iso(value, *, now):
 
 def _request(args):
     if not args.location:
-        raise ValueError("--location is required with --now")
+        raise ValueError("--location is required to request an upload")
     validate_transfer_url(args.location, error="--location must be an absolute HTTP(S) or FTP(S) URL without a fragment")
     validate_retry_options(args.retries, args.retry_interval)
     now = datetime.now(timezone.utc)
@@ -78,9 +76,11 @@ def _history(args):
 
 
 def run_diagnostics(args):
-    if not args.now:
-        if args.location or args.until or args.retries is not None or args.retry_interval is not None:
-            raise ValueError("--location, --until, --retries and --retry-interval require --now")
+    if not args.location or args.list:
+        if args.list and args.location:
+            raise ValueError("--list cannot be combined with --location")
+        if args.until or args.retries is not None or args.retry_interval is not None:
+            raise ValueError("--until, --retries and --retry-interval require --location")
         result = _history(args)
         if args.json:
             print(json.dumps({"events": result}, ensure_ascii=False))
