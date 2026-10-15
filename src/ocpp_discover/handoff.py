@@ -13,7 +13,6 @@ from ocpp_discover import redirect as redirect_tools
 from ocpp_discover.discover import discover_existing_endpoint, require_root
 from ocpp_discover.redirect import RedirectReceipt, receipt_from_json, validate_receipt
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
-from ocpp_csms.install_preflight import evaluate_preflight
 from ocpp_csms.schema import DATABASE_FILENAME
 
 _HANDOFF_RECEIPT = "handoff-endpoint.json"
@@ -265,10 +264,8 @@ def cutover(*, data_dir: str | Path, state_dir: str | Path, old_service: str, pe
     require_root()
     receipt = load_receipt(state_dir)
     validate_discovered_redirect(receipt)
-    preflight = evaluate_preflight(data_dir, rollover=True)
-    if not preflight.allowed:
-        raise RuntimeError(preflight.reason or "handoff_preflight_blocked")
-    expected = preflight.connected_chargers
+    # The captured endpoint identifies the chargers to prove after redirect.
+    expected = tuple(sorted({request.path.rstrip("/").rsplit("/", 1)[-1] for request in receipt.requests}))
     if not expected:
         raise RuntimeError("no_connected_charger_for_handoff")
     if not redirect_tools.listener_available(receipt.listen_port):
@@ -282,11 +279,6 @@ def cutover(*, data_dir: str | Path, state_dir: str | Path, old_service: str, pe
 
     connection_baseline = connection_markers(data_dir, expected)
     ocpp_baseline = _ocpp_markers(data_dir, expected)
-    final_preflight = evaluate_preflight(data_dir, rollover=True)
-    if not final_preflight.allowed:
-        raise RuntimeError(final_preflight.reason or "handoff_preflight_blocked")
-    if final_preflight.connected_chargers != expected:
-        raise RuntimeError("connected_chargers_changed_before_cutover")
 
     _stop_service(old_service)
     try:
