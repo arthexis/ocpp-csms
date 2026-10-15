@@ -39,7 +39,7 @@ def test_events_transaction_alias_and_raw_mode_are_registered():
     (("events", "-f", "-j"), "follow", True),
     (("reserve", "--cp", "CP1", "--all", "-j"), "command", "reserve"),
     (("firmware", "check", "--cp", "CP1", "--offline", "-j"), "firmware_action", "check"),
-    (("firmware", "update", "--location", "https://example.org/fw.bin", "--after", "60", "--confirm"), "after", 60),
+    (("firmware", "update", "--location", "https://example.org/fw.bin", "--confirm"), "confirm", True),
 ])
 def test_recent_cli_parser_contracts(parse_cli, argv, field, expected):
     args = parse_cli(*argv)
