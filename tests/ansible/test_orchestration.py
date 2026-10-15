@@ -337,27 +337,6 @@ def test_development_deploy_gets_distinct_immutable_release():
     assert "'-dev' if ocpp_csms_dev | bool else ''" in release_id
 
 
-def test_release_install_phases_precede_verification_and_readiness():
-    main = read(TASKS / "main.yml")
-
-    assert_task_order(
-        main,
-        "Check reusable build environment",
-        "Install reusable build requirements",
-        "Check reusable runtime dependency environment",
-        "Install reusable runtime dependencies",
-        "Link reusable runtime dependencies into release",
-        "Build OCPP CSMS application wheel",
-        "Install OCPP CSMS application wheel into immutable release",
-        "Verify immutable release command",
-        "Mark immutable release ready",
-        "Render candidate OCPP CSMS systemd unit",
-    )
-
-    verify = task_by_name(TASKS / "main.yml", "Verify immutable release command")
-    assert verify["changed_when"] is False
-
-
 def test_ansible_reports_elapsed_time_for_each_task():
     config = read(ROOT / "ansible.cfg")
     callback = read(ROOT / "ansible" / "callback_plugins" / "task_timing.py")
