@@ -1,5 +1,5 @@
 ---
-- name: Validate hostname and loopback-only WSS proxy deployment
+- name: Validate public WSS proxy deployment
   ansible.builtin.assert:
     that:
       - ocpp_csms_expose is match('^[a-z0-9]+([.-][a-z0-9]+)*$')
@@ -51,6 +51,22 @@
     - not (ocpp_expose_existing_cert.stat.exists | default(false))
     - not (ocpp_csms_no_certbot | default(false) | bool)
 
+- name: Check for an existing nginx site before ACME bootstrap
+  become: true
+  ansible.builtin.stat:
+    path: "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
+  register: ocpp_expose_bootstrap_site
+  when: not (ocpp_expose_existing_cert.stat.exists | default(false))
+
+- name: Refuse to overwrite a live site during first certificate issuance
+  ansible.builtin.assert:
+    that:
+      - not (ocpp_expose_bootstrap_site.stat.exists | default(false))
+    fail_msg: >-
+      An nginx site already exists for this hostname without a certificate.
+      Preserve it and provision a certificate before enabling exposure.
+  when: not (ocpp_expose_existing_cert.stat.exists | default(false))
+
 - name: Install HTTP-only ACME bootstrap nginx site
   become: true
   ansible.builtin.template:
@@ -76,7 +92,7 @@
   become: true
   ansible.builtin.systemd_service:
     name: nginx
-    state: restarted
+    state: reloaded
     enabled: true
   when: not (ocpp_expose_existing_cert.stat.exists | default(false))
 
