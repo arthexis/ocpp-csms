@@ -22,46 +22,46 @@ def parse_cli(parse_cli):
 
 
 def test_start_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("start", "--connector", "2", "--rfid", "REMOTE", "--now")) == {
+    assert control_request(parse_cli("start", "--connector", "2", "--rfid", "REMOTE")) == {
         "command": "start",
-        "timing": "now",
+        
         "id_tag": "REMOTE",
         "connector": 2,
     }
 
     expected = {
         "command": "start",
-        "timing": "now",
+        
         "charger": "charger-a",
         "id_tag": "REMOTE",
         "connector": 2,
     }
-    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--rfid", "REMOTE", "--now")) == expected
-    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")) == expected
+    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--rfid", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE")) == expected
 
 
 def test_stop_command_builds_control_request_with_or_without_charger(parse_cli):
-    assert control_request(parse_cli("stop", "42", "--now")) == {
+    assert control_request(parse_cli("stop", "42")) == {
         "command": "stop",
-        "timing": "now",
+        
         "transaction": 42,
     }
 
     expected = {
         "command": "stop",
-        "timing": "now",
+        
         "charger": "charger-a",
         "transaction": 42,
     }
-    assert control_request(parse_cli("stop", "42", "--cp", "charger-a", "--now")) == expected
+    assert control_request(parse_cli("stop", "42", "--cp", "charger-a")) == expected
 
 
 def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
-    assert control_request(parse_cli("reset", "--now")) == {"command": "reset", "timing": "now", "type": "Soft"}
-    assert control_request(parse_cli("reset", "--hard", "--now")) == {"command": "reset", "timing": "now", "type": "Hard"}
-    assert control_request(parse_cli("reset", "--cp", "charger-a", "--now")) == {
+    assert control_request(parse_cli("reset")) == {"command": "reset", "type": "Soft"}
+    assert control_request(parse_cli("reset", "--hard")) == {"command": "reset", "type": "Hard"}
+    assert control_request(parse_cli("reset", "--cp", "charger-a")) == {
         "command": "reset",
-        "timing": "now",
+        
         "charger": "charger-a",
         "type": "Soft",
     }
@@ -69,7 +69,7 @@ def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
 
 def test_control_rejects_two_charger_selectors(parse_cli):
     with pytest.raises(ValueError):
-        control_request(parse_cli("reset", "charger-a", "--cp", "charger-b", "--now"))
+        control_request(parse_cli("reset", "charger-a", "--cp", "charger-b"))
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
@@ -85,25 +85,25 @@ def install_control_response(monkeypatch, response=None, exc=None):
 @pytest.mark.parametrize(("status", "expected_code"), [("Accepted", 0), ("Rejected", 1)])
 def test_command_status_controls_exit_code(monkeypatch, parse_cli, status, expected_code):
     install_control_response(monkeypatch, {"ok": True, "response": {"status": status}})
-    assert run_control(parse_cli("reset", "--now")) == expected_code
+    assert run_control(parse_cli("reset")) == expected_code
 
 
 def test_control_error_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"error": "charger_required", "chargers": ["charger-a", "charger-b"]})
-    assert run_control(parse_cli("reset", "--now")) == 1
+    assert run_control(parse_cli("reset")) == 1
 
 
 def test_missing_control_socket_returns_one(monkeypatch, parse_cli):
     install_control_response(monkeypatch, exc=FileNotFoundError("control.sock"))
-    assert run_control(parse_cli("reset", "--now")) == 1
+    assert run_control(parse_cli("reset")) == 1
 
 
 @pytest.mark.parametrize(
     "args",
     [
-        ("start", "--connector", "-1", "--rfid", "REMOTE", "--now"),
-        ("start", "-c", "-1", "--rfid", "REMOTE", "--now"),
-        ("stop", "-1", "--now"),
+        ("start", "--connector", "-1", "--rfid", "REMOTE"),
+        ("start", "-c", "-1", "--rfid", "REMOTE"),
+        ("stop", "-1"),
     ],
 )
 def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
@@ -111,52 +111,12 @@ def test_negative_selectors_are_rejected_before_socket_call(parse_cli, args):
         run_control(parse_cli(*args))
 
 
-def test_control_commands_default_to_now(parse_cli, cli_parser):
-    for args in (
-        ["start"],
-        ["stop", "42"],
-        ["reset"],
-    ):
-        parsed = parse_cli(*args)
-        assert control_request(parsed)["timing"] == "now"
-
-    with pytest.raises(SystemExit):
-        cli_parser.parse_args(["reset", "--now", "--after", "5"])
-
-
 def test_start_optional_rfid(parse_cli):
     assert control_request(parse_cli("start"))["id_tag"] == "AUTO"
     assert control_request(parse_cli("start", "--rfid", "TEST001"))["id_tag"] == "TEST001"
 
 
-@pytest.mark.parametrize(
-    ("args", "timing"),
-    [
-        (("reset", "--now"), {"timing": "now"}),
-        (("reset", "--after", "5"), {"timing": "after", "seconds": 5}),
-        (("reset", "--within", "30"), {"timing": "within", "seconds": 30}),
-    ],
-)
-def test_timing_mode_is_sent_to_control_server(parse_cli, args, timing):
-    request = control_request(parse_cli(*args))
-    assert {key: request[key] for key in timing} == timing
-
-
-@pytest.mark.parametrize(
-    "args",
-    [
-        ("reset", "--after", "0"),
-        ("reset", "--within", "0"),
-        ("reset", "--after", "-1"),
-        ("reset", "--within", "-1"),
-    ],
-)
-def test_delayed_timing_requires_positive_seconds(parse_cli, args):
-    with pytest.raises(ValueError, match="greater than zero"):
-        run_control(parse_cli(*args))
-
-
 def test_remote_start_uses_cp_for_charge_point(parse_cli):
-    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE", "--now")
+    args = parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE")
     assert args.charger_option == "charger-a"
     assert args.connector == 2

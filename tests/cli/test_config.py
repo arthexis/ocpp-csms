@@ -5,21 +5,18 @@ from ocpp_csms.cli.config import configuration_request, run_configuration
 
 
 @pytest.mark.parametrize(
-    ("argv", "expected_charger", "expected_keys", "expected_force"),
+    ("argv", "expected_charger", "expected_keys"),
     [
-        (("config",), None, None, False),
-        (("config", "HeartbeatInterval", "GetConfigurationMaxKeys"), None, ["HeartbeatInterval", "GetConfigurationMaxKeys"], False),
-        (("config", "-f"), None, None, True),
-        (("config", "--cp", "charger-a"), "charger-a", None, False),
-        (("config", "--cp", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"], False),
-        (("config", "HeartbeatInterval", "--force"), None, ["HeartbeatInterval"], True),
+        (("config",), None, None),
+        (("config", "HeartbeatInterval", "GetConfigurationMaxKeys"), None, ["HeartbeatInterval", "GetConfigurationMaxKeys"]),
+        (("config", "--cp", "charger-a"), "charger-a", None),
+        (("config", "--cp", "charger-a", "HeartbeatInterval"), "charger-a", ["HeartbeatInterval"]),
     ],
 )
-def test_config_request_preserves_selector_keys_and_force(parse_cli, argv, expected_charger, expected_keys, expected_force):
+def test_config_request_preserves_selector_keys(parse_cli, argv, expected_charger, expected_keys):
     request = configuration_request(parse_cli(*argv))
     assert request["command"] == "config"
     assert request.get("charger") == expected_charger
-    assert request["force"] is expected_force
     assert request.get("keys") == expected_keys
 
 
@@ -34,18 +31,16 @@ def test_config_set_builds_change_request(parse_cli):
         "command": "config_set",
         "key": "HeartbeatInterval",
         "value": "60",
-        "force": False,
     }
 
 
-def test_config_set_supports_explicit_charger_and_force(parse_cli):
+def test_config_set_supports_explicit_charger(parse_cli):
     assert configuration_request(
-        parse_cli("config", "--cp", "charger-a", "set", "HeartbeatInterval", "60", "--force")
+        parse_cli("config", "--cp", "charger-a", "set", "HeartbeatInterval", "60")
     ) == {
         "command": "config_set",
         "key": "HeartbeatInterval",
         "value": "60",
-        "force": True,
         "charger": "charger-a",
     }
 

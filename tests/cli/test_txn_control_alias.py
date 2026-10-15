@@ -14,8 +14,8 @@ def test_txn_query_still_works(monkeypatch):
 
 
 @pytest.mark.parametrize(("argv", "expected"), [
-    (["txn", "start", "-c", "2", "--rfid", "ABC"], {"command": "start", "timing": "now", "connector": 2, "id_tag": "ABC"}),
-    (["txn", "stop", "42", "--after", "10"], {"command": "stop", "timing": "after", "seconds": 10, "transaction": 42}),
+    (["txn", "start", "-c", "2", "--rfid", "ABC"], {"command": "start", "connector": 2, "id_tag": "ABC"}),
+    (["txn", "stop", "42"], {"command": "stop", "transaction": 42}),
 ])
 def test_txn_operation_subparser_dispatch(monkeypatch, argv, expected):
     seen = []

@@ -125,7 +125,6 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     normal subparser positional slot simultaneously. The entry point selects
     this parser only when the token following 'txn' names an operation.
     """
-    from ocpp_csms.cli.control import _add_timing_options
 
     parser = argparse.ArgumentParser(prog="ocpp-csms txn", description="Transaction operations")
     operations = parser.add_subparsers(dest="operation", required=True)
@@ -134,12 +133,10 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     start.add_argument("--cp", dest="charger_option")
     start.add_argument("-c", "--connector", type=int)
     start.add_argument("--rfid", dest="id_tag")
-    _add_timing_options(start)
 
     stop = operations.add_parser("stop", help="Request remote transaction stop")
     stop.add_argument("transaction_id", type=int)
     stop.add_argument("--cp", dest="charger_option")
-    _add_timing_options(stop)
 
     explain = operations.add_parser("explain", help="Explain archived transaction evidence")
     explain.add_argument("transaction_id", type=int)

@@ -10,9 +10,9 @@ from ocpp_csms.cli.transactions import build_txn_operations_parser
 
 @pytest.mark.parametrize(("argv", "expected"), [
     (["start", "--cp", "CP1", "-c", "2", "--rfid", "TAG"],
-     {"command": "start", "charger": "CP1", "connector": 2, "id_tag": "TAG", "timing": "now"}),
-    (["stop", "42", "--after", "5"],
-     {"command": "stop", "transaction": 42, "timing": "after", "seconds": 5}),
+     {"command": "start", "charger": "CP1", "connector": 2, "id_tag": "TAG"}),
+    (["stop", "42"],
+     {"command": "stop", "transaction": 42}),
 ])
 def test_canonical_control_payload_unchanged(argv, expected):
     args = build_txn_operations_parser().parse_args(argv)

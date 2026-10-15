@@ -20,29 +20,13 @@ def add_control_commands(
     add(start, "--cp", dest="charger_option", help="Explicit charge point ID")
     add(start, "--connector", type=int, help="Target connector ID; omit to let the charger choose")
     add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
-    add(start, "--force", action="store_true", help="Override busy connector guard")
-    _add_timing_options(start)
 
     reset = subcommands.add_parser("reset", help="Request charger reset")
     add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
     add(reset, "--cp", dest="charger_option", help="Explicit charge point ID")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
-    add(reset, "--force", action="store_true", help="Override active connector safety guard")
-    _add_timing_options(reset)
 
     return {"start": start, "reset": reset}
-
-
-def _add_timing_options(parser: argparse.ArgumentParser) -> None:
-    timing = parser.add_mutually_exclusive_group(required=False)
-    timing.add_argument("--now", action="store_true", help="Execute as soon as the command is accepted")
-    timing.add_argument("--after", type=int, metavar="SECONDS", help="Wait SECONDS, then attempt the command")
-    timing.add_argument(
-        "--within",
-        type=int,
-        metavar="SECONDS",
-        help="Execute when unblocked, waiting up to SECONDS for an active transaction to finish",
-    )
 
 
 def _requested_charger(args: argparse.Namespace) -> str | None:
@@ -53,18 +37,8 @@ def _requested_charger(args: argparse.Namespace) -> str | None:
     return option or positional
 
 
-def _timing_request(args: argparse.Namespace) -> dict[str, object]:
-    if args.now:
-        return {"timing": "now"}
-    if args.after is not None:
-        return {"timing": "after", "seconds": args.after}
-    if args.within is not None:
-        return {"timing": "within", "seconds": args.within}
-    return {"timing": "now"}
-
-
 def control_request(args: argparse.Namespace) -> dict[str, object]:
-    request: dict[str, object] = {"command": args.command, **_timing_request(args)}
+    request: dict[str, object] = {"command": args.command}
     charger = _requested_charger(args)
     if charger is not None:
         request["charger"] = charger
@@ -77,8 +51,6 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
         request["transaction"] = args.transaction
     elif args.command == "reset":
         request["type"] = "Hard" if args.hard else "Soft"
-    if getattr(args, "force", False):
-        request["force"] = True
     return request
 
 
@@ -87,9 +59,6 @@ def run_control(args: argparse.Namespace) -> int:
         raise ValueError("--connector must be zero or greater")
     if args.command == "stop" and args.transaction < 0:
         raise ValueError("--transaction must be zero or greater")
-    seconds = args.after if args.after is not None else args.within
-    if seconds is not None and seconds <= 0:
-        raise ValueError("--after/--within must be greater than zero")
     try:
         response = asyncio.run(send_control(args.data_dir, control_request(args)))
     except (ConnectionError, FileNotFoundError, OSError, ValueError) as exc:

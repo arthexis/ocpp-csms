@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from .protocols import Session, SessionRegistry
-from ocpp_csms.occupancy import BUSY_STATUSES
 
 def _response_payload(response: Any) -> dict[str, Any]:
     payload = getattr(response, "__dict__", None)
@@ -51,26 +49,6 @@ def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tupl
     if not connected:
         return None, normalized, {"error": "no_charger_connected"}
     return None, normalized, {"error": "charger_required", "chargers": connected}
-
-
-def _config_guard(registry: SessionRegistry, charger: str, force: Any, *, change: bool) -> dict[str, Any] | None:
-    if not isinstance(force, bool):
-        return {"error": "invalid_force"}
-    active_transactions = (_occupancy(registry, charger, None)[0] if hasattr(registry, "connector_occupancy") else registry.active_transaction_ids(charger))
-    if active_transactions and not force:
-        registry.record_control_event(
-            "configuration_change_blocked" if change else "configuration_query_blocked",
-            charger_id=charger,
-            details={"transactions": active_transactions},
-        )
-        return {"error": "active_transaction", "charger": charger, "transactions": active_transactions}
-    if active_transactions and force:
-        registry.record_control_event(
-            "configuration_change_forced" if change else "configuration_query_forced",
-            charger_id=charger,
-            details={"transactions": active_transactions},
-        )
-    return None
 
 
 async def _composite_schedule_response(
@@ -234,99 +212,10 @@ async def _send_rfid_list(
     return result
 
 
-def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, dict[str, Any] | None]:
-    timing = request.get("timing")
-    seconds = request.get("seconds")
-    if timing not in {"now", "after", "within"}:
-        return None, None, {"error": "invalid_timing"}
-    if timing == "now":
-        if seconds is not None:
-            return None, None, {"error": "invalid_timing"}
-        return timing, None, None
-    if not _positive_int(seconds):
-        return None, None, {"error": "invalid_timing_seconds"}
-    return timing, seconds, None
-
-
-def _occupancy(registry: SessionRegistry, charger: str, connector: int | None) -> tuple[list[int], list[str]]:
-    """Return busy connectors and warnings; historical opens are not occupancy."""
-    statuses = registry.connector_occupancy(charger)
-    ids = [connector] if connector is not None and connector > 0 else registry.physical_connector_ids(charger)
-    if not ids:
-        return [], ["Connector occupancy unknown; command sent without confirmed availability"]
-    busy = [cid for cid in ids if statuses.get(cid) in BUSY_STATUSES]
-    unknown = [cid for cid in ids if cid not in statuses]
-    warnings = [f"Connector {cid} occupancy unknown since connection; proceeding" for cid in unknown]
-    return busy, warnings
-
-
-def _blocking_transactions(
-    registry: SessionRegistry,
-    charger: str,
-    *,
-    command: str,
-    connector: int | None,
-) -> list[int]:
-    if command == "reset":
-        if hasattr(registry, "connector_occupancy"):
-            busy, _ = _occupancy(registry, charger, None)
-            return busy
-        return registry.active_transaction_ids(charger)
-    if command != "start":
-        return []
-    if hasattr(registry, "connector_occupancy"):
-        busy, _ = _occupancy(registry, charger, connector)
-        if connector is None or connector == 0:
-            ids = registry.physical_connector_ids(charger)
-            if ids and len(busy) < len(ids):
-                return []
-        return busy
-    active = registry.active_transactions(charger)
-    if connector is None:
-        return [transaction_id for transaction_id, _connector_id in active]
-    return [transaction_id for transaction_id, connector_id in active if connector_id == connector]
-
-
-async def _wait_for_control_window(
-    registry: SessionRegistry,
-    charger: str,
-    *,
-    command: str,
-    connector: int | None,
-    timing: str,
-    seconds: int | None,
-) -> dict[str, Any] | None:
-    if timing == "after":
-        assert seconds is not None
-        await asyncio.sleep(seconds)
-
-    active = _blocking_transactions(registry, charger, command=command, connector=connector)
-    if not active:
-        return None
-
-    if timing != "within":
-        return {"error": "active_transaction", "charger": charger, "transactions": active}
-
-    assert seconds is not None
-    for _ in range(seconds):
-        await asyncio.sleep(1)
-        active = _blocking_transactions(registry, charger, command=command, connector=connector)
-        if not active:
-            return None
-    return {
-        "error": "active_transaction_timeout",
-        "charger": charger,
-        "transactions": active,
-        "seconds": seconds,
-    }
-
-
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     if not isinstance(command, str) or not command:
         return {"error": "missing_command"}
-    if "force" in request and not isinstance(request["force"], bool):
-        return {"error": "invalid_force"}
     if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
         return await registry.tls_control(command.removeprefix("tls_"))
     charger, request, resolution_error = _resolve_charger(registry, request)
@@ -337,53 +226,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
 
-    timing, seconds, timing_error = _control_timing(request)
-    if command in {"start", "reset"}:
-        if timing_error is not None:
-            return timing_error
-        assert timing is not None
-        force = request.get("force", False)
-        if not isinstance(force, bool):
-            return {"error": "invalid_force"}
-        guard = None if force else await _wait_for_control_window(
-            registry,
-            charger,
-            command=command,
-            connector=request.get("connector") if command == "start" else None,
-            timing=timing,
-            seconds=seconds,
-        )
-        if guard is not None:
-            return guard
-        session = registry.session(charger)
-        if session is None:
-            return {"error": "charger_not_connected", "charger": charger}
-
-    if command == "stop":
-        if timing_error is not None:
-            return timing_error
-        if request.get("force", False) is not False:
-            return {"error": "invalid_force"}
-        if timing == "after":
-            assert seconds is not None
-            await asyncio.sleep(seconds)
-            session = registry.session(charger)
-            if session is None:
-                return {"error": "charger_not_connected", "charger": charger}
-        elif timing == "within":
-            return {"error": "invalid_timing"}
-
-    warnings: list[str] = []
-    if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
-        target = request.get("connector") if command == "start" else None
-        busy, warnings = _occupancy(registry, charger, target)
-        if command == "start" and (target is None or target == 0):
-            ids = registry.physical_connector_ids(charger)
-            if ids and len(busy) < len(ids):
-                busy = []
-        if request.get("force") and busy:
-            warnings.append(f"Operator override: busy connectors {busy}")
-            registry.record_control_event("control_occupancy_override", charger_id=charger, details={"command": command, "connectors": busy})
     try:
         if command == "data_transfer":
             vendor_id = request.get("vendor_id")
@@ -452,10 +294,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_retries"}
             if retry_interval is not None and not _non_negative_int(retry_interval):
                 return {"error": "invalid_retry_interval"}
-            if when < datetime.now(timezone.utc) and not request.get("immediate"):
-                return {"error": "retrieve_date_in_past"}
-            if not isinstance(request.get("immediate"), bool):
-                return {"error": "invalid_immediate"}
             response = await session.update_firmware(
                 location, retrieve_date, retries=retries, retry_interval=retry_interval
             )
@@ -546,9 +384,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_key"}
             if not isinstance(value, str):
                 return {"error": "invalid_value"}
-            guard = _config_guard(registry, charger, request.get("force", False), change=True)
-            if guard is not None:
-                return guard
             changed = await session.change_configuration(key, value)
             readback = await session.get_configuration([key])
             return {
@@ -648,9 +483,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     except Exception as exc:
         return {"error": "command_failed", "detail": str(exc)}
 
-    result = {"ok": True, "response": _response_payload(response)}
-    if warnings:
-        result["warnings"] = warnings
-    return result
+    return {"ok": True, "response": _response_payload(response)}
 
 

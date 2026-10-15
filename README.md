@@ -162,7 +162,7 @@ Run `ocpp-csms --help` for the authoritative current surface.
 Use `diagnose` for charger diagnostics and `avail` or `availability` for availability control. Maintenance commands accept `--cp`; `-j`/`--json` emits a machine-readable response. An accepted OCPP request acknowledges
 submission, **not** physical completion. `Scheduled` availability means the
 requested change is pending. Firmware update requires explicit `--confirm`;
-`diagnose --now` requires a charger-reachable upload URL. Transfer URLs must
+`diagnose --location URL` requires a charger-reachable upload URL. Transfer URLs must
 use HTTP(S) or FTP(S) without fragments, and retry values cannot be negative.
 
 
@@ -181,16 +181,16 @@ ocpp-csms rfid report [RFID]
 ocpp-csms rfid export [CHARGER]
 ocpp-csms rfid version [CHARGER]
 ocpp-csms rfid clear [CHARGER]
-ocpp-csms config [KEY ...] [--cp CHARGE_POINT] [-f|--force]
-ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
+ocpp-csms config [KEY ...] [--cp CHARGE_POINT]
+ocpp-csms config download [CHARGER] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
 ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
-ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
-ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
+ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG]
+ocpp-csms txn stop ID
+ocpp-csms reset CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
@@ -230,7 +230,7 @@ ocpp-csms rfid cache clear [--cp CP001]
 
 ### Transactions and events
 
-`txn start` and `txn stop ID` are the canonical remote control operations, with `--now` assumed unless `--after` or `--within` is supplied. Transaction stop requires a positional ID. `txn ID`, `txn --active`, and other history queries remain unchanged.
+`txn start` and `txn stop ID` are the canonical remote control operations, with immediate dispatch. Transaction stop requires a positional ID. `txn ID`, `txn --active`, and other history queries remain unchanged.
 
 
 `txn` exposes transaction history and active/last transaction views. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger. Event-specific `--txn` filters are unchanged.
@@ -273,11 +273,11 @@ Optional `--parent-rfid` maps to `parentIdTag`. Requests and responses use the e
 
 ### Firmware management (OCPP 1.6J)
 
-`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` and one of `--now` or `--at` are required.
+`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` is required; retrieval is requested immediately.
 
 ```bash
-ocpp-csms firmware update --location https://example.org/fw.bin --now --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T03:00:00Z --confirm
+ocpp-csms firmware update --location https://example.org/fw.bin --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
 ocpp-csms firmware status --cp CP001
 ocpp-csms firmware history --cp CP001 --since 7d
 ```
@@ -286,13 +286,13 @@ The CLI also supports `--retries`, `--retry-interval`, and `--json`. The OCPP `U
 
 ### Charger diagnostic upload requests
 
-\`ocpp-csms diagnose\` reads stored diagnostic evidence by default and sends **no OCPP request**. Use \`--list\` to request the same history view explicitly, or \`--now --location URL\` to send OCPP 1.6 \`GetDiagnostics\` to a connected charge point. The upload URL must be reachable by the **charger**; an external server receives uploads.
+\`ocpp-csms diagnose\` reads stored diagnostic evidence by default and sends **no OCPP request**. Use \`--list\` to request the same history view explicitly, or `--location URL` to send OCPP 1.6 \`GetDiagnostics\` to a connected charge point. The upload URL must be reachable by the **charger**; an external server receives uploads.
 
 \`\`\`bash
 ocpp-csms diagnose --cp CP001
 ocpp-csms diagnose --cp CP001 --list -n 20 --json
-ocpp-csms diagnose --cp CP001 --now --location https://uploads.example.org/charger
-ocpp-csms diagnose --cp CP001 --now --location https://uploads.example.org/charger --since 1d --until now --retries 2 --retry-interval 30
+ocpp-csms diagnose --cp CP001 --location https://uploads.example.org/charger
+ocpp-csms diagnose --cp CP001 --location https://uploads.example.org/charger --since 1d --until now --retries 2 --retry-interval 30
 \`\`\`
 
 The old \`diag request\`, \`diag history\`, and \`diagnostics\` commands have been removed. Request evidence redacts upload credentials, path, and query strings. History reads stored GetDiagnostics requests/responses and DiagnosticsStatusNotification events. It does **not** establish strict request-to-notification correlation because persisted events lack OCPP message IDs, and an \`Uploaded\` notification does not prove the destination received the file. A future optional CSMS-managed diagnostic receiver provisioned by Ansible is outside this PR.
@@ -342,7 +342,7 @@ ocpp-csms report --since 7d --cp CP001 --json
 
 When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
 
-Full configuration queries are blocked while the selected charger has an active transaction. This keeps nonessential OCPP traffic out of the active-charging path. `-f` / `--force` deliberately bypasses that guard.
+Configuration commands are dispatched to the connected charge point without an inferred charger-state gate.
 
 Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
 
@@ -354,7 +354,7 @@ ocpp-csms config download CHARGER
 ocpp-csms config download CHARGER --json
 ocpp-csms config download CHARGER --output charger-config.json
 ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
-ocpp-csms config download CHARGER --force
+ocpp-csms config download CHARGER
 ```
 
 `--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
@@ -363,14 +363,11 @@ ocpp-csms config download CHARGER --force
 
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
 
-Remote start, stop, and reset commands require one timing mode:
+Remote start, stop, and reset commands have no scheduling options.
 
-- `--now` attempts the command immediately.
-- `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
-- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reset, it waits up to that many seconds for charging to stop before proceeding.
-- Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
+Control commands are dispatched immediately to connected chargers. There are no inferred charger-state gates or delayed/queued execution; the charger responds to each OCPP command.
 
-Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
+Start and reset requests are dispatched to connected charge points without a busy-state gate; the charger decides whether to accept them.
 
 ### Smart Charging
 
@@ -824,12 +821,12 @@ ocpp-csms firmware check --cp CP001 --offline --json
 Firmware updates require `--confirm` and exactly one explicit timing option:
 
 ```bash
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --now --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --after 3600 --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T18:00:00Z --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
 ```
 
-Unlike start/stop, firmware delivery uses the OCPP `retrieveDate` parameter: `--after` and `--at` send the request now **with a future retrieval date**, not a CSMS-side queued command. OCPP does not guarantee when installation starts or finishes. Omission of timing is an error; the charger only receives an immediate retrieval date with explicit `--now`. `--within` is intentionally unavailable because it would require a separate CSMS queue that waits for an idle charger.
+Firmware delivery sends the OCPP `retrieveDate` parameter with the current time. The request is immediate; actual installation timing remains charger-controlled.
 
 
 ### Uninstall
@@ -870,7 +867,14 @@ sudo systemctl start ocpp-csms
 ocpp-csms status
 ```
 
-For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review\nthe operation, then `ocpp-csms data reset --cp NAME --now` to remove its\nSQLite records and matching JSON archives while preserving other charge points.\nBoth modes back up the original dataset and require the CSMS to be stopped.\nThe charge-point identity is matched exactly, and ambiguous archives abort the\noperation rather than risking an unrelated deletion.\n\nThe default is a non-mutating dry run. The `--all --now` operation moves
+For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review
+the operation, then `ocpp-csms data reset --cp NAME --now` to remove its
+SQLite records and matching JSON archives while preserving other charge points.
+Both modes back up the original dataset and require the CSMS to be stopped.
+The charge-point identity is matched exactly, and ambiguous archives abort the
+operation rather than risking an unrelated deletion.
+
+The default is a non-mutating dry run. The `--all --now` operation moves
 the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
 initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
