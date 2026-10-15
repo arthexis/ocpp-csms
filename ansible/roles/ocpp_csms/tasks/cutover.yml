@@ -98,14 +98,6 @@
             ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
         fail_msg: Storage handoff has an invalid active/candidate selection.
 
-    # Versioned storage is never switched by an in-place schema upgrade.
-    # The versioned cutover is intentionally opt-in until recovery wiring is complete.
-    - name: Reject unsafe versioned storage activation until recovery is wired
-      ansible.builtin.assert:
-        that:
-          - not (ocpp_csms_enable_versioned_cutover | default(false) | bool)
-        fail_msg: Versioned cutover is not yet enabled; evidence-aware recovery must be completed first.
-
     # Verify the already prepared candidate while all writers are stopped.
     # No historical database is upgraded or relocated during a handoff.
     - name: Verify selected storage before service activation
@@ -292,31 +284,43 @@
         - ocpp_csms_versioned_activation_started | default(false) | bool
         - ocpp_csms_storage_selection.action == 'create'
 
-    - name: Refuse rollback when fresh candidate has committed OCPP evidence
+    - name: Confirm fresh candidate is empty before restoring previous storage
       ansible.builtin.assert:
         that:
           - not ((ocpp_csms_candidate_evidence.stdout | from_json).committed_ocpp_evidence | bool)
-        fail_msg: Candidate committed OCPP evidence; repair forward, do not restore an older database.
+        fail_msg: New database has committed evidence; preserve activation and repair forward.
       when:
         - ocpp_csms_versioned_activation_started | default(false) | bool
         - ocpp_csms_storage_selection.action == 'create'
 
-    - name: Refuse unverified versioned rollback
+    - name: Restore previous schema pointer only for an empty candidate
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - storage-restore
+          - --storage-root
+          - "{{ ocpp_csms_data_dir }}"
+          - --target
+          - "{{ ocpp_csms_active_data_dir }}"
+      when:
+        - ocpp_csms_versioned_activation_started | default(false) | bool
+        - ocpp_csms_storage_selection.action == 'create'
+        - ocpp_csms_storage_selection.active | default('', true) | length > 0
+
+    - name: Refuse automatic restoration without previous storage
       ansible.builtin.assert:
         that:
-          - ocpp_csms_storage_selection.action == 'create'
-        fail_msg: Reused versioned storage cannot be rolled back using a zero-evidence test.
-      when: ocpp_csms_versioned_activation_started | default(false) | bool
+          - ocpp_csms_storage_selection.active | default('', true) | length > 0
+        fail_msg: No previous database exists; keep the prepared schema for forward repair.
+      when:
+        - ocpp_csms_versioned_activation_started | default(false) | bool
+        - ocpp_csms_storage_selection.action == 'create'
 
     # Incumbent takeover is independent of the new CSMS database. If it was the
     # production owner before cutover, restore it first even when this was the
     # first managed ocpp-csms release.
-    - name: Refuse legacy restoration after versioned activation without pointer recovery
-      ansible.builtin.assert:
-        that:
-          - not (ocpp_csms_versioned_activation_started | default(false) | bool)
-        fail_msg: Versioned storage was activated; restore its pointer and verify evidence before restarting any incumbent.
-
     - name: Restore incumbent OCPP service after failed takeover
       ansible.builtin.include_tasks: incumbent_restore.yml
       when: ocpp_csms_incumbent_service | length > 0
