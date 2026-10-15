@@ -147,7 +147,7 @@ async def test_restarted_server_keeps_historical_open_distinct_from_connections(
 
 
 @pytest.mark.asyncio
-async def test_a6_orphan_and_conflicting_evidence_cannot_create_live_occupancy(tmp_path):
+async def test_orphan_and_conflicting_evidence_cannot_create_live_occupancy(tmp_path):
     from ocpp_csms.evidence.store import EventStore
     from ocpp_csms.server import CSMSServer
 
