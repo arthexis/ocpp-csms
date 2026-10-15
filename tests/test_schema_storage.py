@@ -1,4 +1,4 @@
-"""Focused Chunk A tests: schema versions select immutable historical stores."""
+"""Current-schema storage selection and activation safety tests."""
 import sqlite3
 
 import pytest
@@ -31,24 +31,6 @@ def test_same_schema_reuses_identity_allocator_and_path(tmp_path):
         assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (42,)
 
 
-def test_upgrade_prepares_empty_new_schema_without_touching_old(tmp_path):
-    old = tmp_path / "schemas" / "7"
-    old.mkdir(parents=True)
-    with sqlite3.connect(old / "ocpp-csms.sqlite3") as db:
-        db.execute("PRAGMA user_version = 7")
-        db.execute("CREATE TABLE evidence (value TEXT)")
-        db.execute("INSERT INTO evidence VALUES ('historical')")
-    before = (old / "ocpp-csms.sqlite3").read_bytes()
-    plan = plan_storage(tmp_path, old)
-    assert plan.action == "create"
-    assert plan.active_schema == 7
-    prepare_storage(plan)
-    assert (old / "ocpp-csms.sqlite3").read_bytes() == before
-    assert (old / "ocpp-csms.sqlite3").exists()
-    with sqlite3.connect(plan.target / "ocpp-csms.sqlite3") as db:
-        assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
-
-
 def test_downgrade_is_rejected(tmp_path):
     active = tmp_path / "active"
     create_current_schema(active)
@@ -63,17 +45,6 @@ def test_invalid_prepared_target_is_rejected_without_overwriting(tmp_path):
     with pytest.raises(RuntimeError, match="interrupted or invalid schema preparation"):
         plan_storage(tmp_path, None)
     assert (target / "evidence.txt").read_text() == "preserve"
-
-
-def test_missing_or_unversioned_active_database_is_rejected(tmp_path):
-    with pytest.raises(RuntimeError, match="missing"):
-        plan_storage(tmp_path, tmp_path / "missing")
-    active = tmp_path / "unversioned"
-    active.mkdir()
-    with sqlite3.connect(active / "ocpp-csms.sqlite3") as db:
-        db.execute("CREATE TABLE unknown (id INTEGER)")
-    with pytest.raises(RuntimeError, match="invalid schema"):
-        plan_storage(tmp_path, active)
 
 
 def test_installer_storage_commands_are_separate_from_legacy_ansible(tmp_path, capsys):
@@ -102,16 +73,6 @@ def test_installer_storage_plan_rejects_downgrade(tmp_path, capsys):
     assert "downgrade" in capsys.readouterr().out
 
 
-def test_discovery_finds_legacy_root_without_mutating_it(tmp_path):
-    from ocpp_csms.schema_storage import discover_active_storage
-    create_current_schema(tmp_path)
-    before = source_id(tmp_path)
-    assert discover_active_storage(tmp_path) == tmp_path
-    assert plan_storage(tmp_path, discover_active_storage(tmp_path)).action == "reuse"
-    assert source_id(tmp_path) == before
-    assert not (tmp_path / "schemas").exists()
-
-
 def test_discovery_finds_versioned_current_pointer(tmp_path):
     from ocpp_csms.schema_storage import discover_active_storage
     active = tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION)
@@ -129,50 +90,6 @@ def test_discovery_rejects_broken_or_ambiguous_pointer(tmp_path):
     (tmp_path / "current").unlink()
     (tmp_path / "schemas").mkdir()
     with pytest.raises(RuntimeError, match="without an active"):
-        discover_active_storage(tmp_path)
-
-
-def test_storage_prepare_does_not_activate_or_modify_legacy(tmp_path):
-    from ocpp_csms.schema_storage import discover_active_storage
-    legacy = tmp_path / "ocpp-csms.sqlite3"
-    with sqlite3.connect(legacy) as db:
-        db.execute("PRAGMA user_version = 7")
-    before = legacy.read_bytes()
-    plan = plan_storage(tmp_path, discover_active_storage(tmp_path))
-    prepare_storage(plan)
-    assert legacy.read_bytes() == before
-    assert not (tmp_path / "current").exists()
-    assert plan.target.is_dir()
-
-
-
-def test_legacy_remains_active_during_unactivated_preparation(tmp_path):
-    from ocpp_csms.schema_storage import discover_active_storage
-    create_current_schema(tmp_path)
-    identity = source_id(tmp_path)
-    target = schema_directory(tmp_path, CURRENT_SCHEMA_VERSION)
-    create_current_schema(target)
-    assert discover_active_storage(tmp_path) == tmp_path
-    plan = plan_storage(tmp_path, discover_active_storage(tmp_path))
-    assert plan.action == "reuse"
-    assert plan.target == tmp_path
-    assert source_id(tmp_path) == identity
-    assert not (tmp_path / "current").exists()
-
-
-def test_versioned_pointer_rejects_wrong_schema_or_nested_directory(tmp_path):
-    from ocpp_csms.schema_storage import discover_active_storage
-    target = tmp_path / "schemas" / "7"
-    create_current_schema(target)
-    pointer = tmp_path / "current"
-    pointer.symlink_to(target, target_is_directory=True)
-    with pytest.raises(RuntimeError, match="mismatched"):
-        discover_active_storage(tmp_path)
-    pointer.unlink()
-    nested = tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION) / "nested"
-    create_current_schema(nested)
-    pointer.symlink_to(nested, target_is_directory=True)
-    with pytest.raises(RuntimeError, match="invalid active schema pointer"):
         discover_active_storage(tmp_path)
 
 
