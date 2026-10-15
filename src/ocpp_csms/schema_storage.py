@@ -124,35 +124,3 @@ def activate_schema(root: str | Path, target: str | Path) -> Path:
         temporary.unlink(missing_ok=True)
     return current
 
-
-def restore_schema(root: str | Path, previous: str | Path) -> None:
-    """Restore the prior storage selector after an externally verified empty cutover.
-
-    Caller must stop all writers and verify the candidate has no committed
-    evidence. This operation never deletes or modifies either database.
-    """
-    root = Path(root).expanduser().resolve()
-    previous = Path(previous).expanduser().resolve(strict=True)
-    current = root / "current"
-    if not current.is_symlink():
-        raise RuntimeError("cannot restore storage: current pointer is missing")
-    active = current.resolve(strict=True)
-    schemas = root / "schemas"
-    if active.parent != schemas or not active.name.isdecimal():
-        raise RuntimeError("current pointer is not versioned storage")
-    # Recheck evidence inside the restore operation, not only in Ansible:
-    # an interrupted handoff must not restore a pointer after new writes.
-    from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
-    if has_committed_ocpp_evidence(active):
-        raise RuntimeError("active schema has committed evidence; forward repair required")
-    if previous == root:
-        if not (root / "ocpp-csms.sqlite3").is_file():
-            raise RuntimeError("previous legacy database missing")
-        current.unlink()
-        return
-    if previous.parent != schemas or not previous.name.isdecimal():
-        raise RuntimeError("previous storage is not a known schema directory")
-    info = inspect_schema(previous)
-    if not info.exists or info.version != int(previous.name):
-        raise RuntimeError("previous schema is invalid")
-    activate_schema(root, previous)
