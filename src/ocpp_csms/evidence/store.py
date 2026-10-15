@@ -158,8 +158,26 @@ class EventStore:
                     WHERE singleton = 1""",
                     (transaction_id,),
                 )
-            if action == "MeterValues":
+            if 0 < transaction_id <= 2147483647:
+                # Reconstruct only the facts carried by the incoming frame.
+                # A recovered record is not an active connector session.
                 connection.execute(
+                    """INSERT OR IGNORE INTO transactions (
+                        transaction_id, charger_id, id_tag, meter_stop,
+                        stopped_at, stop_received_at, state, last_activity_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        transaction_id, charger_id,
+                        str(payload["id_tag"]) if payload.get("id_tag") is not None else None,
+                        int(payload["meter_stop"]) if action == "StopTransaction" else None,
+                        str(payload["timestamp"]) if action == "StopTransaction" else None,
+                        now if action == "StopTransaction" else None,
+                        "stopped" if action == "StopTransaction" else "unknown",
+                        now,
+                    ),
+                )
+            if action == "MeterValues":
+                connection.execute
                     """UPDATE transactions SET last_activity_at = ?
                     WHERE transaction_id = ? AND charger_id = ?""",
                     (now, transaction_id, charger_id),
