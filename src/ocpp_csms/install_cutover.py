@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
-from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage
+from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage, adopt_legacy_storage, activate_schema
 from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
@@ -180,6 +180,13 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--storage-root", required=True)
     prepare.add_argument("--active-data-dir")
 
+    adopt = subcommands.add_parser("storage-adopt")
+    adopt.add_argument("--storage-root", required=True)
+
+    activate = subcommands.add_parser("storage-activate")
+    activate.add_argument("--storage-root", required=True)
+    activate.add_argument("--target", required=True)
+
     checkpoint = subcommands.add_parser("storage-checkpoint")
     checkpoint.add_argument("--data-dir", required=True)
 
@@ -217,6 +224,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"action": plan.action, "target": str(plan.target),
                               "active_schema": plan.active_schema,
                               "active": str(plan.active) if plan.active else None}, sort_keys=True))
+            return 0
+        if args.command == "storage-adopt":
+            print(str(adopt_legacy_storage(args.storage_root)))
+            return 0
+        if args.command == "storage-activate":
+            print(str(activate_schema(args.storage_root, args.target)))
             return 0
         if args.command == "storage-checkpoint":
             checkpoint_stopped_storage(args.data_dir)
