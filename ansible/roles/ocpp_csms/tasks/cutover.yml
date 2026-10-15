@@ -245,6 +245,56 @@
       when: ocpp_csms_incumbent_service | length > 0
 
   rescue:
+    # Always stop the candidate before considering restoration of an incumbent.
+    # A stopped writer is a prerequisite for reliable evidence inspection.
+    - name: Stop failed candidate before inspecting committed evidence
+      become: true
+      ansible.builtin.systemd_service:
+        name: "{{ ocpp_csms_service_name }}"
+        state: stopped
+      register: ocpp_csms_candidate_stop_result
+      failed_when: false
+
+    - name: Fail closed if candidate cannot be confirmed stopped
+      ansible.builtin.assert:
+        that:
+          - not (ocpp_csms_candidate_stop_result.failed | default(false))
+        fail_msg: Candidate stop failed; refusing to restore an older OCPP service.
+
+    # B3.3: only a freshly prepared versioned candidate can be tested for
+    # absence of evidence. Reused databases contain historical records, so
+    # their evidence cannot be interpreted as post-cutover writes.
+    - name: Inspect fresh candidate storage evidence before rollback
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - storage-evidence
+          - --data-dir
+          - "{{ ocpp_csms_storage_selection.target }}"
+      register: ocpp_csms_candidate_evidence
+      changed_when: false
+      when:
+        - ocpp_csms_versioned_activation_started | default(false) | bool
+        - ocpp_csms_storage_selection.action == 'create'
+
+    - name: Refuse rollback when fresh candidate has committed OCPP evidence
+      ansible.builtin.assert:
+        that:
+          - not ((ocpp_csms_candidate_evidence.stdout | from_json).committed_ocpp_evidence | bool)
+        fail_msg: Candidate committed OCPP evidence; repair forward, do not restore an older database.
+      when:
+        - ocpp_csms_versioned_activation_started | default(false) | bool
+        - ocpp_csms_storage_selection.action == 'create'
+
+    - name: Refuse unverified versioned rollback
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_storage_selection.action == 'create'
+        fail_msg: Reused versioned storage cannot be rolled back using a zero-evidence test.
+      when: ocpp_csms_versioned_activation_started | default(false) | bool
+
     # Incumbent takeover is independent of the new CSMS database. If it was the
     # production owner before cutover, restore it first even when this was the
     # first managed ocpp-csms release.
