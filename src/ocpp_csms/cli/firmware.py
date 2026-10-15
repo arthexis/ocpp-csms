@@ -17,10 +17,7 @@ def add_firmware_command(subcommands):
     update = sub.add_parser("update", help="Send an OCPP UpdateFirmware request")
     update.add_argument("--location", required=True, help="Charger-reachable firmware URL")
     update.add_argument("--cp", dest="charger")
-    timing = update.add_mutually_exclusive_group(required=True)
-    timing.add_argument("--now", action="store_true", help="Explicitly request immediate retrieval")
-    timing.add_argument("--at", help="Scheduled retrieval time, ISO-8601 with timezone")
-    timing.add_argument("--after", type=int, metavar="SECONDS", help="Schedule retrieval SECONDS from now (must be positive)")
+    update.add_argument("--at", help="Optional scheduled retrieval time (ISO-8601 with timezone); default: now")
     update.add_argument("--retries", type=int)
     update.add_argument("--retry-interval", type=int)
     update.add_argument("--confirm", action="store_true", help="Acknowledge potential service disruption")
@@ -46,21 +43,16 @@ def firmware_request(args, *, now=None):
     validate_transfer_url(args.location, error="invalid firmware URL")
     validate_retry_options(args.retries, args.retry_interval)
     current = now or datetime.now(timezone.utc)
-    if args.now:
+    if args.at is None:
         date = current
-    elif args.after is not None:
-        if args.after <= 0:
-            raise ValueError("--after must be greater than zero")
-        from datetime import timedelta
-        date = current + timedelta(seconds=args.after)
     else:
         date = datetime.fromisoformat(args.at.replace("Z", "+00:00"))
         if date.tzinfo is None:
             raise ValueError("--at needs an explicit timezone")
         if date <= current:
-            raise ValueError("--at must be in the future; use --now instead")
+            raise ValueError("--at must be in the future")
     result = {"command": "update_firmware", "location": args.location,
-              "retrieve_date": date.astimezone(timezone.utc).isoformat(), "immediate": bool(args.now)}
+              "retrieve_date": date.astimezone(timezone.utc).isoformat(), "immediate": args.at is None}
     if args.charger:
         result["charger"] = args.charger
     if args.retries is not None:
