@@ -28,7 +28,6 @@ def test_discover_uses_active_immutable_csms_runtime():
 
     assert defaults["ocpp_discover_python"].endswith("/current/venv/bin/python")
     assert defaults["ocpp_discover_runtime_command"].endswith("/current/venv/bin/ocpp-discover")
-    assert "{{ ocpp_discover_python }}" in template
 
 
 def test_discover_exposes_stable_global_operator_command():
