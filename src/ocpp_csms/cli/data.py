@@ -257,6 +257,10 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
 def run_data(args: argparse.Namespace) -> int:
     if args.data_command != "reset":
         raise ValueError("unknown data operation")
+    if args.cp is not None and args.dry_run:
+        print(json.dumps({"decision": "dry-run", "scope": "cp", "cp": args.cp,
+                          "data_dir": str(args.data_dir)}, indent=2, sort_keys=True))
+        return 0
     if args.cp is not None and not args.dry_run:
         from ocpp_csms.control import send_control
         response = asyncio.run(send_control(args.data_dir, {"command": "data_reset_cp", "charger": args.cp}))
