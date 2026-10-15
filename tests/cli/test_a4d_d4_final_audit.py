@@ -48,14 +48,14 @@ def test_diagnostics_upload_requires_explicit_location():
 
 
 def test_firmware_update_requires_confirmation():
-    args = parse("firmware", "update", "--location", "https://example.org/fw", "--now")
+    args = parse("firmware", "update", "--location", "https://example.org/fw")
     with pytest.raises(ValueError, match="--confirm"):
         firmware_request(args)
 
 
 @pytest.mark.parametrize("words", [
-    ("firmware", "update", "--location", "https://example.org/fw", "--now", "--confirm", "--retries", "-1"),
-    ("firmware", "update", "--location", "https://example.org/fw", "--now", "--confirm", "--retry-interval", "-1"),
+    ("firmware", "update", "--location", "https://example.org/fw", "--confirm", "--retries", "-1"),
+    ("firmware", "update", "--location", "https://example.org/fw", "--confirm", "--retry-interval", "-1"),
 ])
 def test_firmware_negative_retries_rejected(words):
     with pytest.raises(ValueError, match="non-negative"):
