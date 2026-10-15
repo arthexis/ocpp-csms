@@ -161,7 +161,9 @@ class CSMSServer:
                     self.host,
                     self.port,
                     subprotocols=[OCPP_16_SUBPROTOCOL],
-                    create_protocol=lambda *args, **kwargs: AuthenticatedWebSocketProtocol(\n                        *args, auth=auth, **kwargs\n                    ),
+                    create_protocol=lambda *args, **kwargs: AuthenticatedWebSocketProtocol(
+                        *args, auth=auth, **kwargs
+                    ),
                 ):
                     # TLS startup is independent of the already-bound WS listener.
                     # A bad certificate or occupied WSS port must not stop WS.
