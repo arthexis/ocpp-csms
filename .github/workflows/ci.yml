@@ -217,6 +217,11 @@ jobs:
           /usr/local/bin/ocpp-csms --help >/dev/null
           /usr/local/bin/ocpp-csms status
           test -L "$HOME/.local/share/ocpp-csms/current"
+          # The running service must use the prepared versioned database, not the storage root.
+          unit_exec="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
+          [[ "$unit_exec" == *"--data-dir"* ]]
+          [[ "$unit_exec" == *"$HOME/ocpp-csms-data/schemas/"* ]]
+          test ! -e "$HOME/ocpp-csms-data/ocpp-csms.sqlite3"
           sudo systemctl show ocpp-csms.service -p MainPID --value | grep -Eq '^[1-9][0-9]*$'
           sudo systemctl show ocpp-csms.service -p MainPID --value > /tmp/ocpp-csms-before.pid
 
