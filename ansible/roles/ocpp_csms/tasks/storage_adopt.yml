@@ -1,6 +1,15 @@
 ---
-# Invoke only inside the stopped-service handoff, after the recovery gate
-# has been installed. Never run this task file during staging.
+# Only run with both writers stopped, under the explicit versioned cutover gate.
+# Never run this task file during staging.
+- name: Assert legacy adoption is a stopped-service versioned operation
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_enable_versioned_cutover | default(false) | bool
+      - not (ocpp_csms_stage_only | bool)
+      - ocpp_csms_storage_selection.action in ['create', 'reuse']
+      - ocpp_csms_storage_selection.active is not none
+    fail_msg: Legacy adoption requires an explicitly enabled stopped-service cutover.
+
 - name: Verify fresh candidate before stopped-service storage transition
   ansible.builtin.command:
     argv:
@@ -31,7 +40,7 @@
   ansible.builtin.stat:
     path: "{{ ocpp_csms_adopted_storage.stdout }}/ocpp-csms.sqlite3"
   register: ocpp_csms_adopted_database
-  when: ocpp_csms_adopted_storage is not skipped
+  when: ocpp_csms_adopted_storage is defined and not (ocpp_csms_adopted_storage.skipped | default(false))
 
 - name: Assert adopted historical database exists
   ansible.builtin.assert:
