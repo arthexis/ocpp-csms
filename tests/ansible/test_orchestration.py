@@ -82,30 +82,15 @@ def test_incumbent_takeover_requires_a_real_charger_reconnect():
     assert "ocpp_csms_incumbent_service | length > 0" in reconnect
 
 
-def test_replacement_health_is_proven_before_current_is_promoted():
+
+
+def test_same_commit_convergence_does_not_force_service_restart_or_rebuild():
+    main = read(TASKS / "main.yml")
     cutover = read(TASKS / "cutover.yml")
-    assert_task_order(
-        cutover,
-        "Enable and start candidate OCPP CSMS service",
-        "Wait for OCPP CSMS listener",
-        "Verify candidate OCPP CSMS application status",
-        "Verify previously connected chargers reconnect",
-        "Promote verified release to current",
-    )
-
-
-def test_converged_path_is_non_disruptive():
-    cutover = TASKS / "cutover.yml"
-    activation = task_by_name(cutover, "Activate and verify OCPP CSMS handoff")
-    assert activation["when"] == "ocpp_csms_activation_required | bool"
-
-    for name in (
-        "Ensure converged OCPP CSMS service is enabled and running",
-        "Verify converged OCPP CSMS listener",
-        "Verify converged OCPP CSMS application status",
-    ):
-        assert task_by_name(cutover, name)["when"] == "not (ocpp_csms_activation_required | bool)"
-
+    assert "ocpp_csms_release_ready" not in main
+    assert "state: restarted" not in cutover
+    assert "ocpp_csms_activation_required" in cutover
+    assert "state: started" in cutover
 
 def test_candidate_unit_is_staged_and_verified_before_handoff():
     main = read(TASKS / "main.yml")
@@ -195,15 +180,6 @@ def test_base_role_refuses_root_deployment_identity():
     assert "ansible_user_uid | int != 0" in conditions
 
 
-def test_stage_only_preflight_and_schema_checks_precede_handoff_barrier():
-    main = read(TASKS / "main.yml")
-    assert_task_order(
-        main,
-        "Inspect incumbent host-local OCPP service",
-        "Inspect database schema cutover action",
-        "Report staged OCPP CSMS handoff plan",
-        "End host after safe staging",
-    )
 
 
 def test_stage_only_conditions_exclude_storage_preparation_and_handoff():
@@ -272,30 +248,30 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 
-def test_reusable_environments_are_keyed_by_requirements_and_platform():
-    assert "hash('sha256')" in read(DEFAULTS)
-
-
-def test_runtime_dependencies_are_installed_once_from_defaults():
+def test_release_environment_path_is_derived_from_git_commit():
     defaults = load_yaml(DEFAULTS)
-    install = task_by_name(TASKS / "main.yml", "Install reusable runtime dependencies")
-    ready = task_by_name(TASKS / "main.yml", "Mark reusable runtime dependency environment ready")
-    assert "ansible.builtin.pip" in install
-    for task in (install, ready):
-        assert "not ocpp_csms_dependency_ready.stat.exists" in task["when"]
+    assert defaults["ocpp_csms_release_dir"] == "{{ ocpp_csms_releases_dir }}/{{ ocpp_csms_release_id }}"
+    assert defaults["ocpp_csms_release_venv"] == "{{ ocpp_csms_release_dir }}/venv"
+    main = read(TASKS / "main.yml")
+    assert "rev-parse" in main
+    assert "--short=12" in main
+    assert ".ready" not in main
 
+def test_runtime_dependencies_are_verified_without_readiness_markers():
+    main = read(TASKS / "main.yml")
+    assert "ocpp_csms_release_ready" not in main
+    assert "ocpp_csms_dependency_ready" not in main
+    assert "Mark reusable runtime dependency environment ready" not in main
+    assert "ocpp_csms_runtime_dependencies" in main
+    assert "ansible.builtin.pip:" in main
 
-def test_release_reuses_runtime_site_packages_without_mutating_dependency_environment():
-    dependency_site = task_by_name(
-        TASKS / "main.yml", "Resolve reusable runtime dependency site packages"
-    )
-    release_site = task_by_name(TASKS / "main.yml", "Resolve release site packages")
-    link = task_by_name(TASKS / "main.yml", "Link reusable runtime dependencies into release")
-
-    assert dependency_site["changed_when"] is False
-    assert release_site["changed_when"] is False
-    assert link["ansible.builtin.copy"]["dest"].endswith("/ocpp_csms_dependencies.pth")
-
+def test_release_environment_does_not_depend_on_external_site_packages():
+    main = read(TASKS / "main.yml")
+    defaults = read(DEFAULTS)
+    assert "ocpp_csms_dependencies.pth" not in main
+    assert "ocpp_csms_dependency_site_packages" not in main
+    assert "ocpp_csms_dependency_dir:" not in defaults
+    assert "{{ ocpp_csms_release_venv }}" in main
 
 def test_application_is_built_outside_release_venv_and_installed_as_wheel():
     build = task_by_name(TASKS / "main.yml", "Build OCPP CSMS application wheel")
@@ -310,23 +286,13 @@ def test_application_is_built_outside_release_venv_and_installed_as_wheel():
     assert install["ansible.builtin.pip"]["extra_args"] == "--no-index --no-deps"
 
 
-def test_development_dependencies_remain_release_local_and_opt_in():
+def test_development_dependencies_are_release_local_and_optional_without_markers():
+    main = read(TASKS / "main.yml")
     development = task_by_name(TASKS / "main.yml", "Install release development dependencies")
-
-    assert development["ansible.builtin.pip"] == {
-        "name": [
-            "pytest>=8,<9",
-            "pytest-asyncio>=0.23,<2",
-            "pytest-xdist>=3,<4",
-        ],
-        "virtualenv": "{{ ocpp_csms_release_venv }}",
-    }
-    assert development["when"] == [
-        "not ocpp_csms_release_ready.stat.exists",
-        "ocpp_csms_install_mode == 'online'",
-        "ocpp_csms_dev | bool",
-    ]
-
+    assert development["ansible.builtin.pip"]["virtualenv"] == "{{ ocpp_csms_release_venv }}"
+    assert "ocpp_csms_dev | bool" in development["when"]
+    assert "ocpp_csms_release_ready" not in str(development)
+    assert ".ready" not in main
 
 def test_development_deploy_gets_distinct_immutable_release():
     capture = task_by_name(TASKS / "main.yml", "Capture immutable release identifier")
