@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import sqlite3
@@ -29,6 +30,27 @@ OCPP_16_SUBPROTOCOL = "ocpp1.6"
 def charge_point_id_from_path(path: str) -> str:
     clean_path = path.split("?", 1)[0].rstrip("/")
     return clean_path.rsplit("/", 1)[-1] if clean_path else ""
+
+
+class AuthenticatedWebSocketProtocol(WebSocketServerProtocol):
+    """Recognize local TLS termination from the TCP peer, not HTTP headers."""
+
+    def __init__(self, *args, auth: dict, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.auth = auth
+
+    async def process_request(self, path, headers):
+        peer = self.remote_address
+        local_proxy = False
+        if peer:
+            try:
+                local_proxy = ipaddress.ip_address(peer[0]).is_loopback
+            except ValueError:
+                pass
+        return basic_upgrade_check(
+            self.auth, path, headers, secure=local_proxy,
+            config_path=auth_path() if local_proxy else None,
+        )
 
 
 class RecordedWebSocket:
@@ -139,7 +161,7 @@ class CSMSServer:
                     self.host,
                     self.port,
                     subprotocols=[OCPP_16_SUBPROTOCOL],
-                    process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=False),
+                    create_protocol=lambda *args, **kwargs: AuthenticatedWebSocketProtocol(\n                        *args, auth=auth, **kwargs\n                    ),
                 ):
                     # TLS startup is independent of the already-bound WS listener.
                     # A bad certificate or occupied WSS port must not stop WS.
