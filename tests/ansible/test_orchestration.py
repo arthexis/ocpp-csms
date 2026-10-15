@@ -252,6 +252,40 @@ def test_stage_only_stops_before_handoff():
     assert end_host["when"] == "ocpp_csms_stage_only | bool"
 
 
+
+def test_stage_only_conditions_exclude_storage_preparation_and_handoff():
+    """Evaluate staging conditions for both modes, rather than snapshot strings."""
+    from jinja2 import Environment
+
+    tasks = load_yaml(TASKS / "main.yml")
+    prepare = next(task for task in tasks if task.get("name") == "Prepare versioned candidate before service downtime")
+    end_host = next(task for task in tasks if task.get("name") == "End host after safe staging")
+    handoff = next(task for task in tasks if task.get("name") == "Perform controlled OCPP CSMS handoff")
+
+    environment = Environment()
+
+    def enabled(task, **values):
+        conditions = task.get("when", [])
+        if isinstance(conditions, str):
+            conditions = [conditions]
+        return all(environment.compile_expression(condition)(**values) for condition in conditions)
+
+    for action in ("create", "reuse"):
+        for stage_only in (True, False):
+            values = {
+                "ocpp_csms_stage_only": stage_only,
+                "ocpp_csms_storage_selection": {"action": action},
+            }
+            assert enabled(prepare, **values) == (not stage_only and action == "create")
+            assert enabled(end_host, **values) == stage_only
+
+    # Ansible's end_host is a control-flow barrier, not a conditional on handoff.
+    assert end_host["ansible.builtin.meta"] == "end_host"
+    assert "when" not in handoff
+    assert tasks.index(end_host) < tasks.index(handoff)
+
+
+
 def test_diagnose_tasks_are_read_only_and_report_takeover_preflight():
     diagnose = read(TASKS / "diagnose.yml")
     assert "ocpp_discover.incumbent" in diagnose
