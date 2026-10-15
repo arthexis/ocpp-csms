@@ -1,4 +1,4 @@
-"""A4b diagnose is read-only by default and requires --now for upload requests."""
+"""A4b diagnose is read-only by default and uses --location for upload requests."""
 import pytest
 
 from ocpp_csms.cli import build_parser
@@ -18,26 +18,27 @@ def test_diagnose_history_is_default(monkeypatch, tmp_path, capsys):
 def test_diagnose_explicit_list():
     parser, _ = build_parser()
     args = parser.parse_args(["diagnose", "--list", "--cp", "CP1"])
-    assert args.list and not args.now
+    assert args.list
 
 
 def test_diagnose_now_request_contract():
     parser, _ = build_parser()
-    args = parser.parse_args(["diagnose", "--now", "--cp", "CP1", "--location", "https://example.org/upload"])
+    args = parser.parse_args(["diagnose", "--cp", "CP1", "--location", "https://example.org/upload"])
     assert _request(args) == {"command": "get_diagnostics", "location": "https://example.org/upload", "charger": "CP1"}
 
 
-def test_diagnose_now_requires_location():
+def test_diagnose_upload_requires_location():
     parser, _ = build_parser()
-    args = parser.parse_args(["diagnose", "--now"])
+    args = parser.parse_args(["diagnose"])
     with pytest.raises(ValueError, match="--location is required"):
         _request(args)
 
 
 def test_diagnose_rejects_both_modes():
     parser, _ = build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["diagnose", "--now", "--list"])
+    args = parser.parse_args(["diagnose", "--list", "--location", "https://example.org/upload"])
+    with pytest.raises(ValueError, match="cannot be combined"):
+        run_diagnostics(args)
 
 
 @pytest.mark.parametrize("old", ["diag", "diagnostics"])
