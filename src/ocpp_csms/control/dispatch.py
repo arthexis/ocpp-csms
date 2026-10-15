@@ -224,9 +224,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             return {"error": "invalid_charger"}
         if cp in registry.connected_chargers():
             return {"error": "charger_connected", "charger": cp}
-        from ocpp_csms.cli.data import reset_live_cp
         try:
-            return {"ok": True, "response": reset_live_cp(registry.events.data_dir, cp)}
+            return {"ok": True, "response": await registry.reset_cp_data(cp)}
         except (ValueError, OSError, RuntimeError) as exc:
             return {"error": "data_reset_failed", "detail": str(exc)}
     charger, request, resolution_error = _resolve_charger(registry, request)
