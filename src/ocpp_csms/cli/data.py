@@ -97,7 +97,9 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
     if unit is not None and unit.returncode == 0:
         raise ValueError("ocpp-csms.service is active; stop it before reset")
     from ocpp_csms.schema import inspect_schema, require_supported_schema
-    require_supported_schema(inspect_schema(root))
+    schema = inspect_schema(root)
+    if schema.exists:
+        require_supported_schema(schema)
     if root.resolve() in (Path.home().resolve(), Path("/")):
         raise ValueError("refusing reset of home or filesystem root")
     backup_root = root.parent / (root.name + "-test-backups")
