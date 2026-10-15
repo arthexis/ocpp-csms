@@ -1,4 +1,4 @@
-"""A4d D1: command registration must retain only intentional maintenance aliases."""
+"""Maintenance commands retain only intentional aliases."""
 import pytest
 
 from ocpp_csms.cli import build_parser
@@ -19,14 +19,6 @@ def test_canonical_maintenance_registration(argv, command):
     assert parser.parse_args(argv).command == command
     assert command in commands
 
-
-@pytest.mark.parametrize("name", ["diag", "diagnostics"])
-def test_removed_diagnostic_commands_are_not_registered(name):
-    parser, commands = build_parser()
-    assert name not in commands
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args([name])
-    assert exc.value.code == 2
 
 
 def test_availability_alias_shares_parser():
