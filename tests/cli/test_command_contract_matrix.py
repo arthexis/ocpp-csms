@@ -31,7 +31,7 @@ def test_maintenance_commands_registered_on_root_parser(parse_cli, argv, command
 
 @pytest.mark.parametrize("argv", [
     ("firmware", "status", "--limit", "1"),
-    ("firmware", "update", "--location", "https://host/fw", "--at", "2026-10-12T00:00:00Z", "--after", "5", "--confirm"),
+    ("firmware", "update", "--location", "https://host/fw", "--at", "2026-10-12T00:00:00Z", "--confirm"),
     ("data-transfer", "send", "--data", "payload"),
     ("reserve", "cancel"),
 ])
