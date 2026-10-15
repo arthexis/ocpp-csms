@@ -14,7 +14,6 @@ def test_default_dry_run_is_read_only(tmp_path):
     data.mkdir()
     (data / "marker").write_text("test")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
-         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         result = reset_test_data(data, all_data=True)
     assert result["decision"] == "dry-run"
@@ -80,7 +79,6 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
     for i, cp in enumerate(("ABB-A", "ABB-B"), 1):
         (folder / f"record-{i}.json").write_text(json.dumps({"charge_point_id":cp,"transaction_id":i}))
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
-         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         out = reset_test_data(data, cp="ABB-A", now=True)
     assert out["scope"] == "cp"
@@ -103,7 +101,6 @@ def test_refuses_ambiguous_cp_archive_without_swapping(tmp_path):
     folder.mkdir()
     (folder / "unknown.json").write_text("{}")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
-         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         with pytest.raises(ValueError,match="ambiguous"):
             reset_test_data(data, cp="ABB-A", now=True)
@@ -133,7 +130,6 @@ def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
         )
         writer.commit()
         with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
-             patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
              patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
             result = reset_test_data(data, cp="REMOVE", now=True)
         with sqlite3.connect(data / "ocpp-csms.sqlite3") as check:
