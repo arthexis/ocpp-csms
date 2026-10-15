@@ -21,6 +21,9 @@ class WebSocket:
         self.subprotocol = subprotocol
         self.closed = asyncio.Event()
 
+    async def close(self, *, code, reason):
+        self.closed.set()
+
 
 def install_waiting_session(monkeypatch, started=None, sessions=None):
     class Session:
