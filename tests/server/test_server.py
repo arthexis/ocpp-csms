@@ -57,6 +57,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     install_waiting_session(monkeypatch, started, sessions)
     events = RuntimeEvents()
     server = make_server(events)
+    assert server.session("missing") is None
     first = WebSocket(path="/charger-a")
     second = WebSocket(path="/charger-a")
 
