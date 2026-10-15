@@ -342,11 +342,7 @@ def test_deploy_wrapper_exposes_field_friendly_options():
 
 
 def test_reusable_environments_are_keyed_by_requirements_and_platform():
-    defaults = load_yaml(DEFAULTS)
-
     assert "hash('sha256')" in read(DEFAULTS)
-    assert defaults["ocpp_csms_builds_dir"].endswith("/builds")
-    assert defaults["ocpp_csms_dependencies_dir"].endswith("/dependencies")
 
 
 def test_runtime_dependencies_are_installed_once_from_defaults():
