@@ -201,5 +201,7 @@ def test_stopped_storage_adoption_is_prepared_but_not_enabled():
     assert "ocpp_csms_storage_selection.active == ocpp_csms_data_dir" in adoption
     assert "ocpp_csms_adopted_storage.stdout" in adoption
     assert "storage-activate" not in adoption
-    assert "storage_adopt.yml" not in cutover
+    assert "storage_adopt.yml" in cutover
+    assert cutover.index("Reject unsafe versioned storage activation until recovery is wired") < cutover.index("Adopt stopped legacy storage for versioned handoff")
+    assert "ocpp_csms_enable_versioned_cutover | default(false) | bool" in adoption
     assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
