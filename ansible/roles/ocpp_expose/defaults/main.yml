@@ -1,4 +1,4 @@
 ---
 # nginx connects locally even when CSMS listens on all IPv4 interfaces.
-ocpp_csms_port: 9000
-ocpp_csms_runtime_command: "{{ ansible_env.HOME }}/.local/share/ocpp-csms/current/venv/bin/ocpp-csms"
+ocpp_expose_upstream_port: 9000
+ocpp_expose_runtime_command: "{{ ansible_env.HOME }}/.local/share/ocpp-csms/current/venv/bin/ocpp-csms"
