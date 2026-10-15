@@ -44,7 +44,7 @@ def firmware_request(args, *, now=None):
     current = now or datetime.now(timezone.utc)
     date = current
     result = {"command": "update_firmware", "location": args.location,
-              "retrieve_date": date.astimezone(timezone.utc).isoformat(), "immediate": True}
+              "retrieve_date": date.astimezone(timezone.utc).isoformat()}
     if args.charger:
         result["charger"] = args.charger
     if args.retries is not None:
