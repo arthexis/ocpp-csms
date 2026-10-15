@@ -28,3 +28,15 @@
       - "{{ ocpp_csms_data_dir }}"
   when: ocpp_csms_storage_selection.action == 'create'
   changed_when: true
+
+- name: Verify prepared schema storage
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-verify
+      - --data-dir
+      - "{{ ocpp_csms_storage_selection.target }}"
+  changed_when: false
+  when: ocpp_csms_storage_selection.action == 'create'
