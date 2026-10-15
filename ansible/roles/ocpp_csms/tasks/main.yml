@@ -465,6 +465,16 @@
   ansible.builtin.meta: end_host
   when: ocpp_csms_stage_only | bool
 
+# JSON archives are diagnostic projections alongside the selected schema database.
+# Prepare their parent directory before cutover, without writing transaction data.
+- name: Prepare selected schema transaction archive directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_transactions_dir }}"
+    state: directory
+    owner: "{{ ocpp_csms_service_user }}"
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0750"
+
 # Versioned cutover remains explicitly gated until recovery is verified.
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
