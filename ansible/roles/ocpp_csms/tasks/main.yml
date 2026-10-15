@@ -424,30 +424,8 @@
   ansible.builtin.set_fact:
     ocpp_csms_service_data_dir: "{{ ocpp_csms_storage_selection.target }}"
 
-- name: Inspect database schema cutover action
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - ocpp_csms.install_cutover
-      - schema-check
-      - --data-dir
-      - "{{ ocpp_csms_active_data_dir }}"
-  register: ocpp_csms_schema_check
-  changed_when: false
-
-- name: Validate schema cutover action
-  ansible.builtin.assert:
-    that:
-      - ocpp_csms_schema_check.stdout in ['create', 'current', 'upgrade']
-    fail_msg: "Unexpected schema cutover action: {{ ocpp_csms_schema_check.stdout }}"
-
-- name: Capture schema cutover action
-  ansible.builtin.set_fact:
-    ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
-
 # Prepare a fresh schema candidate only for a real handoff. Staging must
-# never create or activate storage; this task does not touch the active pointer.
+# never create storage; no database activation pointer exists.
 - name: Prepare versioned candidate before service downtime
   ansible.builtin.include_tasks: storage_prepare.yml
   when:
