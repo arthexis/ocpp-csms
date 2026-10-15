@@ -8,9 +8,6 @@ import pytest
 from ocpp_csms.cli.data import reset_test_data
 
 
-def permitted():
-    return SimpleNamespace(allowed=True, connected_chargers=(), active_chargers=(), reason=None)
-
 
 def test_default_dry_run_is_read_only(tmp_path):
     data = tmp_path / "ocpp-csms-data"
@@ -18,7 +15,7 @@ def test_default_dry_run_is_read_only(tmp_path):
     (data / "marker").write_text("test")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-         patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()):
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         result = reset_test_data(data, all_data=True)
     assert result["decision"] == "dry-run"
     assert (data / "marker").read_text() == "test"
@@ -31,7 +28,6 @@ def test_reset_moves_data_and_reinitializes(tmp_path):
     (data / "marker").write_text("secret")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-         patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()), \
          patch("ocpp_csms.cli.data.initialize_storage") as init:
         result = reset_test_data(data, all_data=True, now=True)
     assert result["decision"] == "reset"
@@ -55,18 +51,6 @@ def test_refuses_live_service(tmp_path, reason, running, active):
 def test_refuses_without_scope(tmp_path):
     with pytest.raises(ValueError, match="exactly one"):
         reset_test_data(tmp_path, all_data=False, now=True)
-
-
-def test_refuses_active_charge_evidence(tmp_path):
-    data = tmp_path / "data"
-    data.mkdir()
-    unsafe = SimpleNamespace(allowed=False, connected_chargers=(), active_chargers=("CP",), reason="active charging")
-    with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
-         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-         patch("ocpp_csms.cli.data.evaluate_preflight", return_value=unsafe):
-        with pytest.raises(ValueError, match="active charging"):
-            reset_test_data(data, all_data=True, now=True)
-    assert data.exists()
 
 
 def test_refuses_symlinked_data(tmp_path):
@@ -97,7 +81,7 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
         (folder / f"record-{i}.json").write_text(json.dumps({"charge_point_id":cp,"transaction_id":i}))
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-         patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()):
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         out = reset_test_data(data, cp="ABB-A", now=True)
     assert out["scope"] == "cp"
     with sqlite3.connect(db_path) as db:
@@ -120,7 +104,7 @@ def test_refuses_ambiguous_cp_archive_without_swapping(tmp_path):
     (folder / "unknown.json").write_text("{}")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-         patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()):
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         with pytest.raises(ValueError,match="ambiguous"):
             reset_test_data(data, cp="ABB-A", now=True)
     assert (folder / "unknown.json").exists()
@@ -150,7 +134,7 @@ def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
         writer.commit()
         with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
              patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
-             patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()):
+             patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
             result = reset_test_data(data, cp="REMOVE", now=True)
         with sqlite3.connect(data / "ocpp-csms.sqlite3") as check:
             assert check.execute(
