@@ -105,7 +105,7 @@ async def test_config_set_changes_then_reads_back_on_inferred_charger():
     session = Session()
     response = await dispatch_control(
         Registry(session),
-        {"command": "config_set", "key": "HeartbeatInterval", "value": "60", "force": False},
+        {"command": "config_set", "key": "HeartbeatInterval", "value": "60"},
     )
     assert response["response"]["change"] == {"status": "Accepted"}
     assert response["response"]["readback"]["configuration_key"][0]["value"] == "60"
@@ -115,30 +115,6 @@ async def test_config_set_changes_then_reads_back_on_inferred_charger():
     ]
 
 
-@pytest.mark.asyncio
-async def test_config_set_is_blocked_during_active_transaction():
-    session = Session()
-    registry = Registry(session, active={"charger-a": [17]})
-    response = await dispatch_control(
-        registry,
-        {"command": "config_set", "key": "HeartbeatInterval", "value": "60"},
-    )
-    assert response["error"] == "active_transaction"
-    assert session.calls == []
-    assert registry.events[0]["event"] == "configuration_change_blocked"
-
-
-@pytest.mark.asyncio
-async def test_config_set_force_records_override_and_runs():
-    session = Session()
-    registry = Registry(session, active={"charger-a": [17]})
-    response = await dispatch_control(
-        registry,
-        {"command": "config_set", "key": "HeartbeatInterval", "value": "60", "force": True},
-    )
-    assert response["ok"] is True
-    assert registry.events[0]["event"] == "configuration_change_forced"
-    assert session.calls[0] == ("config_set", "HeartbeatInterval", "60")
 
 
 @pytest.mark.asyncio
@@ -162,35 +138,6 @@ async def test_legacy_config_positional_charger_is_recognized():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("active", "force", "keys", "expected_call", "expected_error", "records_decision"),
-    [
-        ({}, False, ["HeartbeatInterval"], ("config", ["HeartbeatInterval"]), None, False),
-        ({"charger-a": [17]}, False, None, ("config", None), None, False),
-        ({"charger-a": [17]}, True, None, ("config", None), None, False),
-        ({"charger-b": [88]}, False, None, ("config", None), None, False),
-    ],
-)
-async def test_configuration_dispatch_respects_active_transaction_policy(active, force, keys, expected_call, expected_error, records_decision):
-    session = Session()
-    registry = Registry(session, active=active)
-    request = {"command": "config", "charger": "charger-a", "force": force}
-    if keys is not None:
-        request["keys"] = keys
-    response = await dispatch_control(registry, request)
-    if expected_error is None:
-        assert response["ok"] is True
-        assert session.calls == [expected_call]
-    else:
-        assert response["error"] == expected_error
-        assert response["transactions"] == [17]
-        assert session.calls == []
-    assert bool(registry.events) is records_decision
-    if records_decision:
-        assert registry.events[0]["charger_id"] == "charger-a"
-        assert registry.events[0]["details"]["transactions"] == [17]
-
-
 @pytest.mark.asyncio
 async def test_disconnected_explicit_charger_is_not_queued():
     response = await dispatch_control(Registry(), {"command": "reset", "charger": "charger-a"})
@@ -209,7 +156,6 @@ async def test_disconnected_explicit_charger_is_not_queued():
         ({"command": "stop", "charger": "charger-a"}, "invalid_transaction"),
         ({"command": "reset", "charger": "charger-a", "type": "Warm"}, "invalid_reset_type"),
         ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
-        ({"command": "config", "charger": "charger-a", "force": "yes"}, "invalid_force"),
         ({"command": "config_set", "charger": "charger-a", "key": "", "value": "60"}, "invalid_key"),
         ({"command": "config_set", "charger": "charger-a", "key": "HeartbeatInterval", "value": 60}, "invalid_value"),
         ({"command": "unknown", "charger": "charger-a"}, "unknown_command"),
@@ -260,24 +206,6 @@ async def test_unix_socket_reports_invalid_json(tmp_path):
     assert response == {"error": "invalid_json"}
 
 
-@pytest.mark.asyncio
-async def test_now_blocks_start_and_reset_when_transaction_is_active():
-    for request in (
-        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE"},
-        {"command": "reset", "charger": "charger-a"},
-    ):
-        session = Session()
-        response = await dispatch_control(
-            Registry(session, active={"charger-a": [17]}),
-            request,
-        )
-        assert response == {
-            "error": "active_transaction",
-            "charger": "charger-a",
-            "transactions": [17],
-        }
-        assert session.calls == []
-
 
 @pytest.mark.asyncio
 async def test_start_allows_free_connector_when_another_connector_is_active():
@@ -293,100 +221,8 @@ async def test_start_allows_free_connector_when_another_connector_is_active():
     assert session.calls == [("start", "REMOTE", 2)]
 
 
-@pytest.mark.asyncio
-async def test_start_blocks_when_requested_connector_is_active():
-    session = Session()
-    registry = Registry(session, active={"charger-a": [(17, 2), (18, 1)]})
-
-    response = await dispatch_control(
-        registry,
-        {"command": "start", "charger": "charger-a", "connector": 2, "id_tag": "REMOTE"},
-    )
-
-    assert response == {
-        "error": "active_transaction",
-        "charger": "charger-a",
-        "transactions": [17],
-    }
-    assert session.calls == []
 
 
-@pytest.mark.asyncio
-async def test_start_without_connector_remains_blocked_by_any_active_transaction():
-    session = Session()
-    registry = Registry(session, active={"charger-a": [(17, 1)]})
-
-    response = await dispatch_control(
-        registry,
-        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE"},
-    )
-
-    assert response["error"] == "active_transaction"
-    assert response["transactions"] == [17]
-    assert session.calls == []
-
-
-@pytest.mark.asyncio
-async def test_within_times_out_if_transaction_stays_active(monkeypatch):
-    session = Session()
-    registry = Registry(session, active={"charger-a": [17]})
-    sleeps = []
-
-    async def fake_sleep(seconds):
-        sleeps.append(seconds)
-
-    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
-
-    response = await dispatch_control(
-        registry,
-        {"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "timing": "within", "seconds": 3},
-    )
-
-    assert response == {
-        "error": "active_transaction_timeout",
-        "charger": "charger-a",
-        "transactions": [17],
-        "seconds": 3,
-    }
-    assert sleeps == [1, 1, 1]
-    assert session.calls == []
-
-
-@pytest.mark.asyncio
-async def test_stop_after_delays_but_is_not_blocked_by_active_transaction(monkeypatch):
-    session = Session()
-    registry = Registry(session, active={"charger-a": [42]})
-    sleeps = []
-
-    async def fake_sleep(seconds):
-        sleeps.append(seconds)
-
-    monkeypatch.setattr("ocpp_csms.control.asyncio.sleep", fake_sleep)
-
-    response = await dispatch_control(
-        registry,
-        {"command": "stop", "charger": "charger-a", "transaction": 42, "timing": "after", "seconds": 4},
-    )
-
-    assert response["ok"] is True
-    assert sleeps == [4]
-    assert session.calls == [("stop", 42)]
-
-
-@pytest.mark.asyncio
-async def test_control_timing_is_required_and_validated():
-    session = Session()
-    registry = Registry(session)
-
-    assert (await dispatch_control(
-        registry,
-        {"command": "reset", "charger": "charger-a"},
-    ))["error"] == "invalid_timing"
-
-    assert (await dispatch_control(
-        registry,
-        {"command": "reset", "charger": "charger-a", "timing": "after", "seconds": 0},
-    ))["error"] == "invalid_timing_seconds"
 
 
 
@@ -401,25 +237,6 @@ async def test_a6_other_charge_point_activity_never_blocks_free_connector():
     assert response == {"ok": True, "response": {"status": "Accepted"}}
     assert session.calls == [("start", "REMOTE", 1)]
 
-
-@pytest.mark.asyncio
-async def test_a6_multiple_live_connectors_only_block_requested_occupied_connector():
-    session = Session()
-    registry = Registry(session, active={"charger-a": [(71, 1), (72, 3)]})
-    free = await dispatch_control(registry, {
-        "command": "start", "charger": "charger-a", "connector": 2,
-        "id_tag": "REMOTE",
-    })
-    occupied = await dispatch_control(registry, {
-        "command": "start", "charger": "charger-a", "connector": 3,
-        "id_tag": "REMOTE",
-    })
-    assert free["ok"] is True
-    assert occupied == {
-        "error": "active_transaction", "charger": "charger-a",
-        "transactions": [72],
-    }
-    assert session.calls == [("start", "REMOTE", 2)]
 
 
 @pytest.mark.asyncio
@@ -472,20 +289,6 @@ async def test_unknown_connector_warns_and_sends():
     assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
 
 
-@pytest.mark.asyncio
-async def test_busy_connector_requires_explicit_force():
-    registry = EvidenceRegistry({1: "Charging"})
-    request = {"command": "start", "charger": "charger-a", "connector": 1,
-               "id_tag": "REMOTE"}
-    blocked = await dispatch_control(registry, request)
-    assert blocked["error"] == "active_transaction"
-    assert registry.sessions["charger-a"].calls == []
-    sent = await dispatch_control(registry, {**request, "force": True})
-    assert sent["ok"] is True
-    assert sent["warnings"]
-    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
-    assert registry.events[0]["event"] == "control_occupancy_override"
-
 
 class OccupancyRegistry(Registry):
     def __init__(self, statuses):
@@ -507,22 +310,6 @@ async def test_unspecified_start_allows_other_free_connector():
     assert registry.session("charger-a").calls == [("start", "AUTO", None)]
 
 
-@pytest.mark.asyncio
-async def test_unspecified_start_blocks_when_all_connectors_busy():
-    registry = OccupancyRegistry({1: "Charging", 2: "Reserved"})
-    response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO"})
-    assert response["error"] == "active_transaction"
-    assert registry.session("charger-a").calls == []
-
-
-@pytest.mark.asyncio
-async def test_explicit_busy_start_requires_force_and_records_override():
-    registry = OccupancyRegistry({1: "Charging", 2: "Available"})
-    request = {"command": "start", "connector": 1, "id_tag": "AUTO"}
-    assert (await dispatch_control(registry, request))["error"] == "active_transaction"
-    response = await dispatch_control(registry, {**request, "force": True})
-    assert response["ok"] is True
-    assert registry.events[-1]["event"] == "control_occupancy_override"
 
 
 @pytest.mark.asyncio
@@ -531,3 +318,17 @@ async def test_unknown_connector_start_warns_and_proceeds():
     response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO"})
     assert response["ok"] is True
     assert any("unknown" in warning for warning in response["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_control_and_config_dispatch_without_busy_state_gate():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [17]})
+    for request in (
+        {"command": "start", "id_tag": "REMOTE", "connector": 1},
+        {"command": "reset"},
+        {"command": "config_set", "key": "HeartbeatInterval", "value": "60"},
+    ):
+        assert (await dispatch_control(registry, request))["ok"] is True
+    assert session.calls[:2] == [("start", "REMOTE", 1), ("reset", "Soft")]
+    assert ("config_set", "HeartbeatInterval", "60") in session.calls
