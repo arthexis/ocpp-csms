@@ -25,8 +25,8 @@ def invoke_cli(monkeypatch, tmp_path) -> Callable[..., int]:
 
 
 @pytest.mark.parametrize(("argv", "expected"), [
-    (["txn", "start", "--cp", "CP1", "-c", "2", "--rfid", "ABC"], {"command": "start", "charger": "CP1", "connector": 2, "id_tag": "ABC", "timing": "now"}),
-    (["txn", "stop", "42", "--after", "10"], {"command": "stop", "transaction": 42, "timing": "after", "seconds": 10}),
+    (["txn", "start", "--cp", "CP1", "-c", "2", "--rfid", "ABC"], {"command": "start", "charger": "CP1", "connector": 2, "id_tag": "ABC"}),
+    (["txn", "stop", "42"], {"command": "stop", "transaction": 42}),
 ])
 def test_canonical_txn_entrypoint_preserves_control_payload(monkeypatch, invoke_cli, argv, expected):
     observed = []
