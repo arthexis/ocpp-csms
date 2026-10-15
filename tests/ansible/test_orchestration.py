@@ -263,6 +263,8 @@ def test_stage_only_conditions_exclude_storage_preparation_and_handoff():
     handoff = next(task for task in tasks if task.get("name") == "Perform controlled OCPP CSMS handoff")
 
     environment = Environment()
+    # Plain Jinja2 lacks Ansible's bool filter; these inputs are actual booleans.
+    environment.filters["bool"] = bool
 
     def enabled(task, **values):
         conditions = task.get("when", [])
