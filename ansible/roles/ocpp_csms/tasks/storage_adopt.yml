@@ -8,6 +8,7 @@
       - not (ocpp_csms_stage_only | bool)
       - ocpp_csms_storage_selection.action in ['create', 'reuse']
       - ocpp_csms_storage_selection.active is not none
+      - ocpp_csms_storage_selection.active == ocpp_csms_active_data_dir
     fail_msg: Legacy adoption requires an explicitly enabled stopped-service cutover.
 
 - name: Verify fresh candidate before stopped-service storage transition
@@ -47,7 +48,7 @@
     that:
       - ocpp_csms_adopted_database.stat.isreg | default(false)
     fail_msg: Historical database was not found after adoption.
-  when: ocpp_csms_adopted_storage is not skipped
+  when: ocpp_csms_adopted_storage is defined and not (ocpp_csms_adopted_storage.skipped | default(false))
 
 # Do not activate here. Atomic pointer activation must be coupled to
 # candidate service startup and evidence-aware rescue in the parent block.
