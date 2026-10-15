@@ -245,7 +245,10 @@ def _charger_status(
                 status=status["status"] if status else None,
                 error_code=status["error_code"] if status else None,
                 info=status['info'] if status else None,
-                derived_status=derive_status(status['status'], status['error_code'], status['info']) if status else None,
+                derived_status=(derive_status(status['status'], status['error_code'], status['info']) if status
+                                else "Unknown" if transaction is not None
+                                else "Available" if connected and connector_id > 0
+                                else None),
                 transaction_id=int(transaction["transaction_id"]) if transaction else None,
                 id_tag=transaction["id_tag"] if transaction else None,
                 started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
@@ -378,9 +381,26 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
 
     if appliance:
         lines.append("Chargers:")
-    lines.append("ID                 Connected  Status       Charging  Last seen")
+    physical_ids = sorted({
+        connector.connector_id for item in chargers
+        for connector in item.connectors if connector.connector_id > 0
+    })
+    # Never invent C2 merely because a charger model might support it.
+    status_headers = [f"Status C{connector_id}" for connector_id in physical_ids] if physical_ids else ["Status"]
+    widths = [max(12, len(header)) for header in status_headers]
+    lines.append(f"{'ID':<18} {'Connected':<10} " +
+                 "  ".join(f"{header:<{width}}" for header, width in zip(status_headers, widths)) +
+                 "  Charging  Last seen")
     for item in chargers:
+        by_connector = {connector.connector_id: connector for connector in item.connectors}
+        statuses = [
+            (by_connector[connector_id].derived_status or by_connector[connector_id].status or "Unknown")
+            if connector_id in by_connector else "-"
+            for connector_id in physical_ids
+        ] if physical_ids else [item.derived_status or item.status or "Unknown"]
         lines.append(
-            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} {(item.derived_status or item.status or 'Unknown'):<12} {'yes' if item.charger_id in active_chargers else 'no':<9} {item.last_seen or '-'}"
+            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} " +
+            "  ".join(f"{value:<{width}}" for value, width in zip(statuses, widths)) +
+            f"  {'yes' if item.charger_id in active_chargers else 'no':<8}  {item.last_seen or '-'}"
         )
     return "\n".join(lines)
