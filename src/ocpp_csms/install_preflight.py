@@ -54,7 +54,7 @@ def _live_occupancy(data_dir: Path, connected: tuple[str, ...]) -> tuple[tuple[s
     return tuple(busy), tuple(warnings)
 
 
-def evaluate_preflight(data_dir: str | Path, *, force: bool = False) -> InstallPreflight:
+def evaluate_preflight(data_dir: str | Path, *, force: bool = False, rollover: bool = False) -> InstallPreflight:
     root = Path(data_dir).expanduser()
     schema = inspect_schema(root)
 
