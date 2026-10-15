@@ -46,59 +46,83 @@
         - ocpp-csms
         - ocpp-discover
 
-    - name: Remove managed nginx site configuration
+    - name: Inspect nginx sites for CSMS-managed exposure
+      become: true
+      ansible.builtin.find:
+        paths: /etc/nginx/sites-available
+        file_type: file
+        recurse: false
+      register: ocpp_uninstall_nginx_candidates
+      failed_when: false
+
+    - name: Read nginx site definitions
+      become: true
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ ocpp_uninstall_nginx_candidates.files | default([]) }}"
+      register: ocpp_uninstall_nginx_contents
+      no_log: true
+
+    - name: Identify CSMS-managed nginx site names
+      ansible.builtin.set_fact:
+        ocpp_uninstall_nginx_sites: "{{ (ocpp_uninstall_nginx_sites | default([])) + [item.item.path | basename] }}"
+      loop: "{{ ocpp_uninstall_nginx_contents.results | default([]) }}"
+      when:
+        - "'proxy_pass http://127.0.0.1:{{ 9000 }};' in (item.content | b64decode)"
+        - "'/var/www/ocpp-csms-acme' in (item.content | b64decode)"
+        - "not (item.item.path | basename).startswith('.')"
+      no_log: true
+
+    - name: Remove only identified CSMS nginx sites and snapshots
       become: true
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ item.0 }}/{{ item.1 }}"
         state: absent
-      loop:
-        - "/etc/nginx/sites-enabled/{{ ocpp_csms_expose }}"
-        - "/etc/nginx/sites-available/{{ ocpp_csms_expose }}"
-        - "/etc/nginx/sites-available/.{{ ocpp_csms_expose }}.previous"
-      when: ocpp_csms_expose | default('') | length > 0
+      loop: "{{ ['/etc/nginx/sites-enabled', '/etc/nginx/sites-available'] | product(ocpp_uninstall_nginx_sites | default([])) | list }}"
+      register: ocpp_uninstall_nginx_removed
 
-    - name: Remove dedicated nginx certificate renewal hook
+    - name: Remove CSMS nginx site snapshots
+      become: true
+      ansible.builtin.file:
+        path: "/etc/nginx/sites-available/.{{ item }}.previous"
+        state: absent
+      loop: "{{ ocpp_uninstall_nginx_sites | default([]) }}"
+
+    - name: Remove CSMS certificate renewal hook
       become: true
       ansible.builtin.file:
         path: /etc/letsencrypt/renewal-hooks/deploy/ocpp-csms-nginx.sh
         state: absent
-      when: ocpp_csms_expose | default('') | length > 0
 
-    - name: Validate nginx after removing endpoint
+    - name: Validate nginx after removing CSMS exposure
       become: true
       ansible.builtin.command: nginx -t
       changed_when: false
-      when: ocpp_csms_expose | default('') | length > 0
+      when: ocpp_uninstall_nginx_removed.changed | default(false)
 
-    - name: Reload nginx after removing endpoint
+    - name: Reload nginx after removing CSMS exposure
       become: true
       ansible.builtin.systemd_service:
         name: nginx
         state: reloaded
-      when: ocpp_csms_expose | default('') | length > 0
+      when: ocpp_uninstall_nginx_removed.changed | default(false)
 
-    - name: Check delegate Basic authentication credentials
+    - name: Check Discover persistent integration
       become: true
       ansible.builtin.stat:
-        path: /etc/ocpp-csms/auth.json
-      register: ocpp_uninstall_auth
+        path: /etc/ocpp-discover/nftables.conf
+      register: ocpp_uninstall_discover_rules
 
-    - name: Archive active Basic credentials before switching deployment type
+    - name: Remove Discover-owned persistent nftables integration
       become: true
-      ansible.builtin.copy:
-        src: /etc/ocpp-csms/auth.json
-        dest: /etc/ocpp-csms/auth.uninstalled.json
-        remote_src: true
-        owner: root
-        group: root
-        mode: "0600"
-      when: ocpp_uninstall_auth.stat.exists | default(false)
-
-    - name: Deactivate former Basic authentication configuration
-      become: true
-      ansible.builtin.file:
-        path: /etc/ocpp-csms/auth.json
-        state: absent
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_install_prefix }}/current/venv/bin/python"
+          - -m
+          - ocpp_discover.lifecycle
+          - remove
+      when: ocpp_uninstall_discover_rules.stat.exists
+      changed_when: true
 
     - name: Remove replaceable program releases, not application data
       ansible.builtin.file:
