@@ -92,3 +92,48 @@ def test_independent_customer_availability_and_operator_activity():
     assert operational_state(connectors) == ("available", "unknown")
     connectors[0].status = "Unavailable"
     assert operational_state(connectors) == ("available", "inactive")
+
+
+def test_status_table_has_independent_connector_columns(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_connector_status(
+        "charger-a", {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:01:00Z"},
+    )
+    events.record_connector_status(
+        "charger-a", {"connector_id": 2, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
+    )
+    from ocpp_csms.runtime import write_pid
+    write_pid(tmp_path)
+    data = appliance_status(tmp_path)
+    text = format_status(data)
+    assert "Status C1" in text and "Status C2" in text
+    assert "Charging" in text and "Available" in text
+
+
+def test_unreported_connector_defaults_independently(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_connector_status(
+        "charger-a", {"connector_id": 1, "status": "Faulted", "timestamp": "2026-10-01T15:01:00Z"},
+    )
+    _start(events, 2)
+    from ocpp_csms.runtime import write_pid
+    write_pid(tmp_path)
+    data = appliance_status(tmp_path)
+    connector = {c.connector_id: c for c in data["chargers"][0].connectors}
+    assert connector[1].derived_status == "Faulted"
+    assert connector[2].derived_status == "Unknown"
+    assert "Status C2" in format_status(data)
+
+
+def test_no_fabricated_second_connector(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_connector_status(
+        "charger-a", {"connector_id": 1, "status": "Available", "timestamp": "2026-10-01T15:00:00Z"},
+    )
+    text = format_status(appliance_status(tmp_path))
+    assert "Status C1" in text
+    assert "Status C2" not in text
