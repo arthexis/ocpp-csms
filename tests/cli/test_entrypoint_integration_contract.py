@@ -1,4 +1,4 @@
-"""A5.3: CLI entrypoint integration contracts without runtime changes."""
+"""CLI entrypoint integration contracts without runtime changes."""
 from __future__ import annotations
 
 import json

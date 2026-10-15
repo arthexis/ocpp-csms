@@ -39,7 +39,7 @@ def config_diff_harness(monkeypatch, tmp_path):
         return str(path)
     def arguments(*paths, charger=None, json_output=True):
         return SimpleNamespace(items=["diff", *paths], charger=charger,
-                               data_dir=str(tmp_path), force=False, json=json_output)
+                               data_dir=str(tmp_path), json=json_output)
     return send, write, arguments
 
 
@@ -60,7 +60,7 @@ def test_single_file_queries_charger(config_diff_harness, capsys, tmp_path):
     ]}}
     args = arguments(write("baseline.json", "30"))
     assert run_config_diff(args) == 1
-    send.assert_awaited_once_with(str(tmp_path), {"command": "config", "charger": "CP1", "force": False})
+    send.assert_awaited_once_with(str(tmp_path), {"command": "config", "charger": "CP1"})
     output = capsys.readouterr().out
     assert "secretB" not in output
     assert json.loads(output)["mode"] == "live"
@@ -70,7 +70,7 @@ def test_diff_rejects_invalid_snapshot(tmp_path):
     path = tmp_path / "bad.json"
     path.write_text('{"configuration":{}}', encoding="utf-8")
     args = SimpleNamespace(items=["diff", str(path), str(path)], charger=None,
-                           data_dir=str(tmp_path), force=False, json=False)
+                           data_dir=str(tmp_path), json=False)
     with pytest.raises(ValueError, match="invalid configuration snapshot"):
         run_config_diff(args)
 

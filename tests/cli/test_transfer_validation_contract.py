@@ -1,4 +1,4 @@
-"""A4d D3: shared transfer validation preserves existing command error contracts."""
+"""shared transfer validation preserves existing command error contracts."""
 from __future__ import annotations
 
 from types import SimpleNamespace

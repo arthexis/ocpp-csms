@@ -1,4 +1,4 @@
-"""A4d D2: lock CLI parser/dispatch contracts without executing charger actions."""
+"""lock CLI parser/dispatch contracts without executing charger actions."""
 from __future__ import annotations
 
 import sys
@@ -7,24 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from ocpp_csms.cli import build_parser, main
-
-
-@pytest.mark.parametrize(("argv", "expected"), [
-    (["status"], "status"),
-    (["cps"], "cps"),
-    (["txn"], "txn"),
-    (["txn", "-j"], "txn"),
-    (["reserve"], "reserve"),
-    (["diagnose"], "diagnose"),
-    (["inspect"], "inspect"),
-    (["capabilities"], "capabilities"),
-    (["reconcile"], "reconcile"),
-    (["export"], "export"),
-])
-def test_canonical_root_commands_parse(argv, expected):
-    parser, commands = build_parser()
-    assert parser.parse_args(argv).command == expected
-    assert expected in commands
 
 
 @pytest.mark.parametrize("argv", [

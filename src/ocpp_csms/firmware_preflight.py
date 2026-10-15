@@ -80,7 +80,7 @@ async def preflight(data_dir, cp, *, location=None, query_capability=True, timeo
         try:
             response = await asyncio.wait_for(
                 send_control(data_dir, {"command": "config", "charger": cp,
-                                         "keys": ["SupportedFeatureProfiles"], "force": True}),
+                                         "keys": ["SupportedFeatureProfiles"]}),
                 timeout=timeout,
             )
             if not isinstance(response, dict) or response.get("error") or not isinstance(response.get("response"), dict):
