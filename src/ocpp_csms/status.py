@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
 
@@ -81,6 +82,8 @@ def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | N
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
+        "schema_compiled": CURRENT_SCHEMA_VERSION,
+        "schema_database": None,
         "transactions": "missing",
         "server": "running" if running else "stopped",
         "started_at": None,
@@ -102,6 +105,7 @@ def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | N
         try:
             with (nullcontext(connection) if connection is not None else _connect(database)) as db:
                 version = int(db.execute("PRAGMA user_version").fetchone()[0])
+                result["schema_database"] = version
                 if version < 2:
                     result["database"] = "upgrade-needed"
                 else:
@@ -348,6 +352,8 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         f"CSMS: {data.get('server', 'unknown')}",
         f"Started: {data.get('started_at') or '-'}",
         f"Database: {data.get('database', 'unknown')}",
+        f"Schema (code): {data.get('schema_compiled', CURRENT_SCHEMA_VERSION)}",
+        f"Schema (database): {data.get('schema_database') if data.get('schema_database') is not None else '-'}",
         f"JSON archive: {data.get('transactions', 'unknown')}",
         (
             "RFID authorization: Allow All"

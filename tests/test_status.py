@@ -200,3 +200,31 @@ def test_available_status_supersedes_historical_open_for_charging_filter(tmp_pat
     assert data["active_chargers"] == []
     assert data["chargers"][0].status == "Available"
     assert "charger-a" not in format_status(data, charging_only=True)
+
+
+def test_status_displays_compiled_and_database_schema(tmp_path: Path):
+    import sqlite3
+
+    from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
+    from ocpp_csms.status_contract import status_contract
+
+    missing = appliance_status(tmp_path)
+    assert missing["schema_compiled"] == CURRENT_SCHEMA_VERSION
+    assert missing["schema_database"] is None
+    assert "Schema (database): -" in format_status(missing)
+    assert status_contract(missing)["data"]["storage"]["schema_database"] is None
+
+    EventStore(tmp_path)
+    current = appliance_status(tmp_path)
+    assert current["schema_database"] == CURRENT_SCHEMA_VERSION
+    assert f"Schema (code): {CURRENT_SCHEMA_VERSION}" in format_status(current)
+    assert f"Schema (database): {CURRENT_SCHEMA_VERSION}" in format_status(current)
+
+    with sqlite3.connect(tmp_path / "ocpp-csms.sqlite3") as db:
+        db.execute("PRAGMA user_version = 6")
+    different = appliance_status(tmp_path)
+    assert different["schema_compiled"] == CURRENT_SCHEMA_VERSION
+    assert different["schema_database"] == 6
+    assert "Schema (database): 6" in format_status(different)
+    assert status_contract(different)["data"]["storage"]["schema_compiled"] == CURRENT_SCHEMA_VERSION
+    assert status_contract(different)["data"]["storage"]["schema_database"] == 6
