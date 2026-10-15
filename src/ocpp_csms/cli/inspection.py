@@ -45,7 +45,7 @@ def _features(response):
 
 def capability_request(charger=None):
     """Read-only OCPP GetConfiguration query shared by inspection views."""
-    request = {"command": "config", "keys": ["SupportedFeatureProfiles"], "force": True}
+    request = {"command": "config", "keys": ["SupportedFeatureProfiles"]}
     if charger:
         request["charger"] = charger
     return request
