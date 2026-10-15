@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
-from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage, activate_schema, restore_schema
+from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage, activate_schema
 from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
@@ -184,10 +184,6 @@ def _parser() -> argparse.ArgumentParser:
     activate.add_argument("--storage-root", required=True)
     activate.add_argument("--target", required=True)
 
-    restore = subcommands.add_parser("storage-restore")
-    restore.add_argument("--storage-root", required=True)
-    restore.add_argument("--target", required=True)
-
     checkpoint = subcommands.add_parser("storage-checkpoint")
     checkpoint.add_argument("--data-dir", required=True)
 
@@ -228,10 +224,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "storage-activate":
             print(str(activate_schema(args.storage_root, args.target)))
-            return 0
-        if args.command == "storage-restore":
-            restore_schema(args.storage_root, args.target)
-            print("ok")
             return 0
         if args.command == "storage-checkpoint":
             checkpoint_stopped_storage(args.data_dir)
