@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from .protocols import Session, SessionRegistry
-from ocpp_csms.occupancy import BUSY_STATUSES
 
 def _response_payload(response: Any) -> dict[str, Any]:
     payload = getattr(response, "__dict__", None)
@@ -213,18 +212,6 @@ async def _send_rfid_list(
     return result
 
 
-def _occupancy(registry: SessionRegistry, charger: str, connector: int | None) -> tuple[list[int], list[str]]:
-    """Return busy connectors and warnings; historical opens are not occupancy."""
-    statuses = registry.connector_occupancy(charger)
-    ids = [connector] if connector is not None and connector > 0 else registry.physical_connector_ids(charger)
-    if not ids:
-        return [], ["Connector occupancy unknown; command sent without confirmed availability"]
-    busy = [cid for cid in ids if statuses.get(cid) in BUSY_STATUSES]
-    unknown = [cid for cid in ids if cid not in statuses]
-    warnings = [f"Connector {cid} occupancy unknown since connection; proceeding" for cid in unknown]
-    return busy, warnings
-
-
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     if not isinstance(command, str) or not command:
@@ -239,14 +226,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
 
-    warnings: list[str] = []
-    if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
-        target = request.get("connector") if command == "start" else None
-        busy, warnings = _occupancy(registry, charger, target)
-        if command == "start" and (target is None or target == 0):
-            ids = registry.physical_connector_ids(charger)
-            if ids and len(busy) < len(ids):
-                busy = []
     try:
         if command == "data_transfer":
             vendor_id = request.get("vendor_id")
@@ -315,8 +294,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_retries"}
             if retry_interval is not None and not _non_negative_int(retry_interval):
                 return {"error": "invalid_retry_interval"}
-            if when < datetime.now(timezone.utc) and not request.get("immediate"):
-                return {"error": "retrieve_date_in_past"}
             if not isinstance(request.get("immediate"), bool):
                 return {"error": "invalid_immediate"}
             response = await session.update_firmware(
@@ -508,9 +485,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     except Exception as exc:
         return {"error": "command_failed", "detail": str(exc)}
 
-    result = {"ok": True, "response": _response_payload(response)}
-    if warnings:
-        result["warnings"] = warnings
-    return result
+    return {"ok": True, "response": _response_payload(response)}
 
 
