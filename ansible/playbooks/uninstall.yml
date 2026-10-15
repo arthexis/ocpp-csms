@@ -68,7 +68,7 @@
         ocpp_uninstall_nginx_sites: "{{ (ocpp_uninstall_nginx_sites | default([])) + [item.item.path | basename] }}"
       loop: "{{ ocpp_uninstall_nginx_contents.results | default([]) }}"
       when:
-        - "'proxy_pass http://127.0.0.1:{{ 9000 }};' in (item.content | b64decode)"
+        - "'proxy_pass http://127.0.0.1:' in (item.content | b64decode)"
         - "'/var/www/ocpp-csms-acme' in (item.content | b64decode)"
         - "not (item.item.path | basename).startswith('.')"
       no_log: true
@@ -106,6 +106,21 @@
         name: nginx
         state: reloaded
       when: ocpp_uninstall_nginx_removed.changed | default(false)
+
+    - name: Check active Discover redirect table
+      become: true
+      ansible.builtin.command:
+        argv: [nft, list, table, ip, ocpp_field_redirect]
+      register: ocpp_uninstall_live_redirect
+      changed_when: false
+      failed_when: false
+
+    - name: Remove active Discover-owned redirect table
+      become: true
+      ansible.builtin.command:
+        argv: [nft, delete, table, ip, ocpp_field_redirect]
+      when: ocpp_uninstall_live_redirect.rc == 0
+      changed_when: true
 
     - name: Check Discover persistent integration
       become: true
