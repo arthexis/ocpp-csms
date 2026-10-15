@@ -29,22 +29,3 @@ def has_committed_ocpp_evidence(data_dir: str | Path) -> bool:
     except sqlite3.Error as exc:
         raise RuntimeError(f"candidate evidence inspection uncertain: {exc}") from exc
 
-
-def evidence_watermark(data_dir: str | Path) -> dict[str, int]:
-    """Capture committed row counts at a stopped-writer boundary.
-
-    A mismatch (including deletions) is unsafe for automatic rollback.
-    """
-    path = Path(data_dir).expanduser() / DATABASE_FILENAME
-    if not path.is_file():
-        raise RuntimeError(f"database missing: {path}")
-    try:
-        with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=0.2)) as db:
-            db.execute("PRAGMA query_only = ON")
-            db.execute("PRAGMA busy_timeout = 200")
-            return {
-                table: int(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-                for table in ("events", "transactions", "connector_status", "start_identities", "runtime_events")
-            }
-    except sqlite3.Error as exc:
-        raise RuntimeError(f"evidence watermark uncertain: {exc}") from exc
