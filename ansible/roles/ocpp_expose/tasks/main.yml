@@ -4,9 +4,8 @@
     that:
       - ocpp_csms_expose is match('^[a-z0-9]+([.-][a-z0-9]+)*$')
       - "'.' in ocpp_csms_expose"
-      - ocpp_csms_host == '127.0.0.1'
       - ocpp_csms_port | int > 0
-    fail_msg: Expose requires valid FQDN and 127.0.0.1 CSMS backend.
+    fail_msg: Expose requires a valid FQDN and CSMS upstream port.
 
 - name: Verify Basic credentials are configured
   ansible.builtin.command:
