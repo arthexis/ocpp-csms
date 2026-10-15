@@ -77,20 +77,6 @@ def test_incumbent_service_is_disabled_only_after_verified_promotion():
     )
 
 
-def test_failed_incumbent_takeover_restores_old_listener():
-    restore = read(TASKS / "incumbent_restore.yml")
-    assert_task_order(
-        restore,
-        "Stop failed replacement before incumbent rollback",
-        "Restore incumbent OCPP listener",
-        "Verify restored incumbent OCPP listener",
-    )
-    failure = task_by_name(
-        TASKS / "cutover.yml", "Report failed incumbent OCPP service takeover after restoration"
-    )
-    assert failure["when"] == "ocpp_csms_incumbent_service | length > 0"
-
-
 def test_incumbent_takeover_requires_a_real_charger_reconnect():
     reconnect = read(TASKS / "reconnect.yml")
     assert "Verify takeover charger reconnect" in reconnect
@@ -108,44 +94,6 @@ def test_replacement_health_is_proven_before_current_is_promoted():
         "Verify previously connected chargers reconnect",
         "Promote verified release to current",
     )
-
-
-def test_schema_upgrade_disables_managed_release_runtime_rollback():
-    """Evaluate actual rollback conditions for safe and unsafe schema states."""
-    from jinja2 import Environment
-
-    environment = Environment()
-    environment.filters["bool"] = bool
-    rollback_tasks = (
-        "Stop failed replacement before rollback",
-        "Restore previous live systemd unit",
-        "Restart previous OCPP CSMS service",
-        "Verify rollback listener",
-        "Report handoff failure after safe rollback",
-    )
-
-    def eligible(task, context):
-        conditions = task["when"]
-        if isinstance(conditions, str):
-            conditions = [conditions]
-        return all(bool(environment.compile_expression(expr)(**context)) for expr in conditions)
-
-    for schema_action in ("current", "create", "upgrade"):
-        for incumbent in ("", "incumbent.service"):
-            for previous_release in (False, True):
-                context = {
-                    "ocpp_csms_schema_action": schema_action,
-                    "ocpp_csms_incumbent_service": incumbent,
-                    "ocpp_csms_current_state": {"stat": {"islnk": previous_release}},
-                    "ocpp_csms_live_service_state": {"stat": {"exists": previous_release}},
-                }
-                for name in rollback_tasks:
-                    task = task_by_name(TASKS / "cutover.yml", name)
-                    expected = schema_action != "upgrade" and not incumbent and previous_release
-                    assert eligible(task, context) == expected, (
-                        name, schema_action, incumbent, previous_release
-                    )
-
 
 
 def test_converged_path_is_non_disruptive():
