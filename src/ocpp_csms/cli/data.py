@@ -23,7 +23,7 @@ def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.Argume
     reset = operations.add_parser("reset", help="Archive all test data and initialize clean storage")
     target = reset.add_mutually_exclusive_group(required=True)
     target.add_argument("--all", action="store_true", help="Archive and reset the entire application data directory")
-    target.add_argument("--cp", metavar="NAME", help="Archive and remove records for only this charge-point identity")
+    target.add_argument("--cp", metavar="NAME", help="Delete records for only this charge-point identity")
     mode = reset.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Check safety without modifying files (default)")
     mode.add_argument("--now", action="store_true", help="Required for offline --all reset; optional compatibility flag for --cp")
@@ -76,88 +76,67 @@ def _remove_cp_from_copy(root: Path, cp: str) -> None:
     # Keep unrelated data and stable source identity intact.
 
 def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
-    """Archive and remove one disconnected CP without replacing the live database.
+    """Idempotently delete only the selected disconnected charge point's evidence.
 
-    Called synchronously on the server event loop to prevent a CP from being
-    admitted or producing another frame during the critical section.
+    The server gates new connections for this identity while this runs.
+    Retrying after interruption completes remaining deletes.
     """
     from ocpp_csms.schema import inspect_schema, require_supported_schema
     root = Path(data_dir).expanduser().absolute()
-    if (not cp or cp.strip() != cp or "/" in cp or "\\x00" in cp):
+    if not cp or cp.strip() != cp or "/" in cp or "\\x00" in cp:
         raise ValueError("invalid charge-point identity")
     if root.is_symlink() or not root.is_dir():
         raise ValueError("unsafe data directory")
     info = inspect_schema(root)
     require_supported_schema(info)
-    if any(p.is_symlink() for folder in ("transactions", "transactions-unresolved")
-           for p in (root / folder).rglob("*")):
-        raise ValueError("symlinked evidence: reset refused")
-    backup_parent = root.parent / (root.name + "-test-backups")
-    if backup_parent.is_symlink():
-        raise ValueError("unsafe backup directory")
-    backup_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(backup_parent, 0o700)
-    backup = backup_parent / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex[:8])
-    backup.mkdir(mode=0o700)
-    moved = []
-    try:
-        with closing(sqlite3.connect(info.path, timeout=5)) as db:
-            db.execute("PRAGMA foreign_keys=ON")
-            # SQLite backup establishes a consistent snapshot before write locking.
-            with closing(sqlite3.connect(backup / info.path.name)) as snapshot:
-                db.backup(snapshot)
-            db.execute("BEGIN IMMEDIATE")
+    selected = []
+    for folder in ("transactions", "transactions-unresolved"):
+        parent = root / folder
+        if not parent.exists():
+            continue
+        for path in parent.rglob("*"):
+            if path.is_symlink():
+                raise ValueError("symlinked evidence: reset refused")
+            if path.suffix != ".json" or not path.is_file():
+                continue
             try:
-                active = db.execute(
-                    "SELECT transaction_id FROM transactions WHERE charger_id=? "
-                    "AND state NOT IN ('stopped', 'complete', 'completed') LIMIT 1", (cp,)
-                ).fetchone()
-                if active:
-                    raise ValueError("charge point has an open transaction; reset refused")
-                selected = []
-                for folder in ("transactions", "transactions-unresolved"):
-                    parent = root / folder
-                    if not parent.exists():
-                        continue
-                    for path in parent.rglob("*.json"):
-                        record = json.loads(path.read_text(encoding="utf-8"))
-                        if not isinstance(record, dict) or not isinstance(record.get("charge_point_id"), str):
-                            raise ValueError("ambiguous transaction evidence: reset refused")
-                        if record["charge_point_id"] == cp:
-                            selected.append(path)
-                for path in selected:
-                    destination = backup / path.relative_to(root)
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    path.rename(destination)
-                    moved.append((path, destination))
-                ids = [row[0] for row in db.execute(
-                    "SELECT transaction_id FROM transactions WHERE charger_id=?", (cp,)
-                )]
-                if ids:
-                    marks = ",".join("?" for _ in ids)
-                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
-                        db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({marks})", ids)
-                    db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({marks})", ids)
-                db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
-                           "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
-                for table in ("events", "runtime_events", "connector_status", "rfid_lists", "transactions"):
-                    db.execute(f"DELETE FROM {table} WHERE charger_id=?", (cp,))
-                if db.execute("PRAGMA foreign_key_check").fetchone():
-                    raise ValueError("foreign key violation: reset refused")
-                db.commit()
-            except Exception:
-                db.rollback()
-                for original, stored in reversed(moved):
-                    original.parent.mkdir(parents=True, exist_ok=True)
-                    stored.rename(original)
-                raise
-        return {"decision": "reset", "scope": "cp", "cp": cp,
-                "backup": str(backup), "data_dir": str(root),
-                "preserve": "other charge points, allocator and authentication"}
-    except Exception:
-        # Keep an existing backup for forensic inspection.
-        raise
-
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ValueError("unreadable transaction evidence: reset refused") from exc
+            if not isinstance(record, dict) or not isinstance(record.get("charge_point_id"), str):
+                raise ValueError("ambiguous transaction evidence: reset refused")
+            if record["charge_point_id"] == cp:
+                selected.append(path)
+    with closing(sqlite3.connect(info.path, timeout=5)) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if db.execute("SELECT 1 FROM transactions WHERE charger_id=? "
+                          "AND state NOT IN ('stopped', 'complete', 'completed') LIMIT 1", (cp,)).fetchone():
+                raise ValueError("charge point has an open transaction; reset refused")
+            ids = [row[0] for row in db.execute(
+                "SELECT transaction_id FROM transactions WHERE charger_id=?", (cp,))]
+            if ids:
+                marks = ",".join("?" for _ in ids)
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
+                    db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({marks})", ids)
+                db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({marks})", ids)
+            db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
+                       "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
+            for table in ("events", "runtime_events", "connector_status", "rfid_lists", "transactions"):
+                db.execute(f"DELETE FROM {table} WHERE charger_id=?", (cp,))
+            if db.execute("PRAGMA foreign_key_check").fetchone():
+                raise ValueError("foreign key violation: reset refused")
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    # A crash here leaves some JSON behind; the next invocation removes it.
+    for path in selected:
+        path.unlink(missing_ok=True)
+    return {"decision": "reset", "scope": "cp", "cp": cp,
+            "deleted_json": len(selected), "data_dir": str(root),
+            "preserve": "other charge points, allocator and authentication"}
 
 def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | None = None, now: bool = False) -> dict:
     if all_data == (cp is not None):
