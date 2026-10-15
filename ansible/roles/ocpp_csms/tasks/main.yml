@@ -424,6 +424,13 @@
     - ocpp_csms_tls_config_stat.stat.exists | default(false)
     - ocpp_csms_tls_enablement.stdout == 'enabled'
 
+- name: Inspect versioned storage plan for staged handoff
+  ansible.builtin.include_tasks: storage_plan.yml
+
+- name: Select candidate service storage directory
+  ansible.builtin.set_fact:
+    ocpp_csms_service_data_dir: "{{ ocpp_csms_storage_selection.target }}"
+
 - name: Render candidate OCPP CSMS systemd unit
   ansible.builtin.template:
     src: ocpp-csms.service.j2
@@ -437,13 +444,6 @@
       - verify
       - "{{ ocpp_csms_candidate_service_path }}"
   changed_when: false
-
-- name: Inspect versioned storage plan for staged handoff
-  ansible.builtin.include_tasks: storage_plan.yml
-
-- name: Select candidate service storage directory
-  ansible.builtin.set_fact:
-    ocpp_csms_service_data_dir: "{{ ocpp_csms_storage_selection.target }}"
 
 # Prepare a fresh schema candidate only for a real handoff. Staging must
 # never create storage; no database activation pointer exists.
