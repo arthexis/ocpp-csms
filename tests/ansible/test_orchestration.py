@@ -158,10 +158,6 @@ def test_candidate_unit_is_staged_and_verified_before_handoff():
     assert verify["ansible.builtin.command"]["argv"][0] == "systemd-analyze"
 
 
-def test_candidate_runs_from_immutable_release():
-    template = read(DEFAULTS.parent.parent / "templates" / "ocpp-csms.service.j2")
-
-
 def test_initialized_storage_is_validated_before_service_start():
     cutover = read(TASKS / "cutover.yml")
     assert_task_order(
