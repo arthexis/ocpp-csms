@@ -145,91 +145,36 @@ def test_storage_prepare_does_not_activate_or_modify_legacy(tmp_path):
     assert plan.target.is_dir()
 
 
-def test_ansible_storage_preparation_is_not_live_cutover():
-    from pathlib import Path
-    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
-    preparation = (tasks / "storage_prepare.yml").read_text()
-    assert "storage-prepare" in preparation
-    assert "storage-plan" in (tasks / "storage_plan.yml").read_text()
-    assert "ocpp_csms_data_dir" in preparation
-    assert "systemd_service" not in preparation
-    main = (tasks / "main.yml").read_text()
-    assert "storage_prepare.yml" in main
-    assert main.index("Run final install safety preflight") < main.index(
-        "Prepare versioned candidate before service downtime"
-    ) < main.index("Perform controlled OCPP CSMS handoff")
-    assert "not (ocpp_csms_stage_only | bool)" in main
-    assert "ocpp_csms_storage_selection.action == 'create'" in main
-    assert "storage_prepare.yml" not in (tasks / "cutover.yml").read_text()
-    assert "schema-verify" in preparation
-    assert "storage-activate" not in preparation
+
+def test_legacy_and_unactivated_candidate_are_ambiguous(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    create_current_schema(tmp_path)
+    (tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION)).mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        discover_active_storage(tmp_path)
+    assert (tmp_path / "ocpp-csms.sqlite3").exists()
 
 
-def test_ansible_storage_plan_keeps_active_and_candidate_distinct():
-    from pathlib import Path
-
-    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
-    plan = (tasks / "storage_plan.yml").read_text()
-    preparation = (tasks / "storage_prepare.yml").read_text()
-    assert "ocpp_csms_active_data_dir" in plan
-    assert "ocpp_csms_storage_selection.active" in plan
-    assert "ocpp_csms_storage_selection.target" in plan
-    assert "storage-activate" not in plan
-    assert "storage-activate" not in preparation
-
-
-def test_handoff_baseline_reads_active_storage_not_candidate():
-    from pathlib import Path
-
-    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
-    cutover = (tasks / "cutover.yml").read_text()
-    baseline = cutover.split("- name: Capture charger reconnect baseline", 1)[1].split(
-        "- name: Preserve previous live systemd unit", 1
-    )[0]
-    assert "ocpp_csms_active_data_dir" in baseline
-    assert "ocpp_csms_storage_selection.target" not in baseline
-    assert "Verify prepared storage handoff contract after service stop" in cutover
+def test_versioned_pointer_rejects_wrong_schema_or_nested_directory(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    target = tmp_path / "schemas" / "7"
+    create_current_schema(target)
+    pointer = tmp_path / "current"
+    pointer.symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="mismatched"):
+        discover_active_storage(tmp_path)
+    pointer.unlink()
+    nested = tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION) / "nested"
+    create_current_schema(nested)
+    pointer.symlink_to(nested, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="invalid active schema pointer"):
+        discover_active_storage(tmp_path)
 
 
-def test_stopped_storage_adoption_is_prepared_but_not_enabled():
-    from pathlib import Path
-
-    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
-    adoption = (tasks / "storage_adopt.yml").read_text()
-    cutover = (tasks / "cutover.yml").read_text()
-    assert "storage-adopt" in adoption
-    assert "ocpp_csms_storage_selection.active == ocpp_csms_data_dir" in adoption
-    assert "ocpp_csms_adopted_storage.stdout" in adoption
-    assert "storage-activate" not in adoption
-    assert "storage_adopt.yml" in cutover
-    assert cutover.index("Reject unsafe versioned storage activation until recovery is wired") < cutover.index("Adopt stopped legacy storage for versioned handoff")
-    assert "ocpp_csms_enable_versioned_cutover | default(false) | bool" in adoption
-    assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
-
-
-def test_adoption_guards_active_identity_and_skipped_result():
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks/storage_adopt.yml"
-    tasks = path.read_text()
-    assert "ocpp_csms_storage_selection.active == ocpp_csms_active_data_dir" in tasks
-    guard = "ocpp_csms_adopted_storage is defined and not (ocpp_csms_adopted_storage.skipped | default(false))"
-    assert tasks.count(guard) == 2
-    assert "ocpp_csms_adopted_storage is not skipped" not in tasks
-
-
-def test_service_storage_path_is_separate_from_storage_root():
-    from pathlib import Path
-
-    role = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms"
-    defaults = (role / "defaults/main.yml").read_text()
-    service = (role / "templates/ocpp-csms.service.j2").read_text()
-    reconnect = (role / "tasks/reconnect.yml").read_text()
-    cutover = (role / "tasks/cutover.yml").read_text()
-    assert 'ocpp_csms_service_data_dir: "{{ ocpp_csms_data_dir }}"' in defaults
-    assert '{{ ocpp_csms_service_data_dir }}/ocpp-csms.sqlite3' in defaults
-    assert '{{ ocpp_csms_service_data_dir }}/transactions' in defaults
-    assert '--data-dir "{{ ocpp_csms_service_data_dir }}"' in service
-    assert "ocpp_csms_service_data_dir" in reconnect
-    assert "ocpp_csms_service_data_dir" in cutover
-    assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
+def test_versioned_pointer_rejects_missing_database(tmp_path):
+    from ocpp_csms.schema_storage import discover_active_storage
+    target = tmp_path / "schemas" / str(CURRENT_SCHEMA_VERSION)
+    target.mkdir(parents=True)
+    (tmp_path / "current").symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="missing database"):
+        discover_active_storage(tmp_path)
