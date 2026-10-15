@@ -188,9 +188,9 @@ ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
 ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
-ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG] [--now|--after SECONDS|--within SECONDS]
-ocpp-csms txn stop ID [--now|--after SECONDS|--within SECONDS]
-ocpp-csms reset CHARGER [--hard] (--now|--after SECONDS|--within SECONDS)
+ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG]
+ocpp-csms txn stop ID
+ocpp-csms reset CHARGER [--hard]
 ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
@@ -230,7 +230,7 @@ ocpp-csms rfid cache clear [--cp CP001]
 
 ### Transactions and events
 
-`txn start` and `txn stop ID` are the canonical remote control operations, with `--now` assumed unless `--after` or `--within` is supplied. Transaction stop requires a positional ID. `txn ID`, `txn --active`, and other history queries remain unchanged.
+`txn start` and `txn stop ID` are the canonical remote control operations, with immediate dispatch. Transaction stop requires a positional ID. `txn ID`, `txn --active`, and other history queries remain unchanged.
 
 
 `txn` exposes transaction history and active/last transaction views. `events` exposes recorded runtime and OCPP evidence, while `explain` provides a time-centered diagnostic view for a charger. Event-specific `--txn` filters are unchanged.
@@ -273,10 +273,10 @@ Optional `--parent-rfid` maps to `parentIdTag`. Requests and responses use the e
 
 ### Firmware management (OCPP 1.6J)
 
-`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` and one of `--now` or `--at` are required.
+`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` is required; retrieval is immediate by default, or scheduled with `--at`.
 
 ```bash
-ocpp-csms firmware update --location https://example.org/fw.bin --now --confirm
+ocpp-csms firmware update --location https://example.org/fw.bin --confirm
 ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T03:00:00Z --confirm
 ocpp-csms firmware status --cp CP001
 ocpp-csms firmware history --cp CP001 --since 7d
@@ -365,12 +365,9 @@ Remote commands are sent only to chargers connected to the current CSMS process 
 
 Remote start, stop, and reset commands require one timing mode:
 
-- `--now` attempts the command immediately.
-- `--after SECONDS` waits exactly that long before evaluating execution conditions and attempting the command.
-- `--within SECONDS` attempts immediately when unblocked; if an active transaction blocks a start or reset, it waits up to that many seconds for charging to stop before proceeding.
-- Remote stop is not blocked by an active transaction, so `--within` behaves like immediate execution for stop while `--after` still delays it.
+Control commands are dispatched immediately to connected chargers. Known busy-connector safety checks remain in effect; there is no delayed or queued execution.
 
-Start and reset are rejected while the selected charger has an active transaction. For `--after`, that check is intentionally made only after the delay expires. These waits live in the running CSMS control service; they do not turn disconnected chargers into queued targets.
+Start and reset are rejected while the selected charger has an active transaction. No waiting or scheduling is performed by the control service.
 
 ### Smart Charging
 
@@ -824,8 +821,8 @@ ocpp-csms firmware check --cp CP001 --offline --json
 Firmware updates require `--confirm` and exactly one explicit timing option:
 
 ```bash
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --now --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --after 3600 --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-16T03:00:00Z --confirm
 ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T18:00:00Z --confirm
 ```
 
