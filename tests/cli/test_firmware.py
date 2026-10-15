@@ -9,9 +9,8 @@ from ocpp_csms.control.dispatch import dispatch_control
 NOW = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
 
 @pytest.mark.parametrize("timing,expected_date,immediate", [
-    (("--now",), NOW, True),
+    ((,), NOW, True),
     (("--at", (NOW + timedelta(days=1)).isoformat()), NOW + timedelta(days=1), False),
-    (("--after", "3600"), NOW + timedelta(hours=1), False),
 ])
 def test_firmware_timing_contract(parse_cli, timing, expected_date, immediate):
     args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
@@ -22,9 +21,8 @@ def test_firmware_timing_contract(parse_cli, timing, expected_date, immediate):
 
 
 @pytest.mark.parametrize("args", [
-    ("--now",),
+    (,),
     ("--at", "2026-10-11T12:00:00Z"),
-    ("--after", "60"),
 ])
 def test_confirmation_required(args, parse_cli):
     with pytest.raises(ValueError, match="confirm"):
@@ -33,7 +31,7 @@ def test_confirmation_required(args, parse_cli):
 @pytest.mark.parametrize("url", ["file:///tmp/a", "not-a-url", "https://", "https://host/a#frag"])
 def test_invalid_url(url, parse_cli):
     with pytest.raises(ValueError):
-        firmware_request(parse_cli("firmware", "update", "--location", url, "--now", "--confirm"), now=NOW)
+        firmware_request(parse_cli("firmware", "update", "--location", url, "--confirm"), now=NOW)
 
 def test_schedule_must_be_future(parse_cli):
     with pytest.raises(ValueError, match="future"):
@@ -59,26 +57,3 @@ async def test_dispatch_rejects_bad_retries():
             "retries": -1, "immediate": True})
     assert result["error"] == "invalid_retries"
 
-@pytest.mark.parametrize("seconds", ("0", "-1"))
-def test_delayed_request_requires_positive_seconds(parse_cli, seconds):
-    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                     "--after", seconds, "--confirm")
-    with pytest.raises(ValueError, match="--after"):
-        firmware_request(args, now=NOW)
-
-
-def test_firmware_update_requires_explicit_timing(parse_cli):
-    with pytest.raises(SystemExit):
-        parse_cli("firmware", "update", "--location", "https://example.org/fw.bin", "--confirm")
-
-
-def test_firmware_update_rejects_multiple_timing_flags(parse_cli):
-    with pytest.raises(SystemExit):
-        parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                  "--now", "--after", "3600", "--confirm")
-
-
-def test_delayed_request_also_requires_confirmation(parse_cli):
-    args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin", "--after", "60")
-    with pytest.raises(ValueError, match="confirm"):
-        firmware_request(args, now=NOW)
