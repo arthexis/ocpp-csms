@@ -6,21 +6,8 @@ ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
 
-# A takeover target is discovered from observed host-local OCPP traffic rather
-# than from a catalog of product-specific service names or ports. Keep the
-# observation window bounded so ordinary converged deploys remain predictable.
-ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
-ocpp_csms_incumbent_observe_seconds: 15
 ocpp_csms_stage_only: false
-ocpp_csms_force_handoff: false
-# Skip only post-start charger reconnection verification; retain all safety gates.
-ocpp_csms_offline: false
 ocpp_csms_dev: false
-ocpp_csms_install_mode: online
-ocpp_csms_bundle_path: ""
-ocpp_csms_bundle_source_dir: "{{ ocpp_csms_bundle_path }}/source"
-ocpp_csms_bundle_wheels_dir: "{{ ocpp_csms_bundle_path }}/wheels"
-ocpp_csms_bundle_manifest_path: "{{ ocpp_csms_bundle_path }}/manifest.yml"
 
 ocpp_csms_build_requirements:
   - "setuptools>=68"
@@ -73,13 +60,6 @@ ocpp_csms_service_data_dir: "{{ ocpp_csms_data_dir }}"
 ocpp_csms_database_path: "{{ ocpp_csms_service_data_dir }}/ocpp-csms.sqlite3"
 ocpp_csms_transactions_dir: "{{ ocpp_csms_service_data_dir }}/transactions"
 
-# The final preflight payload and reconnect markers bridge the safe staging
-# phase to post-start verification without recomputing which chargers mattered.
-ocpp_csms_final_preflight_path: "{{ ocpp_csms_prefix }}/preflight.final.json"
-ocpp_csms_reconnect_baseline_path: "{{ ocpp_csms_prefix }}/reconnect-baseline.json"
-
-# Preserve the live unit during activation so a schema-compatible failure can
-# restore both the previous release and its service configuration.
 ocpp_csms_previous_service_path: "{{ ocpp_csms_prefix }}/{{ ocpp_csms_service_name }}.previous"
 
 # Stage the candidate under a real systemd unit filename. systemd-analyze
@@ -90,10 +70,9 @@ ocpp_csms_candidate_service_path: "{{ ocpp_csms_candidate_dir }}/{{ ocpp_csms_se
 ocpp_csms_runtime_command: "{{ ocpp_csms_current_link }}/venv/bin/ocpp-csms"
 
 # Verification is local to the appliance even when the listener binds all
-# interfaces. Connected chargers get a separate fresh-reconnect verification.
+
 ocpp_csms_verify_host: "{{ '127.0.0.1' if ocpp_csms_host in ['0.0.0.0', '::'] else ocpp_csms_host }}"
 ocpp_csms_listener_timeout: 10
-ocpp_csms_reconnect_timeout: 30
 # Candidate Discover may still be finishing its bounded proof capture after the
 # CSMS has already observed the charger reconnect. Give durable ownership
 # promotion a separate window so the transient service is not killed mid-commit.
