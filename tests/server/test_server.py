@@ -112,7 +112,7 @@ async def test_connection_records_path_identity_and_subprotocol(monkeypatch, sub
         "charger_connected",
         "charger-a",
         {
-            "path": "/ocpp/charger-a?source=test",
+            "path": "/ocpp/charger-a",
             "charge_point_id": "charger-a",
             "subprotocol": expected,
         },

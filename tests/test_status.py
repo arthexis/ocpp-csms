@@ -228,3 +228,108 @@ def test_status_displays_compiled_and_database_schema(tmp_path: Path):
     assert "Schema (database): 6" in format_status(different)
     assert status_contract(different)["data"]["storage"]["schema_compiled"] == CURRENT_SCHEMA_VERSION
     assert status_contract(different)["data"]["storage"]["schema_database"] == 6
+
+
+def test_connected_charger_defaults_to_available_without_contrary_evidence(tmp_path: Path):
+    from ocpp_csms.status_contract import status_contract
+
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert charger.connected is True
+    assert charger.status is None  # No fabricated StatusNotification.
+    assert charger.derived_status == "Available"
+    assert charger.availability == "available"
+    assert charger.activity == "inactive"
+    assert "Available" in format_status(appliance_status(tmp_path))
+    assert "OCPP status: not reported" in format_status(appliance_status(tmp_path), charger_id="charger-a")
+    data = status_contract(appliance_status(tmp_path))["data"]["chargers"][0]
+    assert data["status"] is None
+    assert data["derived_status"] == "Available"
+
+
+def test_open_transaction_prevents_assumed_available(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.commit_start("charger-a", start_payload())
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert charger.status is None
+    assert charger.derived_status is None
+
+
+def test_disconnected_charger_is_not_assumed_available(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_runtime("charger_disconnected", charger_id="charger-a")
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert not charger.connected
+    assert charger.derived_status is None
+
+
+def test_status_last_seen_omits_microseconds_and_aligns_long_ids():
+    from ocpp_csms.status import ChargerStatus, format_status
+    charger = ChargerStatus(
+        charger_id="GSCSC0824110052X0124", connected=True,
+        connected_at=None, subprotocol=None,
+        last_seen="2026-10-15T15:44:42.476504Z",
+        status="Available", error_code=None,
+        transaction_id=None, id_tag=None, started_at=None, connectors=[],
+    )
+    lines = format_status({"chargers": [charger], "active_chargers": []}).splitlines()
+    header = next(line for line in lines if line.startswith("ID "))
+    record = next(line for line in lines if line.startswith(charger.charger_id))
+    assert header.index("Connected") == record.index("unknown")
+    assert "2026-10-15T15:44:42Z" in record
+    assert ".476504" not in record
+
+
+def test_timestamp_presentation_preserves_raw_evidence():
+    from ocpp_csms.status import display_timestamp
+    assert display_timestamp("2026-10-15T15:44:42.476504Z") == "2026-10-15T15:44:42Z"
+    assert display_timestamp("2026-10-15T15:44:42.476504+00:00") == "2026-10-15T15:44:42+00:00"
+    assert display_timestamp(None) == "-"
+
+
+def test_connected_duration_formats_seconds_minutes_hours_and_days():
+    from datetime import datetime, timedelta, timezone
+    from ocpp_csms.status import connected_duration
+
+    now = datetime(2026, 10, 15, 16, 0, tzinfo=timezone.utc)
+    def duration(seconds):
+        return connected_duration(True, (now - timedelta(seconds=seconds)).isoformat(), now=now)
+
+    assert duration(0) == "0s"
+    assert duration(59) == "59s"
+    assert duration(60) == "1m"
+    assert duration(3599) == "59m"
+    assert duration(3600) == "1h"
+    assert duration(3660) == "1h 1m"
+    assert duration(86400 + 40 * 60) == "1d 40m"
+    assert duration(86400 + 3600) == "1d 1h"
+    assert connected_duration(False, now.isoformat(), now=now) == "no"
+    assert connected_duration(True, None, now=now) == "unknown"
+
+
+def test_status_table_displays_connection_age_not_boolean():
+    from datetime import datetime, timedelta, timezone
+    from ocpp_csms.status import ChargerStatus, format_status
+
+    now = datetime.now(timezone.utc)
+    charger = ChargerStatus(
+        charger_id="charger-a", connected=True,
+        connected_at=(now - timedelta(minutes=40)).isoformat(),
+        subprotocol="ocpp1.6", last_seen=now.isoformat(),
+        status="Available", error_code=None, transaction_id=None,
+        id_tag=None, started_at=None, connectors=[],
+    )
+    line = next(line for line in format_status({"chargers": [charger], "active_chargers": []}).splitlines()
+                if line.startswith("charger-a"))
+    assert "40m" in line
+    assert "yes" not in line
