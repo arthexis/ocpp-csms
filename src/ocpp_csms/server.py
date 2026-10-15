@@ -73,6 +73,19 @@ class CSMSServer:
     events: EventStore
     _active_sessions: dict[str, ChargePointSession] = field(default_factory=dict, init=False, repr=False)
     _tls_listener: TLSListener | None = field(default=None, init=False, repr=False)
+    _resetting_charge_points: set[str] = field(default_factory=set, init=False, repr=False)
+
+    async def reset_cp_data(self, cp: str) -> dict:
+        if cp in self._resetting_charge_points:
+            raise ValueError("charge point reset already running")
+        if cp in self._active_sessions:
+            raise ValueError("charge point connected; disconnect before reset")
+        from ocpp_csms.cli.data import reset_live_cp
+        self._resetting_charge_points.add(cp)
+        try:
+            return await asyncio.to_thread(reset_live_cp, self.events.data_dir, cp)
+        finally:
+            self._resetting_charge_points.discard(cp)
 
     async def tls_control(self, action: str) -> dict[str, object]:
         if self._tls_listener is None:
@@ -188,6 +201,9 @@ class CSMSServer:
     async def accept(self, websocket: WebSocketServerProtocol) -> None:
         path = websocket.path
         charge_point_id = charge_point_id_from_path(path)
+        if charge_point_id in self._resetting_charge_points:
+            await websocket.close(code=1013, reason="Charge point maintenance")
+            return
         if not charge_point_id:
             await websocket.close(code=1008, reason="Missing charge point id")
             return

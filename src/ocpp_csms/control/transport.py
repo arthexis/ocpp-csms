@@ -74,7 +74,7 @@ class ControlServer:
                     response = {"error": "invalid_request"}
                 else:
                     command = request.get("command")
-                    if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
+                    if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable", "data_reset_cp"}:
                         sock = writer.get_extra_info("socket")
                         try:
                             raw = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
@@ -82,7 +82,7 @@ class ControlServer:
                             authorized = uid in (0, os.geteuid())
                         except (AttributeError, OSError, struct.error):
                             authorized = False
-                        response = await dispatch_control(self.registry, request) if authorized else {"error": "tls_permission_denied"}
+                        response = await dispatch_control(self.registry, request) if authorized else {"error": "data_reset_permission_denied" if command == "data_reset_cp" else "tls_permission_denied"}
                     else:
                         response = await dispatch_control(self.registry, request)
             writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
