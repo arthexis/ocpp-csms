@@ -152,5 +152,13 @@ def test_ansible_storage_preparation_is_not_live_cutover():
     assert "storage-plan" in preparation and "storage-prepare" in preparation
     assert "ocpp_csms_data_dir" in preparation
     assert "systemd_service" not in preparation
-    assert "storage_prepare.yml" not in (tasks / "main.yml").read_text()
+    main = (tasks / "main.yml").read_text()
+    assert "storage_prepare.yml" in main
+    assert main.index("Run final install safety preflight") < main.index(
+        "Prepare versioned candidate before service downtime"
+    ) < main.index("Perform controlled OCPP CSMS handoff")
+    assert "not (ocpp_csms_stage_only | bool)" in main
+    assert "ocpp_csms_storage_selection.action == 'create'" in main
     assert "storage_prepare.yml" not in (tasks / "cutover.yml").read_text()
+    assert "schema-verify" in preparation
+    assert "storage-activate" not in preparation
