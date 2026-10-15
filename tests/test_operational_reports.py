@@ -20,11 +20,11 @@ class OperationalReportTests(unittest.TestCase):
 
     def _transaction(self, tid, tag, start, stop):
         payload = {"connector_id": 1, "id_tag": tag, "meter_start": start,
-                   "timestamp": self.now.isoformat()}
-        self.store.record_transaction_start(tid, "CP001", payload)
+                   "timestamp": (self.now + timedelta(microseconds=tid)).isoformat()}
+        transaction_id = self.store.commit_start("CP001", payload)
         if stop is not None:
             self.store.record_transaction_stop("CP001", {
-                "transaction_id": tid, "meter_stop": stop,
+                "transaction_id": transaction_id, "meter_stop": stop,
                 "timestamp": (self.now + timedelta(minutes=10)).isoformat()
             })
 

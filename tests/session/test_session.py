@@ -65,38 +65,30 @@ def test_record_failure_logs_raw_frame(caplog):
 
 
 @pytest.mark.asyncio
-async def test_start_retry_keeps_identity_when_sqlite_is_locked(tmp_path):
+async def test_start_does_not_acknowledge_when_sqlite_is_locked(tmp_path):
     events = EventStore(tmp_path)
-    archive = TransactionArchive(tmp_path)
     session = ChargePointSession(
-        "charger-a",
-        SimpleNamespace(last_frame="start"),
-        archive,
-        events,
+        "charger-a", SimpleNamespace(last_frame="start"),
+        TransactionArchive(tmp_path), events,
     )
     payload = {
-        "connector_id": 1,
-        "id_tag": "card-a",
-        "timestamp": "2026-10-02T12:00:00Z",
-        "meter_start": 100,
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
     }
-
     lock = sqlite3.connect(tmp_path / DATABASE_FILENAME)
     lock.execute("BEGIN EXCLUSIVE")
     try:
-        first = await session.on_start_transaction(**payload)
-        retry = await session.on_start_transaction(**payload)
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            await session.on_start_transaction(**payload)
     finally:
         lock.rollback()
         lock.close()
-
-    assert first.transaction_id == 1
-    assert retry.transaction_id == first.transaction_id
-    assert len(transaction_records(tmp_path)) == 1
+    assert transaction_records(tmp_path) == []
+    assert event_directions(tmp_path, "StartTransaction") == []
 
 
 @pytest.mark.asyncio
-async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
+async def test_stop_and_meter_values_remain_orphan_evidence(tmp_path):
     session, recorded = make_session(tmp_path)
 
     meter = await session.on_meter_values(
@@ -111,14 +103,15 @@ async def test_stop_and_meter_values_recover_unknown_transaction(tmp_path):
 
     assert isinstance(meter, call_result.MeterValuesPayload)
     assert isinstance(stop, call_result.StopTransactionPayload)
-    records = transaction_records(tmp_path)
-    assert len(records) == 1
-    assert records[0]["transaction_id"] == 999
-    assert records[0]["status"] == "stopped"
-    assert [(entry[0], entry[2]) for entry in recorded] == [
-        ("MeterValues", "in"),
-        ("StopTransaction", "in"),
-    ]
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+        assert db.execute(
+            "SELECT transaction_id, state, started_at, meter_stop FROM transactions"
+        ).fetchall() == [(999, "stopped", None, 20)]
+        rows = db.execute("SELECT action, transaction_id, payload_json FROM events ORDER BY id").fetchall()
+    assert [(action, tid) for action, tid, _ in rows] == [("MeterValues", 999), ("StopTransaction", 999)]
+    assert json.loads(rows[0][2])["meter_value"][0]["timestamp"] == "2026-10-01T15:05:00Z"
+    assert json.loads(rows[1][2])["meter_stop"] == 20
+
 
 
 @pytest.mark.asyncio
@@ -169,3 +162,57 @@ async def test_failed_send_does_not_record_outbound_evidence(tmp_path):
         await session.route_message(raw)
 
     assert event_directions(tmp_path, "Heartbeat") == [("in",)]
+
+
+@pytest.mark.asyncio
+async def test_committed_start_survives_json_diagnostic_failure(tmp_path, monkeypatch):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    session = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="start"), archive, events,
+    )
+    async def broken_diagnostic(*args, **kwargs):
+        raise OSError("diagnostic storage unavailable")
+    monkeypatch.setattr(archive, "diagnostic_start", broken_diagnostic)
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
+    }
+    response = await session.on_start_transaction(**payload)
+    assert response.transaction_id == 1
+    with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+        assert db.execute("SELECT transaction_id FROM transactions WHERE charger_id = ?", ("charger-a",)).fetchone()[0] == 1
+    assert event_directions(tmp_path, "StartTransaction") == [("in",)]
+    assert transaction_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_start_commit_precedes_response_and_retry_survives_restart(tmp_path, monkeypatch):
+    events = EventStore(tmp_path)
+    archive = TransactionArchive(tmp_path)
+    session = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="start"), archive, events,
+    )
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "timestamp": "2026-10-02T12:00:00Z", "meter_start": 100,
+    }
+    observed = []
+    original = archive.diagnostic_start
+    async def inspect_committed(charger, start, transaction_id):
+        with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
+            assert db.execute("SELECT transaction_id FROM transactions WHERE charger_id = ?", (charger,)).fetchone()[0] == transaction_id
+        assert event_directions(tmp_path, "StartTransaction") == [("in",)]
+        observed.append(transaction_id)
+        await original(charger, start, transaction_id)
+    monkeypatch.setattr(archive, "diagnostic_start", inspect_committed)
+    first = await session.on_start_transaction(**payload)
+    restarted = ChargePointSession(
+        "charger-a", SimpleNamespace(last_frame="retry"),
+        TransactionArchive(tmp_path), EventStore(tmp_path),
+    )
+    retry = await restarted.on_start_transaction(**payload)
+    assert observed == [first.transaction_id]
+    assert retry.transaction_id == first.transaction_id == 1
+    assert event_directions(tmp_path, "StartTransaction") == [("in",), ("in",)]
+    assert len(transaction_records(tmp_path)) == 1

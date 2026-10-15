@@ -4,7 +4,7 @@ import sqlite3
 from ocpp_csms.evidence.diagnostics import events_between, format_events
 from ocpp_csms.evidence.contracts import events_contract
 from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.schema import database_path, inspect_schema, upgrade_schema
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, database_path, inspect_schema, upgrade_schema
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
 
@@ -75,7 +75,7 @@ def test_upgrade_v5_preserves_connector_status(tmp_path):
         conn.execute("DROP TABLE connector_status")
         conn.execute("ALTER TABLE old_connector RENAME TO connector_status")
         conn.execute("PRAGMA user_version = 5")
-    assert upgrade_schema(tmp_path).version == 6
+    assert upgrade_schema(tmp_path).version == CURRENT_SCHEMA_VERSION
     assert db.with_name(db.name + ".schema-5.bak").exists()
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT status, info FROM connector_status WHERE charger_id=?", (CP,)).fetchone() == ("Faulted", None)

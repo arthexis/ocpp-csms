@@ -166,8 +166,8 @@ async def test_legacy_config_positional_charger_is_recognized():
     ("active", "force", "keys", "expected_call", "expected_error", "records_decision"),
     [
         ({}, False, ["HeartbeatInterval"], ("config", ["HeartbeatInterval"]), None, False),
-        ({"charger-a": [17]}, False, None, None, "active_transaction", True),
-        ({"charger-a": [17]}, True, None, ("config", None), None, True),
+        ({"charger-a": [17]}, False, None, ("config", None), None, False),
+        ({"charger-a": [17]}, True, None, ("config", None), None, False),
         ({"charger-b": [88]}, False, None, ("config", None), None, False),
     ],
 )
@@ -455,3 +455,146 @@ async def test_control_timing_is_required_and_validated():
         {"command": "reset", "charger": "charger-a", "timing": "after", "seconds": 0},
     ))["error"] == "invalid_timing_seconds"
 
+
+
+@pytest.mark.asyncio
+async def test_a6_other_charge_point_activity_never_blocks_free_connector():
+    session = Session()
+    registry = Registry(session, active={"charger-b": [(71, 1)]})
+    response = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert response == {"ok": True, "response": {"status": "Accepted"}}
+    assert session.calls == [("start", "REMOTE", 1)]
+
+
+@pytest.mark.asyncio
+async def test_a6_multiple_live_connectors_only_block_requested_occupied_connector():
+    session = Session()
+    registry = Registry(session, active={"charger-a": [(71, 1), (72, 3)]})
+    free = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 2,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    occupied = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 3,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert free["ok"] is True
+    assert occupied == {
+        "error": "active_transaction", "charger": "charger-a",
+        "transactions": [72],
+    }
+    assert session.calls == [("start", "REMOTE", 2)]
+
+
+@pytest.mark.asyncio
+async def test_a6_reconnected_registry_uses_live_state_not_old_transaction_ids():
+    session = Session()
+    stale_registry = Registry(session, active={"charger-a": [(71, 1)]})
+    blocked = await dispatch_control(stale_registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert blocked["error"] == "active_transaction"
+    reconnected = Registry(session)
+    allowed = await dispatch_control(reconnected, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert allowed["ok"] is True
+    assert session.calls == [("start", "REMOTE", 1)]
+
+
+class EvidenceRegistry(Registry):
+    def __init__(self, statuses, active=None):
+        super().__init__(Session(), active=active)
+        self.statuses = statuses
+
+    def connector_occupancy(self, charge_point_id):
+        return self.statuses
+
+
+@pytest.mark.asyncio
+async def test_historical_open_does_not_block_available_connector():
+    registry = EvidenceRegistry({1: "Available"}, active={"charger-a": [(17, 1)]})
+    response = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert response["ok"] is True
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+
+
+@pytest.mark.asyncio
+async def test_unknown_connector_warns_and_sends():
+    registry = EvidenceRegistry({})
+    response = await dispatch_control(registry, {
+        "command": "start", "charger": "charger-a", "connector": 1,
+        "id_tag": "REMOTE", "timing": "now",
+    })
+    assert response["ok"] is True
+    assert response["warnings"]
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+
+
+@pytest.mark.asyncio
+async def test_busy_connector_requires_explicit_force():
+    registry = EvidenceRegistry({1: "Charging"})
+    request = {"command": "start", "charger": "charger-a", "connector": 1,
+               "id_tag": "REMOTE", "timing": "now"}
+    blocked = await dispatch_control(registry, request)
+    assert blocked["error"] == "active_transaction"
+    assert registry.sessions["charger-a"].calls == []
+    sent = await dispatch_control(registry, {**request, "force": True})
+    assert sent["ok"] is True
+    assert sent["warnings"]
+    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
+    assert registry.events[0]["event"] == "control_occupancy_override"
+
+
+class OccupancyRegistry(Registry):
+    def __init__(self, statuses):
+        super().__init__(Session())
+        self.statuses = statuses
+
+    def connector_occupancy(self, charge_point_id):
+        return dict(self.statuses)
+
+    def physical_connector_ids(self, charge_point_id):
+        return [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_unspecified_start_allows_other_free_connector():
+    registry = OccupancyRegistry({1: "Charging", 2: "Available"})
+    response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO", "timing": "now"})
+    assert response["ok"] is True
+    assert registry.session("charger-a").calls == [("start", "AUTO", None)]
+
+
+@pytest.mark.asyncio
+async def test_unspecified_start_blocks_when_all_connectors_busy():
+    registry = OccupancyRegistry({1: "Charging", 2: "Reserved"})
+    response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO", "timing": "now"})
+    assert response["error"] == "active_transaction"
+    assert registry.session("charger-a").calls == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_busy_start_requires_force_and_records_override():
+    registry = OccupancyRegistry({1: "Charging", 2: "Available"})
+    request = {"command": "start", "connector": 1, "id_tag": "AUTO", "timing": "now"}
+    assert (await dispatch_control(registry, request))["error"] == "active_transaction"
+    response = await dispatch_control(registry, {**request, "force": True})
+    assert response["ok"] is True
+    assert registry.events[-1]["event"] == "control_occupancy_override"
+
+
+@pytest.mark.asyncio
+async def test_unknown_connector_start_warns_and_proceeds():
+    registry = OccupancyRegistry({1: "Charging"})
+    response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO", "timing": "now"})
+    assert response["ok"] is True
+    assert any("unknown" in warning for warning in response["warnings"])

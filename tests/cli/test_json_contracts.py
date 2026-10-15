@@ -98,23 +98,25 @@ def test_profile_composite_json_uses_deterministic_emitter(monkeypatch, tmp_path
 
 
 def test_transaction_json_local_time_controls_filter_and_event_times(tmp_path, capsys):
-    directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True)
-    record = {
-        "transaction_id": 1,
-        "origin": "local",
-        "charge_point_id": "charger-a",
-        "status": "stopped",
-        "created_at": "2026-10-06T12:00:00Z",
-        "updated_at": "2026-10-06T12:10:00Z",
-        "start": {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"},
-        "start_received_at": "2026-10-06T12:00:00Z",
-        "meter_values": [],
-        "meter_values_received_at": [],
-        "stop": {"transaction_id": 1, "timestamp": "2020-01-01T00:10:00Z"},
-        "stop_received_at": "2026-10-06T12:10:00Z",
-    }
-    (directory / "charger-a-1.json").write_text(json.dumps(record))
+    from ocpp_csms.evidence.store import EventStore
+    from ocpp_csms.schema import database_path
+    import sqlite3
+
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "2020-01-01T00:00:00Z",
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 150,
+        "timestamp": "2020-01-01T00:10:00Z",
+    })
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        db.execute(
+            "UPDATE transactions SET start_received_at = ?, stop_received_at = ?, last_activity_at = ? WHERE transaction_id = ?",
+            ("2026-10-06T12:00:00Z", "2026-10-06T12:10:00Z", "2026-10-06T12:10:00Z", transaction_id),
+        )
+
 
     parser, _ = build_parser()
     args = parser.parse_args([

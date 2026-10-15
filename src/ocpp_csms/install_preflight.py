@@ -6,9 +6,9 @@ import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ocpp_csms.occupancy import BUSY_STATUSES, connector_occupancy
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, inspect_schema
-from ocpp_csms.transactions.query import TransactionQuery
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class InstallPreflight:
     connected_chargers: tuple[str, ...]
     active_chargers: tuple[str, ...]
     reason: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def _connected_chargers(data_dir: Path, schema_version: int | None) -> tuple[str, ...]:
@@ -41,30 +42,19 @@ def _connected_chargers(data_dir: Path, schema_version: int | None) -> tuple[str
     return tuple(sorted(charger for charger, event in latest.items() if event == "charger_connected"))
 
 
-def _archive_active_chargers(data_dir: Path) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            {
-                view.charge_point_id
-                for view in TransactionQuery(data_dir).active()
-                if view.charge_point_id
-            }
-        )
-    )
+def _live_occupancy(data_dir: Path, connected: tuple[str, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    busy = []
+    warnings = []
+    for charger in connected:
+        statuses = connector_occupancy(data_dir, charger)
+        if any(status in BUSY_STATUSES for status in statuses.values()):
+            busy.append(charger)
+        if not statuses:
+            warnings.append(f"{charger}: connector occupancy unknown since connection; proceeding")
+    return tuple(busy), tuple(warnings)
 
 
-def _database_active_chargers(data_dir: Path, schema_version: int | None) -> tuple[str, ...] | None:
-    if schema_version is None or schema_version < 2:
-        return None
-    database = inspect_schema(data_dir).path
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
-        rows = connection.execute(
-            "SELECT DISTINCT charger_id FROM transactions WHERE state IN ('open', 'recovered')"
-        ).fetchall()
-    return tuple(sorted(str(row[0]) for row in rows if row[0]))
-
-
-def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
+def evaluate_preflight(data_dir: str | Path, *, force: bool = False) -> InstallPreflight:
     root = Path(data_dir).expanduser()
     schema = inspect_schema(root)
 
@@ -78,43 +68,39 @@ def evaluate_preflight(data_dir: str | Path) -> InstallPreflight:
             f"events database schema {schema.version} is newer than supported {CURRENT_SCHEMA_VERSION}",
         )
 
-    active_archive = _archive_active_chargers(root)
-    active_database = _database_active_chargers(root, schema.version)
     connected = _connected_chargers(root, schema.version)
-
-    if active_database is not None and active_database != active_archive:
-        active = tuple(sorted(set(active_database) | set(active_archive)))
+    active_database, warnings = _live_occupancy(root, connected) if schema.version is not None else ((), ())
+    if active_database and not force:
         return InstallPreflight(
             False,
             connected,
-            active,
-            "active transaction state disagrees between SQLite and transaction archive",
+            active_database,
+            "active charging detected; service handoff is blocked until transactions stop",
+            warnings,
         )
 
-    if active_archive:
-        return InstallPreflight(
-            False,
-            connected,
-            active_archive,
-            "active charging detected; service handoff is blocked; inspect with ocpp-csms transactions recover --dry-run and recover eligible transactions while CSMS is stopped",
-        )
-
-    return InstallPreflight(True, connected, ())
+    if active_database and force:
+        warnings += ("FORCED HANDOFF: active charging on " + ", ".join(active_database),)
+    return InstallPreflight(True, connected, active_database, "charging safety override" if active_database else None, warnings)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only install safety preflight")
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("-j", "--json", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Override charging activity guard only")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    result = evaluate_preflight(args.data_dir)
+    result = evaluate_preflight(args.data_dir, force=args.force)
     if args.json:
         print(json.dumps(asdict(result), sort_keys=True))
-    elif not result.allowed:
+    else:
+        for warning in result.warnings:
+            print(f'warning: {warning}')
+    if not args.json and not result.allowed:
         print(f"Installation refused: {result.reason}")
         if result.connected_chargers:
             print("Connected charger(s): " + ", ".join(result.connected_chargers))

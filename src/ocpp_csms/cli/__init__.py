@@ -19,10 +19,8 @@ from ocpp_csms.cli.inspect import add_inspect_command, run_inspect
 from ocpp_csms.cli.inspection import add_inspection_commands, run_inspection
 from ocpp_csms.cli.json_contracts import run_transactions_json
 from ocpp_csms.cli.maintenance import COMMANDS as MAINTENANCE_COMMANDS, add_maintenance_commands, run_maintenance
-from ocpp_csms.cli.mail import add_mail_command, run_mail
 from ocpp_csms.cli.report import add_report_command, run_report
 from ocpp_csms.cli.reservation import add_reservation_commands, run_reservation
-from ocpp_csms.cli.recovery import run_recovery
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
 from ocpp_csms.cli.tls import add_tls_command, run_tls
@@ -54,12 +52,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["rfid"] = add_rfid_command(subcommands)
     commands["tls"] = add_tls_command(subcommands)
     commands["auth"] = add_auth_command(subcommands)
-    commands["mail"] = add_mail_command(subcommands)
     commands["report"] = add_report_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
     transactions.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable transaction contract")
-    transactions.epilog = "Operations: txn start, txn stop ID, txn explain ID, txn recover. Use txn OP --help for details."
+    transactions.epilog = "Operations: txn start, txn stop ID, txn explain ID. Use txn OP --help for details."
     for name in TRANSACTION_COMMANDS:
         commands[name] = transactions
     help_parser = subcommands.add_parser("help", help="Show commands and parameters")
@@ -82,16 +79,16 @@ def main() -> int:
     # Transaction operations use their own real subparsers; txn [ID] remains
     # the historical read-only query grammar without any argv rewriting.
     txn_offset = next((i for i, word in enumerate(argv) if word == "txn"), -1)
-    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop", "explain", "recover"}:
+    if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop", "explain"}:
         global_parser = argparse.ArgumentParser(add_help=False)
         global_parser.add_argument("--data-dir", default=str(default_data_dir()))
         global_args = global_parser.parse_args(argv[:txn_offset])
         operations = build_txn_operations_parser()
         args = operations.parse_args(argv[txn_offset + 1:])
         args.data_dir = global_args.data_dir
-        if args.operation in {"explain", "recover"}:
+        if args.operation == "explain":
             try:
-                return run_txn_explain(args) if args.operation == "explain" else run_recovery(args)
+                return run_txn_explain(args)
             except ValueError as exc:
                 operations.error(str(exc))
         args.command = args.operation
@@ -133,7 +130,6 @@ def main() -> int:
         if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
         if args.command == "tls": return run_tls(args)
         if args.command == "auth": return run_auth(args)
-        if args.command == "mail": return run_mail(args)
         if args.command == "report": return run_report(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)

@@ -4,9 +4,8 @@ from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.status import appliance_status, format_status
 
 
-def _start(events: EventStore, transaction_id: int, connector_id: int) -> None:
-    events.record_transaction_start(
-        transaction_id,
+def _start(events: EventStore, connector_id: int) -> int:
+    return events.commit_start(
         "charger-a",
         {
             "connector_id": connector_id,
@@ -27,7 +26,7 @@ def test_status_keeps_connectors_separate(tmp_path: Path):
         "charger-a",
         {"connector_id": 2, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
     )
-    _start(events, 7, 1)
+    transaction_id = _start(events, 1)
 
     charger = appliance_status(tmp_path)["chargers"][0]
 
@@ -36,7 +35,7 @@ def test_status_keeps_connectors_separate(tmp_path: Path):
         (1, "Charging"),
         (2, "Available"),
     ]
-    assert charger.connectors[0].transaction_id == 7
+    assert charger.connectors[0].transaction_id == transaction_id
     assert charger.connectors[1].transaction_id is None
 
 
@@ -50,12 +49,15 @@ def test_open_transaction_uses_its_connector_state(tmp_path: Path):
         "charger-a",
         {"connector_id": 2, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
     )
-    _start(events, 7, 1)
+    transaction_id = _start(events, 1)
 
     charger = appliance_status(tmp_path)["chargers"][0]
 
-    assert charger.status == "Preparing"
-    assert charger.transaction_id == 7
+    assert charger.status == "Available"
+    assert charger.transaction_id == transaction_id
+    assert charger.availability == "unknown"  # No live server connection established
+    assert charger.activity == "unknown"
+    assert [(item.connector_id, item.status) for item in charger.connectors] == [(1, "Preparing"), (2, "Available")]
 
 
 def test_detailed_status_prints_each_connector(tmp_path: Path):
@@ -68,10 +70,25 @@ def test_detailed_status_prints_each_connector(tmp_path: Path):
         "charger-a",
         {"connector_id": 2, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
     )
-    _start(events, 7, 1)
+    transaction_id = _start(events, 1)
 
     text = format_status(appliance_status(tmp_path), charger_id="charger-a")
 
     assert "Connector 1: Charging" in text
-    assert "Transaction: 7" in text
+    assert f"Transaction: {transaction_id}" in text
     assert "Connector 2: Available" in text
+
+
+def test_independent_customer_availability_and_operator_activity():
+    from ocpp_csms.status import ConnectorStatus, operational_state
+    connectors = [
+        ConnectorStatus(connector_id=1, status="Charging", error_code=None,
+                        transaction_id=12, id_tag="card", started_at=None),
+        ConnectorStatus(connector_id=2, status="Available", error_code=None,
+                        transaction_id=None, id_tag=None, started_at=None),
+    ]
+    assert operational_state(connectors) == ("available", "active")
+    connectors[0].status = "Preparing"
+    assert operational_state(connectors) == ("available", "unknown")
+    connectors[0].status = "Unavailable"
+    assert operational_state(connectors) == ("available", "inactive")

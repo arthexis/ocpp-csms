@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sqlite3
+from contextlib import closing
 import uuid
 from pathlib import Path
 import subprocess
@@ -52,7 +53,7 @@ def _remove_cp_from_copy(root: Path, cp: str) -> None:
             if record["charge_point_id"] == cp:
                 path.unlink()
 
-    with sqlite3.connect(schema.path) as db:
+    with closing(sqlite3.connect(schema.path)) as db, db:
         db.execute("PRAGMA foreign_keys=ON")
         ids = [row[0] for row in db.execute(
             "SELECT transaction_id FROM transactions WHERE charger_id=?", (cp,)
@@ -60,7 +61,10 @@ def _remove_cp_from_copy(root: Path, cp: str) -> None:
         # Clear references by transaction identity; do not reuse IDs.
         if ids:
             placeholders = ",".join("?" for _ in ids)
-            db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
+            # Historical upgraded databases may retain the obsolete audit table.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
+                db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
+            db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({placeholders})", ids)
         db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
                    "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
         for table in ("events", "runtime_events", "connector_status",
@@ -117,8 +121,27 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
             # Refuse to follow symlinks in a source directory containing evidence.
             if any(path.is_symlink() for path in root.rglob("*")):
                 raise ValueError("refusing symlinked evidence paths")
-            shutil.copytree(root, staging)
+            # Copy non-SQLite evidence normally, but snapshot the database through
+            # SQLite so committed WAL frames cannot be lost or copied inconsistently.
+            from ocpp_csms.schema import database_path, inspect_schema, require_supported_schema
+            info = inspect_schema(root)
+            require_supported_schema(info)
+            db_name = info.path.name
+            shutil.copytree(
+                root, staging,
+                ignore=lambda directory, names: [
+                    name for name in names
+                    if Path(directory) == root and name in
+                    (db_name, db_name + "-wal", db_name + "-shm")
+                ],
+            )
+            with closing(sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(staging / db_name)) as destination:
+                    source.backup(destination)
             _remove_cp_from_copy(staging, cp)
+            with closing(sqlite3.connect(staging / db_name)) as check:
+                if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("staged database integrity check failed")
             root.rename(backup)
             try:
                 staging.rename(root)

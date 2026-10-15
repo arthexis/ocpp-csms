@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ocpp_csms.transactions.formatting import format_transactions, format_transaction
 from ocpp_csms.transactions.query import TransactionQuery, TransactionView
+from ocpp_csms.evidence.store import EventStore
 
 
 def record(transaction_id, *, stopped=False, samples=None):
@@ -52,11 +53,13 @@ def test_open_without_valid_energy_samples_stays_unknown():
 
 
 def test_last_includes_newest_active_transaction(tmp_path):
-    directory = tmp_path / "transactions" / "2026-10-09"
-    directory.mkdir(parents=True)
-    (directory / "1.json").write_text(json.dumps(record(1, stopped=True)))
-    (directory / "2.json").write_text(json.dumps(record(2, samples=[(125, "Wh")])))
+    store = EventStore(tmp_path)
+    first = store.commit_start("SIM001", record(1)["start"])
+    store.commit_transaction_evidence("SIM001", "StopTransaction", {
+        "transaction_id": first, "meter_stop": 250, "timestamp": "2026-10-09T00:01:30Z",
+    })
+    second = store.commit_start("SIM001", record(2)["start"])
     query = TransactionQuery(tmp_path)
-    assert query.last().transaction_id == 2
+    assert query.last().transaction_id == second
     assert query.last().active
-    assert query.list(limit=1)[0].transaction_id == 2
+    assert query.list(limit=1)[0].transaction_id == second

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,6 @@ from typing import Any
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
-from ocpp_csms.transactions.query import TransactionQuery
 
 
 @dataclass
@@ -39,10 +39,31 @@ class ChargerStatus:
     connectors: list[ConnectorStatus]
     info: str | None = None
     derived_status: str | None = None
+    availability: str = "unknown"
+    activity: str = "unknown"
 
 
 def derive_status(status: str | None, error_code: str | None, info: str | None) -> str | None:
     return 'EmergencyStop' if (status == 'Faulted' and error_code == 'InternalError' and info == 'EmergencyStop') else status
+
+
+def operational_state(connectors: list[ConnectorStatus]) -> tuple[str, str]:
+    """Customer availability and observed activity are independent."""
+    physical = [item for item in connectors if item.connector_id > 0]
+    availability = (
+        "available" if any(item.status == "Available" for item in physical)
+        else "unavailable" if physical and all(item.status in {
+            "Charging", "SuspendedEV", "SuspendedEVSE", "Preparing",
+            "Finishing", "Faulted", "Unavailable", "Reserved",
+        } for item in physical)
+        else "unknown"
+    )
+    activity = (
+        "active" if any(item.status in {"Charging", "SuspendedEV", "SuspendedEVSE"} for item in physical)
+        else "inactive" if physical and all(item.status in {"Available", "Unavailable", "Faulted"} for item in physical)
+        else "unknown"
+    )
+    return availability, activity
 
 
 def _connect(database: Path) -> sqlite3.Connection:
@@ -51,19 +72,12 @@ def _connect(database: Path) -> sqlite3.Connection:
     return connection
 
 
-def appliance_status(data_dir: str | Path) -> dict[str, Any]:
+def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | None = None) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
     running = process_is_running(root)
     rfid_authorization = load_rfid_authorization(root)
-    active_chargers = sorted(
-        {
-            view.charge_point_id
-            for view in TransactionQuery(root).active()
-            if view.charge_point_id
-        }
-    )
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
@@ -71,7 +85,7 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
         "server": "running" if running else "stopped",
         "started_at": None,
         "chargers": [],
-        "active_chargers": active_chargers,
+        "active_chargers": [],
         "rfid_authorization": (
             None
             if rfid_authorization.allow_all
@@ -86,14 +100,14 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     live_since_id: int | None = None
     if database.exists():
         try:
-            with _connect(database) as connection:
-                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            with (nullcontext(connection) if connection is not None else _connect(database)) as db:
+                version = int(db.execute("PRAGMA user_version").fetchone()[0])
                 if version < 2:
                     result["database"] = "upgrade-needed"
                 else:
                     result["database"] = "ok"
                     if running:
-                        row = connection.execute(
+                        row = db.execute(
                             """
                             SELECT id, occurred_at FROM runtime_events
                             WHERE event = 'server_started'
@@ -108,7 +122,14 @@ def appliance_status(data_dir: str | Path) -> dict[str, Any]:
     if transactions.exists():
         result["transactions"] = "ok" if transactions.is_dir() else "error"
     if result["database"] == "ok":
-        result["chargers"] = charger_statuses(database, live_since_id=live_since_id)
+        result["chargers"] = charger_statuses(database, live_since_id=live_since_id, connection=connection)
+        result["active_chargers"] = sorted({
+            charger.charger_id for charger in result["chargers"]
+            if any(
+                connector.status in {"Charging", "SuspendedEV", "SuspendedEVSE"}
+                for connector in charger.connectors
+            )
+        })
     return result
 
 
@@ -117,12 +138,13 @@ def charger_statuses(
     charger_id: str | None = None,
     *,
     live_since_id: int | None = None,
+    connection: sqlite3.Connection | None = None,
 ) -> list[ChargerStatus]:
     if not database.exists():
         return []
-    with _connect(database) as connection:
+    with (nullcontext(connection) if connection is not None else _connect(database)) as db:
         if charger_id is None:
-            rows = connection.execute(
+            rows = db.execute(
                 """
                 SELECT charger_id FROM events
                 UNION SELECT charger_id FROM runtime_events WHERE charger_id IS NOT NULL
@@ -134,7 +156,7 @@ def charger_statuses(
         else:
             charger_ids = [charger_id]
         return [
-            _charger_status(connection, value, live_since_id=live_since_id)
+            _charger_status(db, value, live_since_id=live_since_id)
             for value in charger_ids
         ]
 
@@ -226,23 +248,20 @@ def _charger_status(
             )
         )
 
+    # Operational status comes from reported connector evidence, not historical
+    # SQLite transactions that may remain open indefinitely after power loss.
     transaction = transaction_rows[0] if transaction_rows else None
     summary_status = None
     summary_error = None
     summary_info = None
-    if transaction and transaction["connector_id"] is not None:
-        active_connector = statuses.get(int(transaction["connector_id"]))
-        if active_connector:
-            summary_status = active_connector["status"]
-            summary_error = active_connector["error_code"]
-            summary_info = active_connector['info']
-        else:
-            summary_status = "Charging"
-    elif status_rows:
-        latest_status = max(status_rows, key=lambda row: row["received_at"])
+    if status_rows:
+        # Prefer a currently reported busy physical connector over a generic
+        # charge-point/other-connector Available notification.
+        busy = [row for row in status_rows if int(row["connector_id"]) > 0 and row["status"] in {"Charging", "SuspendedEV", "SuspendedEVSE"}]
+        latest_status = max(busy or status_rows, key=lambda row: row["received_at"])
         summary_status = latest_status["status"]
         summary_error = latest_status["error_code"]
-        summary_info = latest_status['info']
+        summary_info = latest_status["info"]
 
     # An emergency fault on any physical connector must be visible at charger level,
     # even when connector 0 reports Available or no transaction ever existed.
@@ -251,6 +270,7 @@ def _charger_status(
         fault = max(emergencies, key=lambda row: row['received_at'])
         summary_status, summary_error, summary_info = fault['status'], fault['error_code'], fault['info']
 
+    availability, activity = operational_state(connectors)
     return ChargerStatus(
         charger_id=charger_id,
         connected=connected,
@@ -265,6 +285,8 @@ def _charger_status(
         id_tag=transaction["id_tag"] if transaction else None,
         started_at=(transaction["started_at"] or transaction["start_received_at"]) if transaction else None,
         connectors=connectors,
+        availability=availability if connected else "unknown",
+        activity=activity if connected else "unknown",
     )
 
 
@@ -303,7 +325,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
                     lines.append(f"  Info: {connector.info}")
                 lines.extend(
                     [
-                        f"  Charging: {'yes' if connector.transaction_id is not None else 'no'}",
+                        f"  Charging: {'yes' if connector.status == 'Charging' else 'no' if connector.status in {'Available', 'Finishing', 'Unavailable', 'Faulted'} else 'unknown'}",
                         f"  Transaction: {connector.transaction_id if connector.transaction_id is not None else '-'}",
                         f"  RFID: {connector.id_tag or '-'}",
                         f"  Started: {connector.started_at or '-'}",

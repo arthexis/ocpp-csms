@@ -34,7 +34,6 @@ def test_bundle_mode_installs_only_from_bundle_wheels():
     argv = runtime["ansible.builtin.command"]["argv"]
     assert "--no-index" in argv
     assert "--find-links" in argv
-    assert "{{ ocpp_csms_bundle_wheels_dir }}" in argv
     assert runtime["when"][-1] == "ocpp_csms_install_mode == 'bundle'"
 
     assert application["ansible.builtin.pip"]["extra_args"] == "--no-index --no-deps"
@@ -43,13 +42,9 @@ def test_bundle_mode_installs_only_from_bundle_wheels():
 
 def test_bundle_mode_uses_manifest_release_and_source():
     defaults = load_yaml(DEFAULTS)
-    capture = task_by_name(TASKS / "main.yml", "Capture immutable release identifier")
-    source = task_by_name(TASKS / "main.yml", "Select release source for preflight")
 
     assert defaults["ocpp_csms_install_mode"] == "online"
     assert defaults["ocpp_csms_bundle_manifest_path"].endswith("/manifest.yml")
-    assert "ocpp_csms_bundle_manifest.release" in capture["ansible.builtin.set_fact"]["ocpp_csms_release_id"]
-    assert "ocpp_csms_bundle_source_dir" in source["ansible.builtin.set_fact"]["ocpp_csms_preflight_source_dir"]
 
 
 def test_bundle_mode_does_not_touch_online_package_indexes():

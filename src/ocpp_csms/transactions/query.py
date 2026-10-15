@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ocpp_csms.transactions.archive import default_data_dir
+from ocpp_csms.schema import database_path
 
-_ACTIVE_STATUSES = {"open", "recovered"}
+_ACTIVE_STATUSES = {"open"}
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -21,32 +23,6 @@ def _parse_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
-
-def _connector_id(record: dict[str, Any]) -> int | None:
-    start = record.get("start")
-    if isinstance(start, dict) and start.get("connector_id") is not None:
-        return int(start["connector_id"])
-    meter_values = record.get("meter_values")
-    if isinstance(meter_values, list):
-        for payload in reversed(meter_values):
-            if isinstance(payload, dict) and payload.get("connector_id") is not None:
-                return int(payload["connector_id"])
-    stop = record.get("stop")
-    if isinstance(stop, dict) and stop.get("connector_id") is not None:
-        return int(stop["connector_id"])
-    return None
-
-
-def _id_tag(record: dict[str, Any]) -> str | None:
-    value = record.get("id_tag")
-    if isinstance(value, str):
-        return value
-    for field in ("start", "stop"):
-        payload = record.get(field)
-        if isinstance(payload, dict) and isinstance(payload.get("id_tag"), str):
-            return payload["id_tag"]
-    return None
 
 
 def _meter_times(record: dict[str, Any]) -> list[datetime]:
@@ -69,7 +45,7 @@ def _meter_times(record: dict[str, Any]) -> list[datetime]:
 
 
 def _activity_at(record: dict[str, Any]) -> datetime:
-    """Newest charger-reported OCPP event time, with archive fallback."""
+    """Newest charger-reported OCPP event time, falling back to SQLite receipt."""
     candidates: list[datetime] = []
     stop = record.get("stop")
     if isinstance(stop, dict):
@@ -84,10 +60,10 @@ def _activity_at(record: dict[str, Any]) -> datetime:
             candidates.append(parsed)
     if candidates:
         return max(candidates)
-    return _archive_time(record)
+    return _sqlite_activity_time(record)
 
 
-def _archive_time(record: dict[str, Any]) -> datetime:
+def _sqlite_activity_time(record: dict[str, Any]) -> datetime:
     for value in (record.get("updated_at"), record.get("created_at")):
         parsed = _parse_time(value)
         if parsed is not None:
@@ -96,8 +72,8 @@ def _archive_time(record: dict[str, Any]) -> datetime:
 
 
 def _received_activity_at(record: dict[str, Any]) -> datetime:
-    """Newest CSMS receive evidence, including legacy archive timestamps."""
-    candidates: list[datetime] = [_archive_time(record)]
+    """Newest SQLite receive evidence, independent of diagnostic archives."""
+    candidates: list[datetime] = [_sqlite_activity_time(record)]
     for field in ("start_received_at", "stop_received_at"):
         parsed = _parse_time(record.get(field))
         if parsed is not None:
@@ -115,7 +91,6 @@ def _received_activity_at(record: dict[str, Any]) -> datetime:
 class TransactionView:
     record: dict[str, Any]
     path: Path
-    unresolved: tuple[dict[str, Any], ...] = ()
 
     @property
     def transaction_id(self) -> int:
@@ -128,17 +103,17 @@ class TransactionView:
     @property
     def status(self) -> str:
         state = str(self.record.get("status", ""))
-        # Preserve the durable recovery state and audit trail; expose a clear
-        # operational label in CLI and machine-readable transaction reports.
-        return "disconnected" if state == "inferred_stopped" else state
+        return state
 
     @property
     def connector_id(self) -> int | None:
-        return _connector_id(self.record)
+        value = self.record.get("connector_id")
+        return int(value) if value is not None else None
 
     @property
     def id_tag(self) -> str | None:
-        return _id_tag(self.record)
+        value = self.record.get("id_tag")
+        return str(value) if value is not None else None
 
     @property
     def activity_at(self) -> datetime:
@@ -152,34 +127,31 @@ class TransactionView:
         return self.received_activity_at if local_time else self.activity_at
 
     @property
+    def next_start_received_at(self) -> str | None:
+        return self.record.get("next_start_received_at")
+
+    @property
     def active(self) -> bool:
-        return self.record.get("stop") is None and self.status in _ACTIVE_STATUSES
+        return self.record.get("stop_received_at") is None and self.status in _ACTIVE_STATUSES
 
 
 class TransactionQuery:
-    """Read archived transaction state without mutating persistence."""
+    """Read authoritative SQLite transaction state without mutating persistence."""
 
-    def __init__(self, data_dir: str | Path | None = None) -> None:
+    def __init__(self, data_dir: str | Path | None = None, *, connection: sqlite3.Connection | None = None) -> None:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
-        self.transactions_dir = self.data_dir / "transactions"
-        self.unresolved_dir = self.data_dir / "transactions-unresolved"
+        self._connection = connection
 
     def get(self, transaction_id: int) -> TransactionView | None:
-        for view in self._views():
-            if view.transaction_id == transaction_id:
-                return view
-        return None
+        views = self._views(transaction_id=transaction_id)
+        return views[0] if views else None
 
     def list(self, *, charger: str | None = None, connector: int | None = None, id_tag: str | None = None, since: datetime | str | None = None, until: datetime | str | None = None, active: bool | None = None, limit: int | None = None, local_time: bool = False) -> list[TransactionView]:
         since_time = self._coerce_time(since)
         until_time = self._coerce_time(until)
         matches = [
-            view for view in self._views()
-            if (charger is None or view.charge_point_id == charger)
-            and (connector is None or view.connector_id == connector)
-            and (id_tag is None or view.id_tag == id_tag)
-            and (active is None or view.active is active)
-            and (since_time is None or view.event_time(local_time=local_time) >= since_time)
+            view for view in self._views(charger=charger, connector=connector, id_tag=id_tag, active=active)
+            if (since_time is None or view.event_time(local_time=local_time) >= since_time)
             and (until_time is None or view.event_time(local_time=local_time) <= until_time)
         ]
         matches.sort(key=lambda view: (view.event_time(local_time=local_time), view.transaction_id), reverse=True)
@@ -192,32 +164,110 @@ class TransactionQuery:
         matches = self.list(limit=1, **filters)
         return matches[0] if matches else None
 
-    def _views(self) -> Iterable[TransactionView]:
-        unresolved = self._unresolved_by_transaction()
-        if not self.transactions_dir.exists():
-            return ()
-        views: list[TransactionView] = []
-        for path in self.transactions_dir.glob("*/*.json"):
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-                transaction_id = int(record["transaction_id"])
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-                continue
-            views.append(TransactionView(record=record, path=path, unresolved=tuple(unresolved.get(transaction_id, ()))))
-        return views
+    def _views(self, *, transaction_id: int | None = None, charger: str | None = None,
+               connector: int | None = None, id_tag: str | None = None,
+               active: bool | None = None) -> list[TransactionView]:
+        """Filter summaries before reading evidence; preserve event-time ordering."""
+        path = database_path(self.data_dir)
+        if not path.is_file():
+            return []
+        predicates: list[str] = []
+        params: list[Any] = []
+        for column, value in (
+            ("transaction_id", transaction_id), ("charger_id", charger),
+            ("connector_id", connector), ("id_tag", id_tag),
+        ):
+            if value is not None:
+                predicates.append(f"{column} = ?")
+                params.append(value)
+        if active is not None:
+            predicates.append("state = 'open' AND stop_received_at IS NULL" if active
+                              else "(state != 'open' OR stop_received_at IS NOT NULL)")
+        where = (" WHERE " + " AND ".join(predicates)) if predicates else ""
+        connection = self._connection or sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            connection.row_factory = sqlite3.Row
+            # Keep summary and evidence reads on one snapshot. Export callers
+            # already own a transaction on their supplied connection.
+            if self._connection is None:
+                connection.execute("BEGIN")
+            rows = connection.execute("SELECT * FROM transaction_summary" + where, params).fetchall()
+            if not rows:
+                return []
+            keys = sorted((int(row["transaction_id"]), str(row["charger_id"])) for row in rows)
+            evidence: list[sqlite3.Row] = []
+            # Bound parameter count for unlimited listings.
+            for offset in range(0, len(keys), 400):
+                batch = keys[offset:offset + 400]
+                placeholders = " OR ".join("(transaction_id = ? AND charger_id = ?)" for _ in batch)
+                values = [item for key in batch for item in key]
+                evidence.extend(connection.execute(
+                    """SELECT id, transaction_id, charger_id, action, payload_json, received_at
+                       FROM events WHERE direction = 'in'
+                         AND action IN ('StartTransaction', 'MeterValues', 'StopTransaction')
+                         AND (""" + placeholders + ") ORDER BY id",
+                    values,
+                ).fetchall())
+            evidence.sort(key=lambda event: event["id"])
+        finally:
+            if self._connection is None:
+                connection.close()
 
-    def _unresolved_by_transaction(self) -> dict[int, list[dict[str, Any]]]:
-        grouped: dict[int, list[dict[str, Any]]] = {}
-        if not self.unresolved_dir.exists():
-            return grouped
-        for path in self.unresolved_dir.glob("*/*.json"):
-            try:
-                record = json.loads(path.read_text(encoding="utf-8"))
-                transaction_id = int(record["transaction_id"])
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-                continue
-            grouped.setdefault(transaction_id, []).append(record)
-        return grouped
+        grouped: dict[tuple[int, str], list[sqlite3.Row]] = {}
+        for event in evidence:
+            grouped.setdefault((int(event["transaction_id"]), str(event["charger_id"])), []).append(event)
+
+        views: list[TransactionView] = []
+        for row in rows:
+            transaction_id = int(row["transaction_id"])
+            record: dict[str, Any] = {
+                "transaction_id": transaction_id,
+                "charge_point_id": row["charger_id"],
+                "status": row["state"],
+                "id_tag": row["id_tag"],
+                "start_received_at": row["start_received_at"],
+                "stop_received_at": row["stop_received_at"],
+                "created_at": row["start_received_at"],
+                "updated_at": row["last_activity_at"],
+                "connector_id": row["connector_id"],
+                "energy_wh": row["energy_wh"],
+                "next_start_received_at": row["next_start_received_at"],
+                "start": None,
+                "stop": None,
+                "meter_values": [],
+                "meter_values_received_at": [],
+            }
+            for event in grouped.get((transaction_id, str(row["charger_id"])), ()):
+                try:
+                    payload = json.loads(event["payload_json"])
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if event["action"] == "StartTransaction" and record["start"] is None:
+                    record["start"] = payload
+                elif event["action"] == "StopTransaction":
+                    # The first committed stop is authoritative, not a later retry.
+                    if event["received_at"] == row["stop_received_at"] and record["stop"] is None:
+                        record["stop"] = payload
+                elif event["action"] == "MeterValues":
+                    record["meter_values"].append(payload)
+                    record["meter_values_received_at"].append(event["received_at"])
+            if record["start"] is None:
+                record["start"] = {
+                    "connector_id": row["connector_id"],
+                    "id_tag": row["id_tag"],
+                    "meter_start": row["meter_start"],
+                    "timestamp": row["started_at"],
+                }
+            if row["stop_received_at"] is not None and record["stop"] is None:
+                record["stop"] = {
+                    "transaction_id": transaction_id,
+                    "meter_stop": row["meter_stop"],
+                    "timestamp": row["stopped_at"],
+                }
+            views.append(TransactionView(record=record, path=path))
+        return views
 
     @staticmethod
     def _coerce_time(value: datetime | str | None) -> datetime | None:

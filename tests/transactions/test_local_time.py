@@ -5,6 +5,7 @@ import pytest
 
 import ocpp_csms.transactions.archive as transactions_module
 from ocpp_csms.transactions.query import TransactionQuery
+from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.transactions.archive import TransactionArchive
 
 
@@ -17,7 +18,9 @@ async def test_archive_persists_receive_time_for_each_event(tmp_path, monkeypatc
     ))
     monkeypatch.setattr(transactions_module, "utc_now_iso", lambda: next(times))
     archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start("charger-a", {"connector_id": 1, "timestamp": "2020-01-01T00:00:00Z"})
+    payload = {"connector_id": 1, "id_tag": "CARD", "meter_start": 100, "timestamp": "2020-01-01T00:00:00Z"}
+    transaction_id = EventStore(tmp_path).commit_start("charger-a", payload)
+    await archive.diagnostic_start("charger-a", payload, transaction_id)
     await archive.meter_values("charger-a", {"transaction_id": transaction_id, "connector_id": 1, "meter_value": [{"timestamp": "2020-01-01T00:05:00Z"}]})
     await archive.stop("charger-a", {"transaction_id": transaction_id, "timestamp": "2020-01-01T00:10:00Z"})
 
@@ -53,62 +56,33 @@ async def test_legacy_meter_values_keep_receive_time_alignment(tmp_path, monkeyp
     assert record["meter_values_received_at"] == [None, "2026-10-06T10:10:00Z"]
 
 
-def _write_record(tmp_path, transaction_id, charger_time, received_time):
+
+def test_json_diagnostics_do_not_create_query_transactions(tmp_path):
     directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True, exist_ok=True)
-    record = {
-        "transaction_id": transaction_id,
-        "origin": "local",
-        "charge_point_id": "charger-a",
-        "status": "stopped",
-        "created_at": received_time,
-        "updated_at": received_time,
-        "start": {"connector_id": 1, "timestamp": charger_time},
-        "start_received_at": received_time,
-        "meter_values": [],
-        "meter_values_received_at": [],
-        "stop": {"transaction_id": transaction_id, "timestamp": charger_time},
-        "stop_received_at": received_time,
-    }
-    (directory / f"charger-a-{transaction_id}.json").write_text(json.dumps(record))
+    directory.mkdir(parents=True)
+    (directory / "legacy.json").write_text(json.dumps({
+        "transaction_id": 1, "charge_point_id": "charger-a",
+        "status": "stopped", "updated_at": "2026-10-06T11:00:00Z",
+    }))
+    assert TransactionQuery(tmp_path).get(1) is None
 
 
-def test_local_time_switches_filtering_and_ordering_to_receive_time(tmp_path):
-    _write_record(tmp_path, 1, "2030-01-01T00:00:00Z", "2026-10-06T10:00:00Z")
-    _write_record(tmp_path, 2, "2020-01-01T00:00:00Z", "2026-10-06T11:00:00Z")
+def test_sqlite_receive_time_controls_query_order(tmp_path, monkeypatch):
+    import ocpp_csms.evidence.store as store_module
+    store = EventStore(tmp_path)
+    monkeypatch.setattr(store_module, "utc_now_iso", lambda: "2026-10-06T10:00:00Z")
+    first = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD", "meter_start": 100,
+        "timestamp": "2030-01-01T00:00:00Z",
+    })
+    monkeypatch.setattr(store_module, "utc_now_iso", lambda: "2026-10-06T11:00:00Z")
+    second = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD", "meter_start": 100,
+        "timestamp": "2020-01-01T00:00:00Z",
+    })
     query = TransactionQuery(tmp_path)
-
-    assert [view.transaction_id for view in query.list()] == [1, 2]
-    assert [view.transaction_id for view in query.list(local_time=True)] == [2, 1]
-    assert [view.transaction_id for view in query.list(local_time=True, since=datetime(2026, 10, 6, 10, 30, tzinfo=timezone.utc))] == [2]
-
-
-def test_local_time_legacy_archive_falls_back_to_archive_update_time(tmp_path):
-    directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True)
-    record = {"transaction_id": 1, "charge_point_id": "charger-a", "status": "stopped", "created_at": "2026-10-06T10:00:00Z", "updated_at": "2026-10-06T11:00:00Z", "start": {"timestamp": "2020-01-01T00:00:00Z"}, "meter_values": [], "stop": {"timestamp": "2020-01-01T01:00:00Z"}}
-    (directory / "legacy.json").write_text(json.dumps(record))
-
-    view = TransactionQuery(tmp_path).get(1)
-    assert view.received_activity_at == datetime(2026, 10, 6, 11, 0, tzinfo=timezone.utc)
-
-
-def test_partial_upgrade_keeps_newer_archive_update_as_receive_activity(tmp_path):
-    directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True)
-    record = {
-        "transaction_id": 1,
-        "charge_point_id": "charger-a",
-        "status": "open",
-        "created_at": "2026-10-06T10:00:00Z",
-        "updated_at": "2026-10-06T11:00:00Z",
-        "start": {"timestamp": "2020-01-01T00:00:00Z"},
-        "start_received_at": "2026-10-06T10:00:00Z",
-        "meter_values": [],
-        "meter_values_received_at": [],
-        "stop": None,
-    }
-    (directory / "partial.json").write_text(json.dumps(record))
-
-    view = TransactionQuery(tmp_path).get(1)
-    assert view.received_activity_at == datetime(2026, 10, 6, 11, 0, tzinfo=timezone.utc)
+    assert [v.transaction_id for v in query.list()] == [first, second]
+    assert [v.transaction_id for v in query.list(local_time=True)] == [second, first]
+    assert [v.transaction_id for v in query.list(
+        local_time=True, since=datetime(2026, 10, 6, 10, 30, tzinfo=timezone.utc)
+    )] == [second]

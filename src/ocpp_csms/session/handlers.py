@@ -60,22 +60,13 @@ class SessionHandlers:
                 id_tag_info={"status": authorization},
             )
 
-        transaction_id = None
+        # The event, exact-retry identity, and allocation commit together.
+        # Never acknowledge an uncommitted transaction or allocate from JSON.
+        transaction_id = self.events.commit_start(self.id, payload)
         try:
-            transaction_id = self.events.find_recent_start(self.id, payload)
+            await self.transactions.diagnostic_start(self.id, payload, transaction_id)
         except Exception:
-            LOGGER.exception("frame %s", self.connection.last_frame)
-
-        if transaction_id is None:
-            transaction_id = await self.transactions.start(self.id, payload)
-            try:
-                self.events.record_transaction_start(transaction_id, self.id, payload)
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
-        else:
-            LOGGER.info("deduplicated StartTransaction %s", transaction_id)
-
-        self._record("StartTransaction", payload, transaction_id=transaction_id)
+            LOGGER.exception("Optional transaction JSON diagnostic failed for %s", self.id)
         return call_result.StartTransactionPayload(
             transaction_id=transaction_id,
             id_tag_info={"status": "Accepted"},
@@ -83,38 +74,12 @@ class SessionHandlers:
 
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
-        self._record("StopTransaction", payload)
-        decision = None
-        try:
-            decision = await self.transactions.stop(self.id, payload)
-        except Exception:
-            LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        self._record_recovery_decision(decision)
-        if decision is None or decision.get("event") != "historical_transaction_id_collision":
-            try:
-                self.events.record_transaction_stop(self.id, payload)
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
+        self.events.commit_transaction_evidence(self.id, "StopTransaction", payload)
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
-        self._record("MeterValues", payload)
-        decision = None
-        try:
-            decision = await self.transactions.meter_values(self.id, payload)
-        except Exception:
-            LOGGER.exception("Could not update transaction JSON for %s", self.id)
-        self._record_recovery_decision(decision)
-        transaction_id = payload.get("transaction_id")
-        if (
-            transaction_id is not None
-            and (decision is None or decision.get("event") != "historical_transaction_id_collision")
-        ):
-            try:
-                self.events.record_transaction_activity(int(transaction_id))
-            except Exception:
-                LOGGER.exception("frame %s", self.connection.last_frame)
+        self.events.commit_transaction_evidence(self.id, "MeterValues", payload)
         return call_result.MeterValuesPayload()
 
     @on("DiagnosticsStatusNotification")

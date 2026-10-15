@@ -1,0 +1,31 @@
+---
+# B3.2 read-only discovery. Do not prepare or switch storage during staging.
+- name: Plan schema-versioned storage without mutation
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - storage-plan
+      - --storage-root
+      - "{{ ocpp_csms_data_dir }}"
+  register: ocpp_csms_storage_plan
+  changed_when: false
+
+- name: Capture schema-versioned storage plan
+  ansible.builtin.set_fact:
+    ocpp_csms_storage_selection: "{{ ocpp_csms_storage_plan.stdout | from_json }}"
+
+# Resolve the database currently owned by the service. This is read-only and
+# must not select the prepared candidate before pointer activation.
+- name: Capture active storage directory for preflight and handoff
+  ansible.builtin.set_fact:
+    ocpp_csms_active_data_dir: >-
+      {{ ocpp_csms_storage_selection.active | default(ocpp_csms_data_dir, true) }}
+
+- name: Assert storage discovery never selects an unactivated candidate
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_storage_selection.action == 'reuse' or
+        ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+    fail_msg: Candidate storage cannot be treated as active before activation.

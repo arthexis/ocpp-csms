@@ -3,18 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
 import websockets
 from websockets.server import WebSocketServerProtocol
 
+from ocpp_csms.occupancy import connector_occupancy as read_connector_occupancy
 from ocpp_csms.connector_query import physical_connector_ids
+from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.runtime import remove_pid, write_pid
-from ocpp_csms.recovery import recovery_loop
-from ocpp_csms.notifications import notification_loop
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.archive import TransactionArchive
@@ -67,6 +68,7 @@ class CSMSServer:
         return physical_connector_ids(self.events.data_dir, charge_point_id)
 
     def active_transactions(self, charge_point_id: str) -> list[tuple[int, int | None]]:
+        # Historical open transactions, not live connector occupancy.
         return [
             (view.transaction_id, view.connector_id)
             for view in TransactionQuery(self.transactions.data_dir).active(charger=charge_point_id)
@@ -74,6 +76,12 @@ class CSMSServer:
 
     def active_transaction_ids(self, charge_point_id: str) -> list[int]:
         return [transaction_id for transaction_id, _connector_id in self.active_transactions(charge_point_id)]
+
+    def connector_occupancy(self, charge_point_id: str) -> dict[int, str]:
+        """Latest connector reports from the current WebSocket connection only."""
+        if self.session(charge_point_id) is None:
+            return {}
+        return read_connector_occupancy(self.events.data_dir, charge_point_id)
 
     def record_control_event(
         self,
@@ -153,14 +161,7 @@ class CSMSServer:
                         )
                         LOGGER.info("OCPP CSMS listening on %s:%s", self.host, self.port)
                         LOGGER.info("OCPP CSMS control socket listening at %s", socket_path)
-                        worker = asyncio.create_task(recovery_loop(self))
-                        mail_worker = asyncio.create_task(notification_loop(self.events.data_dir))
-                        try:
-                            await asyncio.Future()
-                        finally:
-                            worker.cancel()
-                            mail_worker.cancel()
-                            await asyncio.gather(worker, mail_worker, return_exceptions=True)
+                        await asyncio.Future()
                     finally:
                         object.__setattr__(self, "_tls_listener", None)
                         await tls.stop()

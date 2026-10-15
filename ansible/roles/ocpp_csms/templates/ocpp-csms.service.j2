@@ -11,7 +11,7 @@ Environment="HOME={{ ocpp_csms_service_home }}"
 {% if ocpp_csms_expose | default("") | length > 0 %}
 Environment="OCPP_CSMS_TRUST_LOOPBACK_TLS_PROXY=1"
 {% endif %}
-ExecStart="{{ ocpp_csms_release_command }}" --data-dir "{{ ocpp_csms_data_dir }}" serve --host "{{ ocpp_csms_host }}" --port {{ ocpp_csms_port }}
+ExecStart="{{ ocpp_csms_release_command }}" --data-dir "{{ ocpp_csms_service_data_dir }}" serve --host "{{ ocpp_csms_host }}" --port {{ ocpp_csms_port }}
 Restart=always
 RestartSec=5
 TimeoutStopSec=15

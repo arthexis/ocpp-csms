@@ -5,8 +5,6 @@ ocpp_csms_host: "0.0.0.0"
 ocpp_csms_port: 9000
 ocpp_csms_service_name: "ocpp-csms.service"
 ocpp_csms_command_path: "/usr/local/bin/ocpp-csms"
-# Opt in to activating the periodic mail timer at deployment time.
-ocpp_csms_mail_timer_enabled: false
 
 # A takeover target is discovered from observed host-local OCPP traffic rather
 # than from a catalog of product-specific service names or ports. Keep the
@@ -14,7 +12,9 @@ ocpp_csms_mail_timer_enabled: false
 ocpp_csms_incumbent_interface: "{{ ocpp_discover_interface | default('eth0') }}"
 ocpp_csms_incumbent_observe_seconds: 15
 ocpp_csms_stage_only: false
-ocpp_csms_recover: false
+ocpp_csms_force_handoff: false
+# Skip only post-start charger reconnection verification; retain all safety gates.
+ocpp_csms_offline: false
 ocpp_csms_dev: false
 ocpp_csms_install_mode: online
 ocpp_csms_bundle_path: ""
@@ -69,8 +69,9 @@ ocpp_csms_previous_link: "{{ ocpp_csms_prefix }}/previous"
 
 # Application-owned storage is created by `ocpp-csms init`; Ansible verifies
 # these expected artifacts after initialization without owning their schema.
-ocpp_csms_database_path: "{{ ocpp_csms_data_dir }}/ocpp-csms.sqlite3"
-ocpp_csms_transactions_dir: "{{ ocpp_csms_data_dir }}/transactions"
+ocpp_csms_service_data_dir: "{{ ocpp_csms_data_dir }}"
+ocpp_csms_database_path: "{{ ocpp_csms_service_data_dir }}/ocpp-csms.sqlite3"
+ocpp_csms_transactions_dir: "{{ ocpp_csms_service_data_dir }}/transactions"
 
 # The final preflight payload and reconnect markers bridge the safe staging
 # phase to post-start verification without recomputing which chargers mattered.

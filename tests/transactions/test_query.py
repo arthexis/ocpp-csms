@@ -5,6 +5,7 @@ import pytest
 
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.archive import TransactionArchive
+from ocpp_csms.evidence.store import EventStore
 
 
 CHARGER_A = "charger-a"
@@ -29,12 +30,11 @@ def stop_payload(transaction_id, *, timestamp="2026-10-03T10:10:00Z", **extra):
     }
 
 
-@pytest.mark.asyncio
-async def test_lists_newest_first_and_gets_one_transaction(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    first = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T10:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(first, timestamp="2026-10-03T10:10:00Z"))
-    second = await archive.start(CHARGER_A, start_payload(id_tag="card-b", timestamp="2026-10-03T11:00:00Z"))
+def test_lists_newest_first_and_gets_one_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    first = store.commit_start(CHARGER_A, start_payload(timestamp="2026-10-03T10:00:00Z"))
+    store.commit_transaction_evidence(CHARGER_A, "StopTransaction", stop_payload(first, timestamp="2026-10-03T10:10:00Z"))
+    second = store.commit_start(CHARGER_A, start_payload(id_tag="card-b", timestamp="2026-10-03T11:00:00Z"))
 
     query = TransactionQuery(tmp_path)
 
@@ -43,12 +43,11 @@ async def test_lists_newest_first_and_gets_one_transaction(tmp_path):
     assert query.get(9999) is None
 
 
-@pytest.mark.asyncio
-async def test_last_includes_newest_active_transaction(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    finished = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
-    active = await archive.start(CHARGER_A, start_payload(id_tag="current", timestamp="2026-10-03T10:00:00Z"))
+def test_last_includes_newest_active_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    finished = store.commit_start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
+    store.commit_transaction_evidence(CHARGER_A, "StopTransaction", stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
+    active = store.commit_start(CHARGER_A, start_payload(id_tag="current", timestamp="2026-10-03T10:00:00Z"))
 
     query = TransactionQuery(tmp_path)
 
@@ -57,10 +56,9 @@ async def test_last_includes_newest_active_transaction(tmp_path):
     assert query.last().transaction_id in {view.transaction_id for view in query.active()}
 
 
-@pytest.mark.asyncio
-async def test_last_returns_active_when_only_active_transaction_exists(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    active = await archive.start(CHARGER_A, start_payload())
+def test_last_returns_active_when_only_active_transaction_exists(tmp_path):
+    store = EventStore(tmp_path)
+    active = store.commit_start(CHARGER_A, start_payload())
 
     query = TransactionQuery(tmp_path)
 
@@ -68,59 +66,23 @@ async def test_last_returns_active_when_only_active_transaction_exists(tmp_path)
     assert query.last().transaction_id == active
 
 
-@pytest.mark.asyncio
-async def test_recovered_unstopped_transaction_can_be_last(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    finished = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(finished, timestamp="2026-10-03T09:30:00Z"))
-    await archive.meter_values(
-        CHARGER_A,
-        {
-            "connector_id": 2,
-            "transaction_id": 225,
-            "meter_value": [{"timestamp": "2026-10-03T11:00:00Z"}],
-        },
-    )
-
-    query = TransactionQuery(tmp_path)
-
-    assert [view.transaction_id for view in query.active()] == [225]
-    assert query.get(225).status == "recovered"
-    assert query.last().transaction_id == 225
-
-
-@pytest.mark.asyncio
-async def test_recovered_stopped_transaction_can_be_last(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    local = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T09:00:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(local, timestamp="2026-10-03T09:30:00Z"))
-    await archive.stop(CHARGER_A, stop_payload(225, timestamp="2026-10-03T11:00:00Z"))
-
-    last = TransactionQuery(tmp_path).last()
-
-    assert last.transaction_id == 225
-    assert last.status == "stopped"
-    assert last.record["origin"] == "recovered"
-
-
-@pytest.mark.asyncio
-async def test_filters_apply_before_last_selection(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    a1 = await archive.start(
+def test_filters_apply_before_last_selection(tmp_path):
+    store = EventStore(tmp_path)
+    a1 = store.commit_start(
         CHARGER_A,
         start_payload(connector=1, id_tag="alpha", timestamp="2026-10-03T08:00:00Z"),
     )
-    await archive.stop(CHARGER_A, stop_payload(a1, timestamp="2026-10-03T08:30:00Z"))
-    b1 = await archive.start(
+    store.commit_transaction_evidence(CHARGER_A, "StopTransaction", stop_payload(a1, timestamp="2026-10-03T08:30:00Z"))
+    b1 = store.commit_start(
         CHARGER_B,
         start_payload(connector=2, id_tag="beta", timestamp="2026-10-03T09:00:00Z"),
     )
-    await archive.stop(CHARGER_B, stop_payload(b1, timestamp="2026-10-03T09:30:00Z"))
-    a2 = await archive.start(
+    store.commit_transaction_evidence(CHARGER_B, "StopTransaction", stop_payload(b1, timestamp="2026-10-03T09:30:00Z"))
+    a2 = store.commit_start(
         CHARGER_A,
         start_payload(connector=2, id_tag="alpha", timestamp="2026-10-03T10:00:00Z"),
     )
-    await archive.stop(CHARGER_A, stop_payload(a2, timestamp="2026-10-03T10:30:00Z"))
+    store.commit_transaction_evidence(CHARGER_A, "StopTransaction", stop_payload(a2, timestamp="2026-10-03T10:30:00Z"))
 
     query = TransactionQuery(tmp_path)
 
@@ -129,17 +91,16 @@ async def test_filters_apply_before_last_selection(tmp_path):
     assert query.last(id_tag="beta").transaction_id == b1
 
 
-@pytest.mark.asyncio
-async def test_list_filters_time_and_limit(tmp_path):
-    archive = TransactionArchive(tmp_path)
+def test_list_filters_time_and_limit(tmp_path):
+    store = EventStore(tmp_path)
     ids = []
     for hour in (8, 9, 10):
-        transaction_id = await archive.start(
+        transaction_id = store.commit_start(
             CHARGER_A,
             start_payload(timestamp=f"2026-10-03T{hour:02d}:00:00Z", id_tag=f"card-{hour}"),
         )
-        await archive.stop(
-            CHARGER_A,
+        store.commit_transaction_evidence(
+            CHARGER_A, "StopTransaction",
             stop_payload(transaction_id, timestamp=f"2026-10-03T{hour:02d}:30:00Z"),
         )
         ids.append(transaction_id)
@@ -152,41 +113,6 @@ async def test_list_filters_time_and_limit(tmp_path):
     )
 
     assert [view.transaction_id for view in matches] == [ids[1]]
-
-
-@pytest.mark.asyncio
-async def test_connector_filter_uses_recovered_meter_evidence(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    await archive.meter_values(
-        CHARGER_A,
-        {
-            "connector_id": 4,
-            "transaction_id": 225,
-            "meter_value": [{"timestamp": "2026-10-03T11:00:00Z"}],
-        },
-    )
-
-    matches = TransactionQuery(tmp_path).list(connector=4)
-
-    assert [view.transaction_id for view in matches] == [225]
-    assert matches[0].connector_id == 4
-
-
-@pytest.mark.asyncio
-async def test_unresolved_collision_evidence_is_attached_to_view(tmp_path):
-    archive = TransactionArchive(tmp_path)
-    transaction_id = await archive.start(CHARGER_A, start_payload(timestamp="2026-10-03T10:00:00Z"))
-    await archive.stop(
-        CHARGER_A,
-        stop_payload(transaction_id, timestamp="2026-10-03T09:00:00Z"),
-    )
-
-    view = TransactionQuery(tmp_path).get(transaction_id)
-
-    assert view.status == "open"
-    assert len(view.unresolved) == 1
-    assert view.unresolved[0]["transaction_id"] == transaction_id
-    assert view.unresolved[0]["reason"] == "message_predates_local_start"
 
 
 def test_query_skips_malformed_archive_files(tmp_path):

@@ -224,9 +224,5 @@ def format_transaction(view: TransactionView, *, local_time: bool = False) -> st
     if origin == "recovered" and not start:
         recovered_by = "StopTransaction" if stop else "MeterValues" if record.get("meter_values") else "historical traffic"
         lines.extend(("", "Recovery:", "  start:      unknown", f"  recovered:  {recovered_by}"))
-    if view.unresolved:
-        lines.extend(("", "Warnings:"))
-        for unresolved in view.unresolved:
-            lines.append(f"  unresolved {unresolved.get('message_type') or 'OCPP'}: {unresolved.get('reason') or 'unknown'}")
     lines.extend(("", f"Archive:      {_archive_path(view)}"))
     return "\n".join(lines)

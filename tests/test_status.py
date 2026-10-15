@@ -31,7 +31,7 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
             "timestamp": "2026-10-01T15:00:01Z",
         },
     )
-    events.record_transaction_start(7, "charger-a", start_payload())
+    transaction_id = events.commit_start("charger-a", start_payload())
 
     data = appliance_status(tmp_path)
     charger = data["chargers"][0]
@@ -39,13 +39,12 @@ def test_status_uses_derived_connector_and_transaction_state(tmp_path: Path):
     assert data["server"] == "running"
     assert charger.charger_id == "charger-a"
     assert charger.status == "Charging"
-    assert charger.transaction_id == 7
+    assert charger.transaction_id == transaction_id
     assert charger.id_tag == "card-a"
 
 
-def test_charging_filter_uses_transaction_query_activity(tmp_path: Path):
+def test_charging_filter_uses_reported_connector_state(tmp_path: Path):
     events = EventStore(tmp_path)
-    archive = TransactionArchive(tmp_path)
     for charger in ("charger-a", "charger-b"):
         events.record_runtime("charger_connected", charger_id=charger)
         events.record_connector_status(
@@ -53,21 +52,23 @@ def test_charging_filter_uses_transaction_query_activity(tmp_path: Path):
             {"connector_id": 1, "status": "Charging", "timestamp": "2026-10-01T15:00:00Z"},
         )
 
-    active = asyncio.run(archive.start("charger-a", start_payload()))
-    finished = asyncio.run(
-        archive.start("charger-b", start_payload(timestamp="2026-10-01T14:00:00Z"))
-    )
-    asyncio.run(
-        archive.stop(
-            "charger-b",
+    active = events.commit_start("charger-a", start_payload())
+    finished = events.commit_start("charger-b", start_payload(timestamp="2026-10-01T14:00:00Z"))
+    events.commit_transaction_evidence(
+            "charger-b", "StopTransaction",
             {
                 "transaction_id": finished,
                 "meter_stop": 1200,
                 "timestamp": "2026-10-01T14:30:00Z",
             },
         )
-    )
 
+    # A real stop does not itself replace the last reported connector status.
+    # The charger reports that connector B is available again.
+    events.record_connector_status(
+        "charger-b",
+        {"connector_id": 1, "status": "Available", "timestamp": "2026-10-01T15:01:00Z"},
+    )
     data = appliance_status(tmp_path)
 
     assert data["active_chargers"] == ["charger-a"]
@@ -176,3 +177,26 @@ def test_missing_subprotocol_does_not_reject_charger(tmp_path: Path):
 
     assert charger.connected is True
     assert charger.subprotocol is None
+
+
+def test_historical_open_does_not_claim_charging_without_connector_evidence(tmp_path: Path):
+    events = EventStore(tmp_path)
+    transaction_id = events.commit_start("charger-a", start_payload())
+    data = appliance_status(tmp_path)
+    assert data["active_chargers"] == []
+    charger = data["chargers"][0]
+    assert charger.status is None
+    assert charger.transaction_id == transaction_id
+
+
+def test_available_status_supersedes_historical_open_for_charging_filter(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.commit_start("charger-a", start_payload())
+    events.record_connector_status(
+        "charger-a",
+        {"connector_id": 1, "status": "Available", "timestamp": "2026-10-01T15:02:00Z"},
+    )
+    data = appliance_status(tmp_path)
+    assert data["active_chargers"] == []
+    assert data["chargers"][0].status == "Available"
+    assert "charger-a" not in format_status(data, charging_only=True)

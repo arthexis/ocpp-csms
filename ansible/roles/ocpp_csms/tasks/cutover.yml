@@ -22,7 +22,7 @@
   ansible.builtin.set_fact:
     ocpp_csms_activation_required: >-
       {{
-        (ocpp_csms_schema_action == 'upgrade')
+        (ocpp_csms_storage_selection.action == 'create')
         or (ocpp_csms_incumbent_service | length > 0)
         or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
@@ -46,7 +46,7 @@
       - ocpp_csms.install_cutover
       - capture-baseline
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_active_data_dir }}"
       - --preflight-json
       - "{{ ocpp_csms_final_preflight_path }}"
       - --output
@@ -88,18 +88,19 @@
         state: stopped
       when: ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Upgrade database schema after service stop
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - schema-upgrade
-          - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
-      when: ocpp_csms_schema_action == 'upgrade'
+    # The storage plan and candidate were verified before downtime. Recheck
+    # their relationship while stopped, before any schema handoff operation.
+    - name: Verify prepared storage handoff contract after service stop
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_storage_selection.action in ['create', 'reuse']
+          - ocpp_csms_storage_selection.action == 'reuse' or
+            ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+        fail_msg: Storage handoff has an invalid active/candidate selection.
 
-    - name: Verify database schema and SQLite integrity before activation
+    # Verify the already prepared candidate while all writers are stopped.
+    # No historical database is upgraded or relocated during a handoff.
+    - name: Verify selected storage before service activation
       ansible.builtin.command:
         argv:
           - "{{ ocpp_csms_release_venv }}/bin/python"
@@ -107,9 +108,29 @@
           - ocpp_csms.install_cutover
           - schema-verify
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_storage_selection.target }}"
       changed_when: false
-      when: ocpp_csms_schema_action != 'create'
+
+    # Activate a fresh prepared schema only with every prior writer stopped.
+    - name: Record that versioned storage activation started
+      ansible.builtin.set_fact:
+        ocpp_csms_versioned_activation_started: true
+      when: ocpp_csms_storage_selection.action == 'create'
+
+    - name: Atomically select prepared schema storage
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - storage-activate
+          - --storage-root
+          - "{{ ocpp_csms_data_dir }}"
+          - --target
+          - "{{ ocpp_csms_storage_selection.target }}"
+      register: ocpp_csms_storage_activation
+      changed_when: true
+      when: ocpp_csms_storage_selection.action == 'create'
 
     - name: Install live OCPP CSMS systemd unit
       become: true
@@ -123,13 +144,16 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    - name: Initialize OCPP CSMS storage with candidate release
+    - name: Verify initialized database WAL and SQLite integrity
       ansible.builtin.command:
         argv:
-          - "{{ ocpp_csms_release_command }}"
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.install_cutover
+          - schema-verify
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
-          - init
+          - "{{ ocpp_csms_service_data_dir }}"
+      changed_when: false
 
     - name: Inspect initialized OCPP CSMS database
       ansible.builtin.stat:
@@ -141,11 +165,6 @@
         path: "{{ ocpp_csms_transactions_dir }}"
       register: ocpp_csms_transactions_state
 
-    - name: Verify OCPP CSMS data directory is writable
-      ansible.builtin.command:
-        argv: [test, -w, "{{ ocpp_csms_data_dir }}"]
-      changed_when: false
-
     - name: Assert initialized OCPP CSMS storage
       ansible.builtin.assert:
         that:
@@ -154,6 +173,41 @@
           - ocpp_csms_transactions_state.stat.exists | default(false)
           - ocpp_csms_transactions_state.stat.isdir | default(false)
         fail_msg: OCPP CSMS init did not produce expected storage.
+
+    - name: Verify OCPP CSMS storage access as systemd service user
+      become: true
+      become_user: "{{ ocpp_csms_service_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -c
+          - |
+            import os
+            import sqlite3
+            import sys
+            from pathlib import Path
+
+            data_dir, database, archives = map(Path, sys.argv[1:])
+            for directory in (data_dir, archives):
+                if not directory.is_dir() or not os.access(directory, os.R_OK | os.W_OK | os.X_OK):
+                    raise SystemExit(f"CSMS service cannot access directory: {directory}")
+            if not database.is_file() or not os.access(database, os.R_OK | os.W_OK):
+                raise SystemExit(f"CSMS service cannot access database: {database}")
+            connection = sqlite3.connect(database.resolve().as_uri() + "?mode=rw", uri=True, timeout=1)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.rollback()
+            finally:
+                connection.close()
+          - "{{ ocpp_csms_service_data_dir }}"
+          - "{{ ocpp_csms_database_path }}"
+          - "{{ ocpp_csms_transactions_dir }}"
+      changed_when: false
+
+    - name: Mark reused database as potentially written before candidate starts
+      ansible.builtin.set_fact:
+        ocpp_csms_reused_writer_started: true
+      when: ocpp_csms_storage_selection.action == 'reuse'
 
     - name: Enable and start candidate OCPP CSMS service
       become: true
@@ -174,12 +228,13 @@
         argv:
           - "{{ ocpp_csms_release_command }}"
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
           - status
       changed_when: false
 
     - name: Verify previously connected chargers reconnect
       ansible.builtin.include_tasks: reconnect.yml
+      when: not (ocpp_csms_offline | bool)
 
     - name: Point previous at successfully active release
       ansible.builtin.file:
@@ -208,25 +263,23 @@
       when: ocpp_csms_incumbent_service | length > 0
 
   rescue:
-    # Incumbent takeover is independent of the new CSMS database. If it was the
-    # production owner before cutover, restore it first even when this was the
-    # first managed ocpp-csms release.
-    - name: Restore incumbent OCPP service after failed takeover
+    # Once storage has been activated, or the replacement writer might have
+    # started, repair forward. Never infer rollback safety from an empty table:
+    # a restarted installer cannot know what a previous process acknowledged.
+    - name: Refuse automatic rollback after activation or writer start
+      ansible.builtin.assert:
+        that:
+          - not (ocpp_csms_versioned_activation_started | default(false) | bool)
+          - not (ocpp_csms_reused_writer_started | default(false) | bool)
+        fail_msg: Activation or candidate writer started; preserve database and release for forward repair.
+
+    # Only failures before activation may restore the incumbent. No database
+    # pointer or transaction archive is ever modified by this rescue path.
+    - name: Restore incumbent after pre-activation failure
       ansible.builtin.include_tasks: incumbent_restore.yml
       when: ocpp_csms_incumbent_service | length > 0
 
-    - name: Stop failed replacement before rollback
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ ocpp_csms_service_name }}"
-        state: stopped
-      failed_when: false
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-
-    - name: Restore previous live systemd unit
+    - name: Restore previous systemd unit before candidate start
       become: true
       ansible.builtin.copy:
         src: "{{ ocpp_csms_previous_service_path }}"
@@ -236,18 +289,13 @@
       notify: Reload systemd daemon
       when:
         - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Apply rollback systemd daemon reload
+    - name: Apply pre-activation systemd reload
       ansible.builtin.meta: flush_handlers
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
 
-    - name: Restart previous OCPP CSMS service
+    - name: Restart previous managed service after pre-activation failure
       become: true
       ansible.builtin.systemd_service:
         name: "{{ ocpp_csms_service_name }}"
@@ -255,51 +303,14 @@
         state: started
       when:
         - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Verify rollback listener
-      ansible.builtin.wait_for:
-        host: "{{ ocpp_csms_verify_host }}"
-        port: "{{ ocpp_csms_port }}"
-        timeout: "{{ ocpp_csms_listener_timeout }}"
-        state: started
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-        - ocpp_csms_live_service_state.stat.exists | default(false)
-
-    - name: Report failed incumbent OCPP service takeover after restoration
+    - name: Report unsuccessful pre-activation handoff
       ansible.builtin.fail:
         msg: >-
-          OCPP CSMS takeover failed and incumbent OCPP service was restored:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when: ocpp_csms_incumbent_service | length > 0
-
-    - name: Report handoff failure after safe rollback
-      ansible.builtin.fail:
-        msg: >-
-          OCPP CSMS handoff verification failed and the previous release was restored:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-        - ocpp_csms_live_service_state.stat.exists | default(false)
-
-    - name: Report handoff failure without automatic rollback
-      ansible.builtin.fail:
-        msg: >-
-          OCPP CSMS handoff verification failed without a restorable previous managed release:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - >-
-          (ocpp_csms_schema_action == 'upgrade')
-          or not (ocpp_csms_current_state.stat.islnk | default(false))
-          or not (ocpp_csms_live_service_state.stat.exists | default(false))
+          OCPP CSMS handoff failed before activation; previous service restored
+          when available: {{ ansible_failed_result.msg | default('verification failure') }}
 
 - name: Ensure converged OCPP CSMS service is enabled and running
   become: true
@@ -322,7 +333,22 @@
     argv:
       - "{{ ocpp_csms_runtime_command }}"
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_service_data_dir }}"
       - status
+  changed_when: false
+  when: not (ocpp_csms_activation_required | bool)
+
+# Read-only verification on unchanged deployments: never switch journal mode
+# against a running charger service. A non-WAL database fails closed and
+# requires a controlled cutover rather than an in-place live conversion.
+- name: Verify converged database WAL and SQLite integrity
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-verify
+      - --data-dir
+      - "{{ ocpp_csms_service_data_dir }}"
   changed_when: false
   when: not (ocpp_csms_activation_required | bool)

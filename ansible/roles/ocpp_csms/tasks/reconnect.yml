@@ -8,7 +8,7 @@
       - ocpp_csms.install_cutover
       - wait-reconnect
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_service_data_dir }}"
       - --baseline
       - "{{ ocpp_csms_reconnect_baseline_path }}"
       - --timeout
@@ -24,7 +24,7 @@
       - ocpp_csms.install_cutover
       - wait-any
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_service_data_dir }}"
       - --timeout
       - "{{ ocpp_csms_reconnect_timeout }}"
   changed_when: false

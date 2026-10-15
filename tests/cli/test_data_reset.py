@@ -129,3 +129,34 @@ def test_refuses_ambiguous_cp_archive_without_swapping(tmp_path):
 def test_requires_exclusive_scope(tmp_path):
     with pytest.raises(ValueError, match="exactly one"):
         reset_test_data(tmp_path, all_data=True, cp="ABB-A")
+
+
+def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
+    """Committed WAL frames must survive staging even without a checkpoint."""
+    import sqlite3
+    from ocpp_csms.cli.appliance import initialize_storage
+
+    data = tmp_path / "ocpp-csms-data"
+    initialize_storage(str(data))
+    database = data / "ocpp-csms.sqlite3"
+    writer = sqlite3.connect(database)
+    try:
+        assert writer.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute(
+            "INSERT INTO transactions (transaction_id, charger_id, state, last_activity_at) "
+            "VALUES (701, 'KEEP', 'stopped', '2026-01-01')"
+        )
+        writer.commit()
+        with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
+             patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
+             patch("ocpp_csms.cli.data.evaluate_preflight", return_value=permitted()):
+            result = reset_test_data(data, cp="REMOVE", now=True)
+        with sqlite3.connect(data / "ocpp-csms.sqlite3") as check:
+            assert check.execute(
+                "SELECT charger_id FROM transactions WHERE transaction_id=701"
+            ).fetchone() == ("KEEP",)
+            assert check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert Path(result["backup"]).exists()
+    finally:
+        writer.close()

@@ -36,8 +36,6 @@ def transaction_export_metadata(record: dict[str, Any]) -> dict[str, Any]:
                         "received_at": _utc(received),
                     })
     status = record.get("status")
-    recovered = record.get("origin") == "recovered" or start is None
-    inferred = status == "inferred_stopped"
     missing_meter = start is None or stop is None or start.get("meter_start") is None or stop.get("meter_stop") is None
     return {
         "start_event_at": _utc(start.get("timestamp")) if start else None,
@@ -46,12 +44,8 @@ def transaction_export_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "stop_received_at": _utc(record.get("stop_received_at")),
         "meter_sample_times": samples,
         "quality": {
-            "active": status in {"open", "recovered"} and stop is None,
+            "active": status == "open" and stop is None,
             "incomplete": start is None or stop is None,
             "missing_meter": missing_meter,
-            "recovered": recovered,
-            "inferred": inferred,
-            "corrected": isinstance(record.get("recovery"), dict)
-                         and record["recovery"].get("reconciled_at") is not None,
         },
     }

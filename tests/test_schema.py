@@ -27,11 +27,11 @@ def test_missing_database_inspection_is_read_only(tmp_path):
     assert not data_dir.exists()
 
 
-def test_current_schema_is_created_directly_at_version_six(tmp_path):
+def test_current_schema_is_created_directly_at_version_eight(tmp_path):
     info = create_current_schema(tmp_path)
 
     assert info.exists is True
-    assert info.version == CURRENT_SCHEMA_VERSION == 6
+    assert info.version == CURRENT_SCHEMA_VERSION == 8
     with sqlite3.connect(info.path) as connection:
         objects = {
             (kind, name)
@@ -41,7 +41,7 @@ def test_current_schema_is_created_directly_at_version_six(tmp_path):
         }
         version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-    assert version == 6
+    assert version == CURRENT_SCHEMA_VERSION
     assert ("table", "events") in objects
     assert ("table", "runtime_events") in objects
     assert ("table", "transactions") in objects
@@ -68,7 +68,7 @@ def test_inspection_reports_newer_schema_without_modifying_it(tmp_path):
     info = inspect_schema(tmp_path)
 
     assert info.version == 99
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 6"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 8"):
         require_supported_schema(info)
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 99
@@ -79,12 +79,12 @@ def test_event_store_refuses_newer_schema(tmp_path):
     with sqlite3.connect(path) as connection:
         connection.execute("PRAGMA user_version = 99")
 
-    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 6"):
+    with pytest.raises(RuntimeError, match="schema 99 is newer than supported 8"):
         EventStore(tmp_path)
 
 
 def test_event_store_refuses_older_schema_without_mutating_it(tmp_path, schema_one):
-    with pytest.raises(RuntimeError, match="schema 1 is older than required 6; explicit upgrade required"):
+    with pytest.raises(RuntimeError, match="schema 1 is older than required 8; explicit upgrade required"):
         EventStore(tmp_path)
 
     with sqlite3.connect(schema_one) as connection:
@@ -105,16 +105,16 @@ def test_schema_one_has_explicit_upgrade_path(tmp_path, schema_one):
     assert schema_backup_path(info).name == f"{DATABASE_FILENAME}.schema-1.bak"
 
 
-def test_upgrade_schema_one_to_six_preserves_evidence_and_creates_backup(tmp_path, schema_one):
+def test_upgrade_schema_one_to_seven_preserves_evidence_and_creates_backup(tmp_path, schema_one):
     info = inspect_schema(tmp_path)
     backup = schema_backup_path(info)
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 6
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
     assert backup.exists()
     with sqlite3.connect(schema_one) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert connection.execute(
             "SELECT event, charger_id FROM runtime_events"
         ).fetchone() == ("legacy_evidence", "charger-a")
@@ -148,7 +148,7 @@ def test_upgrade_refuses_unversioned_database(tmp_path):
     info = inspect_schema(tmp_path)
     assert info.version == 0
     assert can_upgrade_schema(info) is False
-    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 6"):
+    with pytest.raises(RuntimeError, match="no supported schema upgrade from 0 to 8"):
         upgrade_schema(tmp_path)
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='legacy'").fetchone() == ("legacy",)
@@ -174,7 +174,7 @@ def test_current_schema_creation_refuses_existing_database(tmp_path):
         create_current_schema(tmp_path)
 
 
-def test_schema_two_upgrades_to_six_with_rfid_history_and_metadata(tmp_path):
+def test_schema_two_upgrades_to_seven_with_rfid_history_and_metadata(tmp_path):
     path = tmp_path / DATABASE_FILENAME
     with sqlite3.connect(path) as connection:
         connection.executescript(
@@ -226,7 +226,7 @@ def test_schema_two_upgrades_to_six_with_rfid_history_and_metadata(tmp_path):
 
     upgraded = upgrade_schema(tmp_path)
 
-    assert upgraded.version == 6
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
     with sqlite3.connect(path) as connection:
         tables = {
             row[0]
@@ -256,3 +256,107 @@ def test_new_database_gets_new_source_identity(tmp_path):
     create_current_schema(second_dir)
 
     assert source_id(first_dir) != source_id(second_dir)
+
+
+def test_explicit_upgrade_from_v6_preserves_high_water_and_existing_rows(tmp_path):
+    info = create_current_schema(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        connection.execute(
+            """INSERT INTO transactions
+               (transaction_id, charger_id, state, last_activity_at)
+               VALUES (241, 'charger-a', 'open', '2026-10-01T00:00:00Z')"""
+        )
+        connection.execute("DROP TABLE start_identities")
+        connection.execute("DROP TABLE transaction_allocator")
+        connection.execute("PRAGMA user_version = 6")
+    with pytest.raises(RuntimeError, match="explicit upgrade required"):
+        EventStore(tmp_path)
+    assert inspect_schema(tmp_path).version == 6
+    backup = schema_backup_path(inspect_schema(tmp_path))
+    upgraded = upgrade_schema(tmp_path)
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
+    assert backup.exists()
+    with sqlite3.connect(backup) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert connection.execute("SELECT transaction_id FROM transactions").fetchone() == (241,)
+    store = EventStore(tmp_path)
+    payload = {
+        "connector_id": 1, "id_tag": "card-a",
+        "meter_start": 100, "timestamp": "2026-10-01T00:01:00Z",
+    }
+    assert store.commit_start("charger-a", payload) == 242
+    assert EventStore(tmp_path).commit_start("charger-a", payload) == 242
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("SELECT last_id FROM transaction_allocator").fetchone() == (242,)
+        assert connection.execute("SELECT transaction_id FROM transactions ORDER BY transaction_id").fetchall() == [(241,), (242,)]
+
+
+def test_fresh_schema_has_no_recovery_table(tmp_path):
+    import sqlite3
+    from ocpp_csms.schema import create_current_schema, database_path
+
+    create_current_schema(tmp_path)
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
+        ).fetchone() is None
+
+
+
+def test_upgrade_schema_seven_drops_recovery_table(tmp_path):
+    import sqlite3
+    from ocpp_csms.schema import create_current_schema, database_path, upgrade_schema
+
+    create_current_schema(tmp_path)
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        db.execute(
+            "CREATE TABLE transaction_recoveries (transaction_id INTEGER PRIMARY KEY, reason TEXT)"
+        )
+        db.execute("INSERT INTO transaction_recoveries VALUES (42, 'legacy')")
+        db.execute("PRAGMA user_version = 7")
+    upgraded = upgrade_schema(tmp_path)
+    assert upgraded.version == CURRENT_SCHEMA_VERSION
+    with sqlite3.connect(database_path(tmp_path)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'"
+        ).fetchone() is None
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_wal_enabled_for_new_database_and_restarts(tmp_path):
+    store = EventStore(tmp_path)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    EventStore(tmp_path)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_existing_current_database_converts_to_wal_without_replacing_identity(tmp_path):
+    from ocpp_csms.schema import ensure_wal
+    info = create_current_schema(tmp_path)
+    original_id = source_id(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    ensure_wal(tmp_path)
+    assert source_id(tmp_path) == original_id
+    with sqlite3.connect(info.path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_wal_conversion_refuses_active_reader_without_destroying_database(tmp_path):
+    from ocpp_csms.schema import ensure_wal
+    info = create_current_schema(tmp_path)
+    original_id = source_id(tmp_path)
+    with sqlite3.connect(info.path) as connection:
+        connection.execute("PRAGMA journal_mode=DELETE")
+    reader = sqlite3.connect(info.path)
+    try:
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM appliance_metadata").fetchall()
+        with pytest.raises(RuntimeError, match="WAL readiness failed"):
+            ensure_wal(tmp_path)
+    finally:
+        reader.close()
+    assert source_id(tmp_path) == original_id
+    ensure_wal(tmp_path)

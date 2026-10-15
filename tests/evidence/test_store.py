@@ -5,6 +5,7 @@ from contextlib import closing
 import pytest
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME, EventStore
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 
 
 def database(tmp_path):
@@ -48,7 +49,7 @@ def test_event_store_records_ocpp_and_runtime_events(tmp_path):
     )
     assert json.loads(event[4])["id_tag"] == "card-a"
     assert runtime == ("charger_connected", "charger-a")
-    assert version == 6
+    assert version == CURRENT_SCHEMA_VERSION
 
 
 def test_event_store_does_not_wait_for_locked_database(tmp_path):
@@ -72,13 +73,12 @@ def test_start_retry_returns_existing_transaction(tmp_path):
         "timestamp": "2026-10-01T17:28:16Z",
     }
 
-    store.record_transaction_start(227, "charger-a", payload)
-
-    assert store.find_recent_start("charger-a", payload) == 227
+    transaction_id = store.commit_start("charger-a", payload)
+    assert store.commit_start("charger-a", payload) == transaction_id
     assert fetchall(
         tmp_path,
         "SELECT transaction_id, state FROM transactions",
-    ) == [(227, "open")]
+    ) == [(transaction_id, "open")]
 
 
 def test_equal_timestamp_later_receipt_wins(tmp_path):
@@ -128,7 +128,7 @@ def test_older_status_does_not_replace_newer_connector_state(tmp_path):
     ) == ("Charging",)
 
 
-def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path):
+def test_terminal_status_does_not_mutate_transaction_history(tmp_path):
     store = EventStore(tmp_path)
     start = {
         "connector_id": 2,
@@ -136,7 +136,7 @@ def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path
         "meter_start": 18462750,
         "timestamp": "2026-10-01T17:28:16Z",
     }
-    store.record_transaction_start(227, "charger-a", start)
+    transaction_id = store.commit_start("charger-a", start)
 
     store.record_connector_status(
         "charger-a",
@@ -150,14 +150,13 @@ def test_terminal_status_ends_open_transaction_without_fabricating_stop(tmp_path
 
     assert fetchone(
         tmp_path,
-        "SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = 227",
-    ) == ("ended", None, None)
+        f"SELECT state, meter_stop, stopped_at FROM transactions WHERE transaction_id = {transaction_id}",
+    ) == ("open", None, None)
 
 
-def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
+def test_status_notifications_never_close_transaction_history(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(
-        7,
+    transaction_id = store.commit_start(
         "charger-a",
         {
             "connector_id": 1,
@@ -177,7 +176,7 @@ def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
     ) is True
     assert fetchone(
         tmp_path,
-        "SELECT state FROM transactions WHERE transaction_id = 7",
+        f"SELECT state FROM transactions WHERE transaction_id = {transaction_id}",
     ) == ("open",)
 
     assert store.record_connector_status(
@@ -190,18 +189,18 @@ def test_delayed_terminal_status_does_not_end_newer_session(tmp_path):
     ) is True
     assert fetchone(
         tmp_path,
-        "SELECT state FROM transactions WHERE transaction_id = 7",
-    ) == ("ended",)
+        f"SELECT state FROM transactions WHERE transaction_id = {transaction_id}",
+    ) == ("open",)
 
 
-def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
+def test_terminal_status_does_not_end_any_historical_transaction(tmp_path):
     store = EventStore(tmp_path)
+    allocated_ids = []
     for transaction_id, timestamp in (
         (1, "2026-10-01T15:00:00Z"),
         (2, "2026-10-01T15:10:00Z"),
     ):
-        store.record_transaction_start(
-            transaction_id,
+        allocated_id = store.commit_start(
             "charger-a",
             {
                 "connector_id": 1,
@@ -210,6 +209,7 @@ def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
                 "timestamp": timestamp,
             },
         )
+        allocated_ids.append(allocated_id)
 
     store.record_connector_status(
         "charger-a",
@@ -223,13 +223,12 @@ def test_terminal_status_only_ends_newest_open_transaction(tmp_path):
     assert fetchall(
         tmp_path,
         "SELECT transaction_id, state FROM transactions ORDER BY transaction_id",
-    ) == [(1, "open"), (2, "ended")]
+    ) == [(transaction_id, "open") for transaction_id in allocated_ids]
 
 
 def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
     store = EventStore(tmp_path)
-    store.record_transaction_start(
-        140,
+    transaction_id = store.commit_start(
         "charger-a",
         {
             "connector_id": 1,
@@ -239,7 +238,7 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
         },
     )
     stop = {
-        "transaction_id": 140,
+        "transaction_id": transaction_id,
         "meter_stop": 21499690,
         "timestamp": "2026-06-18T17:44:40Z",
     }
@@ -249,5 +248,156 @@ def test_duplicate_stop_is_idempotent_and_summary_calculates_energy(tmp_path):
 
     assert fetchone(
         tmp_path,
-        "SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = 140",
+        f"SELECT state, energy_wh FROM transaction_summary WHERE transaction_id = {transaction_id}",
     ) == ("stopped", 1170)
+
+
+def export_events(tmp_path, after_id=0, limit=100):
+    """Test-side model of the durable event cursor; not a consumer API."""
+    with closing(sqlite3.connect(database(tmp_path))) as connection:
+        return connection.execute(
+            "SELECT id, action, transaction_id, payload_json FROM events "
+            "WHERE id > ? ORDER BY id LIMIT ?",
+            (after_id, limit),
+        ).fetchall()
+
+
+def test_a5_retransmissions_have_distinct_durable_event_ids(tmp_path):
+    payload = {"connector_id": 1, "id_tag": "card-a",
+               "meter_start": 100, "timestamp": "2026-10-03T10:00:00Z"}
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "StartTransaction", payload, transaction_id=41)
+    store.record_ocpp("charger-a", "StartTransaction", payload, transaction_id=41)
+    rows = export_events(tmp_path)
+    assert len(rows) == 2
+    assert rows[0][0] < rows[1][0]
+    assert [row[2] for row in rows] == [41, 41]
+    assert [json.loads(row[3]) for row in rows] == [payload, payload]
+    assert export_events(tmp_path, after_id=rows[0][0]) == rows[1:]
+
+
+def test_a5_cursor_pages_replay_identically_after_restart(tmp_path):
+    store = EventStore(tmp_path)
+    for n in range(7):
+        store.record_ocpp("charger-a", "MeterValues", {
+            "transaction_id": 41, "sequence": n,
+        })
+    expected = export_events(tmp_path)
+    cursor = 0
+    pages = []
+    while True:
+        page = export_events(tmp_path, after_id=cursor, limit=2)
+        if not page:
+            break
+        assert all(row[0] > cursor for row in page)
+        pages.extend(page)
+        cursor = page[-1][0]
+    assert pages == expected
+    EventStore(tmp_path)
+    assert export_events(tmp_path) == expected
+    assert export_events(tmp_path, after_id=expected[2][0]) == expected[3:]
+
+
+def test_a5_late_stop_is_new_event_not_rewrite(tmp_path):
+    store = EventStore(tmp_path)
+    start = {"connector_id": 1, "id_tag": "card-a",
+             "meter_start": 100, "timestamp": "2026-10-03T10:00:00Z"}
+    store.record_ocpp("charger-a", "StartTransaction", start, transaction_id=41)
+    previous = export_events(tmp_path)
+    stop = {"transaction_id": 41, "meter_stop": 150,
+            "timestamp": "2026-10-03T10:10:00Z"}
+    store.record_ocpp("charger-a", "StopTransaction", stop)
+    assert export_events(tmp_path)[:1] == previous
+    late = export_events(tmp_path, after_id=previous[-1][0])
+    assert len(late) == 1
+    assert late[0][1:3] == ("StopTransaction", 41)
+    assert json.loads(late[0][3]) == stop
+
+
+def test_a5_failed_event_insert_never_advances_durable_cursor(tmp_path, monkeypatch):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "Heartbeat", {})
+    before = export_events(tmp_path)
+    original_connect = store._connect
+
+    def fail_connect():
+        connection = original_connect()
+        connection.execute("BEGIN EXCLUSIVE")
+        connection.close()
+        raise sqlite3.OperationalError("simulated write failure")
+
+    monkeypatch.setattr(store, "_connect", fail_connect)
+    with pytest.raises(sqlite3.OperationalError, match="simulated write failure"):
+        store.record_ocpp("charger-a", "MeterValues", {"transaction_id": 41})
+    assert export_events(tmp_path) == before
+    monkeypatch.setattr(store, "_connect", original_connect)
+    store.record_ocpp("charger-a", "MeterValues", {"transaction_id": 41})
+    assert len(export_events(tmp_path, after_id=before[-1][0])) == 1
+
+
+def test_incoming_stop_advances_allocator_without_creating_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": 700, "meter_stop": 125, "timestamp": "2026-10-14T12:00:00Z",
+    })
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (700,)
+    assert fetchall(
+        tmp_path, "SELECT transaction_id, state, meter_start, meter_stop FROM transactions"
+    ) == [(700, "stopped", None, 125)]
+    assert store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 125,
+        "timestamp": "2026-10-14T12:01:00Z",
+    }) == 701
+
+
+def test_incoming_meter_values_advances_floor_monotonically_across_restart(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 250})
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 17})
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 250})
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (250,)
+    assert EventStore(tmp_path).commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 1,
+        "timestamp": "2026-10-14T12:02:00Z",
+    }) == 251
+
+
+def test_invalid_external_ids_do_not_advance_allocator(tmp_path):
+    store = EventStore(tmp_path)
+    for transaction_id in (0, -5, 2147483648):
+        store.commit_transaction_evidence("charger-a", "MeterValues", {
+            "transaction_id": transaction_id,
+        })
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (0,)
+
+
+def test_unknown_meter_values_creates_incomplete_transaction_without_active_start(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 420})
+    assert fetchall(
+        tmp_path,
+        "SELECT transaction_id, charger_id, state, started_at, start_received_at "
+        "FROM transactions",
+    ) == [(420, "charger-a", "unknown", None, None)]
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": 420, "meter_stop": 90, "timestamp": "2026-10-14T12:10:00Z",
+    })
+    assert fetchone(
+        tmp_path, "SELECT state, meter_stop FROM transactions WHERE transaction_id = 420",
+    ) == ("stopped", 90)
+
+
+def test_unknown_stop_from_other_charger_does_not_mutate_existing_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "a", "meter_start": 10,
+        "timestamp": "2026-10-14T12:00:00Z",
+    })
+    store.commit_transaction_evidence("charger-b", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 99,
+        "timestamp": "2026-10-14T12:11:00Z",
+    })
+    assert fetchone(
+        tmp_path, "SELECT charger_id, state, meter_stop FROM transactions WHERE transaction_id = 1",
+    ) == ("charger-a", "open", None)
+    assert fetchone(tmp_path, "SELECT COUNT(*) FROM events WHERE charger_id = 'charger-b'") == (1,)

@@ -22,7 +22,6 @@ reconnect_seconds=""
 stage_only=0
 diagnose=0
 dev=0
-recover=0
 expose=""
 delegate=0
 satellite=0
@@ -30,6 +29,8 @@ certbot_email=""
 no_certbot=0
 adopt=0
 uninstall=0
+force_handoff=0
+offline=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -60,8 +61,12 @@ while [ "$#" -gt 0 ]; do
             reconnect_seconds=${1#--reconnect=}
             shift
             ;;
-        --recover)
-            recover=1
+        --offline)
+            offline=1
+            shift
+            ;;
+        --force)
+            force_handoff=1
             shift
             ;;
         --stage-only)
@@ -148,7 +153,7 @@ if [ "$uninstall" -eq 1 ]; then
         printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
         exit 2
     fi
-    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$recover" -eq 1 ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+    if [ "$offline" -eq 1 ] || [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
         exit 2
     fi
@@ -253,19 +258,23 @@ if [ -n "$reconnect_seconds" ]; then
     set -- -e "ocpp_csms_reconnect_timeout=$reconnect_seconds" "$@"
 fi
 
+if [ "$offline" -eq 1 ]; then
+    set -- -e ocpp_csms_offline=true "$@"
+fi
+
+if [ "$force_handoff" -eq 1 ]; then
+    set -- -e ocpp_csms_force_handoff=true "$@"
+fi
+
 if [ "$dev" -eq 1 ]; then
     set -- -e ocpp_csms_dev=true "$@"
 fi
 
-if [ "$recover" -eq 1 ]; then
-    if [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
-        printf '%s\\n' '--recover cannot be combined with --diagnose or --stage-only.' >&2
+if [ "$diagnose" -eq 1 ]; then
+    if [ "$offline" -eq 1 ]; then
+        printf '%s\n' '--offline does not apply to --diagnose.' >&2
         exit 2
     fi
-    set -- -e ocpp_csms_recover=true "$@"
-fi
-
-if [ "$diagnose" -eq 1 ]; then
     if [ "$stage_only" -eq 1 ]; then
         printf '%s\n' '--diagnose and --stage-only cannot be combined.' >&2
         exit 2
@@ -298,9 +307,9 @@ else
     printf '\nOCPP CSMS deploy finished in %ds\n' "$seconds"
 fi
 
-# Only successful normal deployments update durable intent. Recovery,
-# diagnostics, stage-only, development and tuning invocations never do.
-if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$recover" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
+# Only successful normal deployments update durable intent; diagnostics,
+# stage-only, development and tuning invocations never do.
+if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
     commit_delegate=$delegate
     if [ -n "$expose" ]; then
         commit_delegate=0
