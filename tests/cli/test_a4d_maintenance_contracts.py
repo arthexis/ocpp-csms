@@ -24,7 +24,7 @@ def parse(*argv):
      {"command": "availability", "connector": 2, "type": "Inoperative"}),
     (("unlock", "-c", "1"), maintenance_request, {"command": "unlock", "connector": 1}),
     (("config", "set", "HeartbeatInterval", "60"), configuration_request,
-     {"command": "config_set", "key": "HeartbeatInterval", "value": "60", "force": False}),
+     {"command": "config_set", "key": "HeartbeatInterval", "value": "60"}),
     (("diagnose", "--location", "https://example.org/upload"), diagnostics_request,
      {"command": "get_diagnostics", "location": "https://example.org/upload"}),
 ])
