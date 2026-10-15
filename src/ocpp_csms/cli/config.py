@@ -16,7 +16,6 @@ def add_config_command(
     config = subcommands.add_parser("config", help="Read or change charger configuration")
     config.add_argument("--cp", dest="charger", help="Explicit charge point ID when more than one charger is connected")
     config.add_argument("items", nargs="*", metavar="KEY", help="Keys to read, set KEY VALUE, download, or diff FILE [FILE]")
-    config.add_argument("-f", "--force", action="store_true", help="Operate even with an active transaction")
     add_config_download_arguments(config)
     return config
 
@@ -45,10 +44,9 @@ def configuration_request(args: argparse.Namespace) -> dict[str, object]:
             "command": "config_set",
             "key": items[1],
             "value": items[2],
-            "force": bool(args.force),
         }
     else:
-        request = {"command": "config", "force": bool(args.force)}
+        request = {"command": "config"}
         if items:
             request["keys"] = items
     if args.charger is not None:
@@ -128,7 +126,7 @@ def run_config_download(args: argparse.Namespace) -> int:
         print(f"error: {exc}")
         return 2
 
-    request: dict[str, object] = {"command": "config", "force": bool(args.force)}
+    request: dict[str, object] = {"command": "config"}
     if charger is not None:
         request["charger"] = charger
 
