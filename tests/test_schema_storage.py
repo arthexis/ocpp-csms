@@ -30,13 +30,15 @@ def test_same_schema_reuses_identity_allocator_and_path(tmp_path):
         assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (42,)
 
 
-def test_downgrade_is_rejected_from_existing_schema_directory(tmp_path):
+def test_newer_historical_schema_does_not_block_compiled_schema(tmp_path):
     newer = schema_directory(tmp_path, CURRENT_SCHEMA_VERSION + 1)
     newer.mkdir(parents=True)
     with sqlite3.connect(newer / "ocpp-csms.sqlite3") as db:
         db.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION + 1}")
-    with pytest.raises(RuntimeError, match="downgrade"):
-        plan_storage(tmp_path)
+    plan = plan_storage(tmp_path)
+    assert plan.action == "create"
+    assert plan.target == schema_directory(tmp_path)
+    assert (newer / "ocpp-csms.sqlite3").exists()
 
 
 def test_invalid_prepared_target_is_rejected_without_overwriting(tmp_path):
@@ -64,15 +66,20 @@ def test_installer_storage_commands_reuse_prepared_schema(tmp_path, capsys):
 
 def test_unversioned_database_is_not_moved_or_overwritten(tmp_path):
     create_current_schema(tmp_path)
-    with pytest.raises(RuntimeError, match="unversioned database"):
-        plan_storage(tmp_path)
-    assert source_id(tmp_path)
+    previous = source_id(tmp_path)
+    plan = plan_storage(tmp_path)
+    assert plan.action == "create"
+    assert prepare_storage(plan).version == CURRENT_SCHEMA_VERSION
+    assert source_id(tmp_path) == previous
+    assert plan.target != tmp_path
 
 
-def test_old_pointer_requires_manual_resolution(tmp_path):
-    (tmp_path / "current").symlink_to(tmp_path / "missing")
-    with pytest.raises(RuntimeError, match="obsolete storage pointer"):
-        plan_storage(tmp_path)
+def test_old_pointer_is_ignored_without_mutation(tmp_path):
+    pointer = tmp_path / "current"
+    pointer.symlink_to(tmp_path / "missing")
+    plan = plan_storage(tmp_path)
+    assert plan.action == "create"
+    assert pointer.is_symlink()
 
 
 def test_same_schema_reuse_preserves_real_transaction_and_archive(tmp_path):
@@ -126,7 +133,7 @@ def test_new_schema_creates_empty_database_without_copying_old_evidence(tmp_path
     monkeypatch.setattr(storage, "schema_directory", lambda root: original_schema_directory(root, CURRENT_SCHEMA_VERSION + 1))
     plan = storage.plan_storage(tmp_path)
     assert plan.action == "create"
-    assert plan.active_schema == CURRENT_SCHEMA_VERSION
+    assert plan.active_schema is None
     assert plan.target == schema_directory(tmp_path, CURRENT_SCHEMA_VERSION + 1)
     assert not plan.target.exists()
     # A plan must never migrate or modify old transaction evidence.
@@ -156,3 +163,13 @@ def test_storage_preparation_failure_preserves_existing_database(tmp_path, monke
         storage.prepare_storage(plan)
     assert source_id(old) == identity
     assert not plan.target.joinpath("ocpp-csms.sqlite3").exists()
+
+
+def test_other_schema_directories_do_not_affect_current_selection(tmp_path):
+    old = schema_directory(tmp_path, CURRENT_SCHEMA_VERSION - 1)
+    old.mkdir(parents=True)
+    (old / "incomplete-evidence.txt").write_text("untouched")
+    plan = plan_storage(tmp_path)
+    assert plan.action == "create"
+    assert prepare_storage(plan).version == CURRENT_SCHEMA_VERSION
+    assert (old / "incomplete-evidence.txt").read_text() == "untouched"
