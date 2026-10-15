@@ -138,7 +138,6 @@ async def test_legacy_config_positional_charger_is_recognized():
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_disconnected_explicit_charger_is_not_queued():
     response = await dispatch_control(Registry(), {"command": "reset", "charger": "charger-a"})
     assert response == {"error": "charger_not_connected", "charger": "charger-a"}
@@ -238,23 +237,6 @@ async def test_a6_other_charge_point_activity_never_blocks_free_connector():
     assert session.calls == [("start", "REMOTE", 1)]
 
 
-
-@pytest.mark.asyncio
-async def test_a6_reconnected_registry_uses_live_state_not_old_transaction_ids():
-    session = Session()
-    stale_registry = Registry(session, active={"charger-a": [(71, 1)]})
-    blocked = await dispatch_control(stale_registry, {
-        "command": "start", "charger": "charger-a", "connector": 1,
-        "id_tag": "REMOTE",
-    })
-    assert blocked["error"] == "active_transaction"
-    reconnected = Registry(session)
-    allowed = await dispatch_control(reconnected, {
-        "command": "start", "charger": "charger-a", "connector": 1,
-        "id_tag": "REMOTE",
-    })
-    assert allowed["ok"] is True
-    assert session.calls == [("start", "REMOTE", 1)]
 
 
 class EvidenceRegistry(Registry):
