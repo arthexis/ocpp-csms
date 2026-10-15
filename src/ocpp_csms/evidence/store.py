@@ -148,6 +148,16 @@ class EventStore:
             )
             if transaction_id is None:
                 return
+            # Incoming charger evidence can outlive a database reset. Reserve
+            # every positive observed ID before the next StartTransaction.
+            # This never creates or selects an active transaction.
+            if 0 < transaction_id <= 2147483647:
+                connection.execute(
+                    """UPDATE transaction_allocator
+                    SET last_id = MAX(last_id, ?)
+                    WHERE singleton = 1""",
+                    (transaction_id,),
+                )
             if action == "MeterValues":
                 connection.execute(
                     """UPDATE transactions SET last_activity_at = ?
