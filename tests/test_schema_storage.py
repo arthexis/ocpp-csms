@@ -149,7 +149,8 @@ def test_ansible_storage_preparation_is_not_live_cutover():
     from pathlib import Path
     tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
     preparation = (tasks / "storage_prepare.yml").read_text()
-    assert "storage-plan" in preparation and "storage-prepare" in preparation
+    assert "storage-prepare" in preparation
+    assert "storage-plan" in (tasks / "storage_plan.yml").read_text()
     assert "ocpp_csms_data_dir" in preparation
     assert "systemd_service" not in preparation
     main = (tasks / "main.yml").read_text()
