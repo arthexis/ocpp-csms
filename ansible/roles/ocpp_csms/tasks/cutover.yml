@@ -46,7 +46,7 @@
       - ocpp_csms.install_cutover
       - capture-baseline
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_active_data_dir }}"
       - --preflight-json
       - "{{ ocpp_csms_final_preflight_path }}"
       - --output
@@ -87,6 +87,16 @@
         name: "{{ ocpp_csms_service_name }}"
         state: stopped
       when: ocpp_csms_live_service_state.stat.exists | default(false)
+
+    # The storage plan and candidate were verified before downtime. Recheck
+    # their relationship while stopped, before any schema handoff operation.
+    - name: Verify prepared storage handoff contract after service stop
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_storage_selection.action in ['create', 'reuse']
+          - ocpp_csms_storage_selection.action == 'reuse' or
+            ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+        fail_msg: Storage handoff has an invalid active/candidate selection.
 
     # Versioned storage is never switched by an in-place schema upgrade.
     # The versioned cutover is intentionally opt-in until recovery wiring is complete.
