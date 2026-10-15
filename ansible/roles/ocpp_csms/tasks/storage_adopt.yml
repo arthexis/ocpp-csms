@@ -1,0 +1,43 @@
+---
+# Invoke only inside the stopped-service handoff, after the recovery gate
+# has been installed. Never run this task file during staging.
+- name: Verify fresh candidate before stopped-service storage transition
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - schema-verify
+      - --data-dir
+      - "{{ ocpp_csms_storage_selection.target }}"
+  changed_when: false
+  when: ocpp_csms_storage_selection.action == 'create'
+
+- name: Adopt stopped legacy database into its historical schema directory
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - storage-adopt
+      - --storage-root
+      - "{{ ocpp_csms_data_dir }}"
+  register: ocpp_csms_adopted_storage
+  changed_when: true
+  when:
+    - ocpp_csms_storage_selection.active == ocpp_csms_data_dir
+
+- name: Verify adopted historical storage after relocation
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.install_cutover
+      - storage-checkpoint
+      - --data-dir
+      - "{{ ocpp_csms_adopted_storage.stdout }}"
+  changed_when: false
+  when: ocpp_csms_adopted_storage is not skipped
+
+# Do not activate here. Atomic pointer activation must be coupled to
+# candidate service startup and evidence-aware rescue in the parent block.
