@@ -209,6 +209,16 @@ jobs:
           set -euo pipefail
           if [[ -n "$BASE_SHA" ]]; then
             git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
+            # CI fixture: install the base code as schema 7, then upgrade to
+            # the candidate's compiled schema 8. No production schema changes.
+            python3 - <<'PY'
+          from pathlib import Path
+          source = Path("/tmp/ocpp-csms-base/src/ocpp_csms/schema.py")
+          content = source.read_text()
+          old = "CURRENT_SCHEMA_VERSION = 8"
+          assert content.count(old) == 1, "base schema fixture needs updating"
+          source.write_text(content.replace(old, "CURRENT_SCHEMA_VERSION = 7", 1))
+          PY
             (cd /tmp/ocpp-csms-base && ./deploy.sh)
           else
             ./deploy.sh
@@ -219,8 +229,15 @@ jobs:
           /usr/local/bin/ocpp-csms status
           old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
           old_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-          old_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
+          old_schema=8
+          if [[ -n "$BASE_SHA" ]]; then old_schema=7; fi
+          old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
           test -f "$old_db"
+          python3 - "$old_db" "$old_schema" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == int(sys.argv[2])
+          PY
           old_inode="$(stat -c '%d:%i' "$old_db")"
           python3 - "$old_db" <<'PY'
           import sqlite3, sys
@@ -266,6 +283,18 @@ jobs:
               raise AssertionError("listener remained unavailable at end of sampling")
           print(f"Longest sampled TCP listener outage: {longest:.3f}s ({len(samples)} samples)")
           PY
+          new_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
+          test -f "$new_db"
+          python3 - "$new_db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
+          PY
+          if [[ -n "$BASE_SHA" ]]; then
+            test "$old_db" != "$new_db"
+            grep -F "schemas/8" /etc/systemd/system/ocpp-csms.service
+          fi
           new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
           new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
           if [[ -n "$BASE_SHA" ]]; then
