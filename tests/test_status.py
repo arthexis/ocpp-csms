@@ -271,3 +271,27 @@ def test_disconnected_charger_is_not_assumed_available(tmp_path: Path):
     charger = appliance_status(tmp_path)["chargers"][0]
     assert not charger.connected
     assert charger.derived_status is None
+
+
+def test_status_last_seen_omits_microseconds_and_aligns_long_ids():
+    from ocpp_csms.status import ChargerStatus, format_status
+    charger = ChargerStatus(
+        charger_id="GSCSC0824110052X0124", connected=True,
+        connected_at=None, subprotocol=None,
+        last_seen="2026-10-15T15:44:42.476504Z",
+        status="Available", error_code=None,
+        transaction_id=None, id_tag=None, started_at=None, connectors=[],
+    )
+    lines = format_status({"chargers": [charger], "active_chargers": []}).splitlines()
+    header = next(line for line in lines if line.startswith("ID "))
+    record = next(line for line in lines if line.startswith(charger.charger_id))
+    assert header.index("Connected") == record.index("yes")
+    assert "2026-10-15T15:44:42Z" in record
+    assert ".476504" not in record
+
+
+def test_timestamp_presentation_preserves_raw_evidence():
+    from ocpp_csms.status import display_timestamp
+    assert display_timestamp("2026-10-15T15:44:42.476504Z") == "2026-10-15T15:44:42Z"
+    assert display_timestamp("2026-10-15T15:44:42.476504+00:00") == "2026-10-15T15:44:42+00:00"
+    assert display_timestamp(None) == "-"
