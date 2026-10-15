@@ -176,3 +176,16 @@ def test_ansible_storage_plan_keeps_active_and_candidate_distinct():
     assert "ocpp_csms_storage_selection.target" in plan
     assert "storage-activate" not in plan
     assert "storage-activate" not in preparation
+
+
+def test_handoff_baseline_reads_active_storage_not_candidate():
+    from pathlib import Path
+
+    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
+    cutover = (tasks / "cutover.yml").read_text()
+    baseline = cutover.split("- name: Capture charger reconnect baseline", 1)[1].split(
+        "- name: Preserve previous live systemd unit", 1
+    )[0]
+    assert "ocpp_csms_active_data_dir" in baseline
+    assert "ocpp_csms_storage_selection.target" not in baseline
+    assert "Verify prepared storage handoff contract after service stop" in cutover
