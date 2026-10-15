@@ -74,7 +74,7 @@ async def _inspect(data_dir, cp, snapshot, *, offline, deep, timeout):
 
     capability = capability_request(cp)
     configuration = await _safe_query(data_dir, cp, capability["command"], timeout,
-                                      keys=capability["keys"], force=capability["force"])
+                                      keys=capability["keys"])
     report["queries"]["configuration"] = configuration
     if configuration["state"] == "observed":
         report["features"] = _features(configuration["response"])
