@@ -150,46 +150,36 @@
   changed_when: false
   when: not ocpp_csms_release_ready.stat.exists
 
-- name: Check reusable runtime dependency environment
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_dependency_dir }}/.ready"
-  register: ocpp_csms_dependency_ready
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-
+# Runtime dependencies are checked against their actual installed distributions.
+# The cache key still identifies the requested dependency set, but no marker
+# file is trusted as evidence of successful installation.
 - name: Create reusable runtime dependency directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_dependency_dir }}"
     state: directory
     mode: "0755"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Create reusable runtime dependency virtual environment
   ansible.builtin.command:
     cmd: "python3 -m venv {{ ocpp_csms_dependency_venv }}"
     creates: "{{ ocpp_csms_dependency_venv }}/bin/python"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Install reusable runtime dependencies
+- name: Converge reusable runtime dependencies
   ansible.builtin.pip:
     name: "{{ ocpp_csms_runtime_dependencies }}"
     virtualenv: "{{ ocpp_csms_dependency_venv }}"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Mark reusable runtime dependency environment ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_dependency_dir }}/.ready"
-    content: "{{ ocpp_csms_dependency_key }}\n"
-    mode: "0644"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_dependency_ready.stat.exists
+- name: Verify reusable runtime dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_dependency_venv }}/bin/python"
+      - -c
+      - "from importlib.metadata import distribution; from packaging.specifiers import SpecifierSet; assert distribution('websockets').version in SpecifierSet('>=12,<14'); assert distribution('ocpp').version in SpecifierSet('>=0.26,<1')"
+  changed_when: false
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Resolve reusable runtime dependency site packages
   ansible.builtin.command:
