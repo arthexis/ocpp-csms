@@ -128,6 +128,21 @@
         dest: "{{ ocpp_csms_remote_preflight_dir.path }}/src/"
         mode: preserve
 
+    - name: Discover remote active storage before initial preflight
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            from ocpp_csms.schema_storage import discover_active_storage;
+            import sys;
+            print(discover_active_storage(sys.argv[1]) or sys.argv[1])
+          - "{{ ocpp_csms_data_dir }}"
+      environment:
+        PYTHONPATH: "{{ ocpp_csms_remote_preflight_dir.path }}/src"
+      register: ocpp_csms_remote_active_storage
+      changed_when: false
+
     - name: Execute remote initial install safety preflight
       ansible.builtin.command:
         argv:
@@ -136,7 +151,7 @@
           - ocpp_csms.install_preflight
           - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_remote_active_storage.stdout }}"
           - --json
       environment:
         PYTHONPATH: "{{ ocpp_csms_remote_preflight_dir.path }}/src"
