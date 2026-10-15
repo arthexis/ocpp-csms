@@ -23,7 +23,7 @@ def rows(store):
     return events, transactions
 
 
-def test_orphan_meter_and_stop_are_events_not_transactions(tmp_path):
+def test_unknown_meter_and_stop_recover_incomplete_transaction(tmp_path):
     store = EventStore(tmp_path)
     store.commit_transaction_evidence("cp-a", "MeterValues", {
         "transaction_id": 999, "connector_id": 1, "meter_value": []
@@ -34,7 +34,9 @@ def test_orphan_meter_and_stop_are_events_not_transactions(tmp_path):
     events, transactions = rows(store)
     assert [event[1] for event in events] == ["MeterValues", "StopTransaction"]
     assert [event[2] for event in events] == [999, 999]
-    assert transactions == []
+    assert transactions == [(999, "cp-a", 150, "2026-10-03T10:10:00Z")]
+    with store._connect() as db:
+        assert db.execute("SELECT state, started_at FROM transactions WHERE transaction_id = 999").fetchone() == ("stopped", None)
 
 
 def test_cross_charge_point_stop_does_not_mutate_transaction(tmp_path):
@@ -67,7 +69,7 @@ def test_exact_meter_retry_preserves_each_receipt(tmp_path):
     store.commit_transaction_evidence("cp-a", "MeterValues", payload)
     events, transactions = rows(store)
     assert len(events) == 2
-    assert transactions == []
+    assert transactions == [(404, "cp-a", None, None)]
 
 
 def test_failed_stop_state_update_rolls_back_event(tmp_path):
@@ -94,7 +96,9 @@ async def test_handler_acknowledges_only_after_sqlite_commit(tmp_path, action, h
     assert result is not None
     events, transactions = rows(store)
     assert [event[1] for event in events] == [action]
-    assert transactions == []
+    expected_stop = payload.get("meter_stop") if action == "StopTransaction" else None
+    expected_timestamp = payload.get("timestamp") if action == "StopTransaction" else None
+    assert transactions == [(999, "cp-a", expected_stop, expected_timestamp)]
 
 
 @pytest.mark.asyncio
