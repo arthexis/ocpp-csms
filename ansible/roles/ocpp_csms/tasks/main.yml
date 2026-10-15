@@ -436,7 +436,7 @@
   ansible.builtin.debug:
     msg:
       release: "{{ ocpp_csms_release_id }}"
-      schema_action: "{{ ocpp_csms_schema_action }}"
+      schema_action: "{{ ocpp_csms_storage_selection.action }}"
       handoff: skipped
   when: ocpp_csms_stage_only | bool
 
