@@ -121,6 +121,11 @@
 
     # Activate a fresh prepared schema only with every prior writer stopped.
     # The safety gate above prevents this path until evidence-aware rescue is ready.
+    - name: Record that versioned storage activation started
+      ansible.builtin.set_fact:
+        ocpp_csms_versioned_activation_started: true
+      when: ocpp_csms_storage_selection.action == 'create'
+
     - name: Atomically select prepared schema storage
       ansible.builtin.command:
         argv:
@@ -134,11 +139,6 @@
           - "{{ ocpp_csms_storage_selection.target }}"
       register: ocpp_csms_storage_activation
       changed_when: true
-      when: ocpp_csms_storage_selection.action == 'create'
-
-    - name: Record that versioned storage activation started
-      ansible.builtin.set_fact:
-        ocpp_csms_versioned_activation_started: true
       when: ocpp_csms_storage_selection.action == 'create'
 
     - name: Install live OCPP CSMS systemd unit
