@@ -102,13 +102,9 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
     try:
         with closing(sqlite3.connect(info.path, timeout=5)) as db:
             db.execute("PRAGMA foreign_keys=ON")
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                # Preserve a consistent SQLite snapshot before any deletion.
-                with closing(sqlite3.connect(backup / info.path.name)) as snapshot:
-                    db.backup(snapshot)  # cannot back up from a connection with an open write txn
-            finally:
-                db.rollback()
+            # SQLite backup establishes a consistent snapshot before write locking.
+            with closing(sqlite3.connect(backup / info.path.name)) as snapshot:
+                db.backup(snapshot)
             db.execute("BEGIN IMMEDIATE")
             try:
                 active = db.execute(
