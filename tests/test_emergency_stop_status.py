@@ -1,10 +1,7 @@
 """EmergencyStop is derived per connector, including with no transaction."""
-import sqlite3
-
 from ocpp_csms.evidence.diagnostics import events_between, format_events
 from ocpp_csms.evidence.contracts import events_contract
 from ocpp_csms.evidence.store import EventStore
-from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, database_path, inspect_schema, upgrade_schema
 from ocpp_csms.status import appliance_status, format_status
 from ocpp_csms.status_contract import status_contract
 
@@ -66,16 +63,3 @@ def test_event_history_shows_emergency_without_transaction(tmp_path):
     assert "EmergencyStop" in format_events(rows)
 
 
-def test_upgrade_v5_preserves_connector_status(tmp_path):
-    store = EventStore(tmp_path)
-    store.record_connector_status(CP, FAULT)
-    db = database_path(tmp_path)
-    with sqlite3.connect(db) as conn:
-        conn.execute("CREATE TABLE old_connector AS SELECT charger_id, connector_id, status, error_code, event_timestamp, received_at FROM connector_status")
-        conn.execute("DROP TABLE connector_status")
-        conn.execute("ALTER TABLE old_connector RENAME TO connector_status")
-        conn.execute("PRAGMA user_version = 5")
-    assert upgrade_schema(tmp_path).version == CURRENT_SCHEMA_VERSION
-    assert db.with_name(db.name + ".schema-5.bak").exists()
-    with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT status, info FROM connector_status WHERE charger_id=?", (CP,)).fetchone() == ("Faulted", None)

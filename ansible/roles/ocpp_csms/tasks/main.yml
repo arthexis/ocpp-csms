@@ -15,17 +15,6 @@
       Use Ansible become for privileged host changes instead of running the
       playbook itself as root.
 
-- name: Validate OCPP CSMS install mode
-  ansible.builtin.assert:
-    that:
-      - ocpp_csms_install_mode in ['online', 'bundle']
-      - ocpp_csms_install_mode != 'bundle' or ocpp_csms_bundle_path | length > 0
-      - ocpp_csms_install_mode != 'bundle' or (ansible_connection | default('ssh')) == 'local'
-      - ocpp_csms_install_mode != 'bundle' or not (ocpp_csms_dev | bool)
-    fail_msg: >-
-      Bundle installs require a local appliance connection, a bundle path,
-      and production dependencies only.
-
 - name: Resolve release revision from controller checkout
   ansible.builtin.command:
     argv:
@@ -38,130 +27,10 @@
   delegate_to: localhost
   register: ocpp_csms_release_revision
   changed_when: false
-  when: ocpp_csms_install_mode == 'online'
-
-- name: Read offline release manifest
-  ansible.builtin.include_vars:
-    file: "{{ ocpp_csms_bundle_manifest_path }}"
-    name: ocpp_csms_bundle_manifest
-  when: ocpp_csms_install_mode == 'bundle'
-
-- name: Validate offline release manifest
-  ansible.builtin.assert:
-    that:
-      - ocpp_csms_bundle_manifest.release | length > 0
-      - ocpp_csms_bundle_manifest.architecture == ansible_facts.architecture
-      - ocpp_csms_bundle_manifest.python == ansible_facts.python.version.major ~ '.' ~ ansible_facts.python.version.minor
-    fail_msg: >-
-      Offline release bundle metadata does not match this appliance.
-  when: ocpp_csms_install_mode == 'bundle'
 
 - name: Capture immutable release identifier
   ansible.builtin.set_fact:
-    ocpp_csms_release_id: >-
-      {{
-        (ocpp_csms_bundle_manifest.release
-         if ocpp_csms_install_mode == 'bundle'
-         else ocpp_csms_release_revision.stdout)
-        ~ ('-dev' if ocpp_csms_dev | bool else '')
-      }}
-
-- name: Select release source for preflight
-  ansible.builtin.set_fact:
-    ocpp_csms_preflight_source_dir: >-
-      {{
-        ocpp_csms_bundle_source_dir
-        if ocpp_csms_install_mode == 'bundle'
-        else ocpp_csms_controller_source_dir
-      }}
-
-# The first safety gate must run before appliance mutation. Idle connected
-# chargers are expected; only active charging or unsafe persistence state blocks.
-# Resolve existing storage before the first safety gate. This uses the
-# source checkout, so it does not require staging a release on the appliance.
-- name: Discover active storage for initial safety preflight
-  ansible.builtin.command:
-    argv:
-      - python3
-      - -c
-      - >-
-        from ocpp_csms.schema_storage import discover_active_storage;
-        import sys;
-        print(discover_active_storage(sys.argv[1]) or sys.argv[1])
-      - "{{ ocpp_csms_data_dir }}"
-  environment:
-    PYTHONPATH: "{{ ocpp_csms_preflight_source_dir }}/src"
-  register: ocpp_csms_initial_active_storage
-  changed_when: false
-  when: (ansible_connection | default('ssh')) == 'local'
-
-- name: Run local initial install safety preflight
-  ansible.builtin.command:
-    argv:
-      - python3
-      - -m
-      - ocpp_csms.install_preflight
-      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
-      - --data-dir
-      - "{{ ocpp_csms_initial_active_storage.stdout }}"
-      - --json
-  environment:
-    PYTHONPATH: "{{ ocpp_csms_preflight_source_dir }}/src"
-  changed_when: false
-  when: (ansible_connection | default('ssh')) == 'local'
-
-# A remote target cannot read the controller checkout. Copy the Python source
-# only to a temporary directory, run the same read-only preflight, and always
-# remove the temporary directory before any appliance staging begins.
-- name: Run remote initial install safety preflight
-  when: (ansible_connection | default('ssh')) != 'local'
-  block:
-    - name: Create temporary remote preflight source directory
-      ansible.builtin.tempfile:
-        state: directory
-        suffix: -ocpp-csms-preflight
-      register: ocpp_csms_remote_preflight_dir
-
-    - name: Copy Python source for remote initial preflight
-      ansible.builtin.copy:
-        src: "{{ ocpp_csms_preflight_source_dir }}/src/"
-        dest: "{{ ocpp_csms_remote_preflight_dir.path }}/src/"
-        mode: preserve
-
-    - name: Discover remote active storage before initial preflight
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -c
-          - >-
-            from ocpp_csms.schema_storage import discover_active_storage;
-            import sys;
-            print(discover_active_storage(sys.argv[1]) or sys.argv[1])
-          - "{{ ocpp_csms_data_dir }}"
-      environment:
-        PYTHONPATH: "{{ ocpp_csms_remote_preflight_dir.path }}/src"
-      register: ocpp_csms_remote_active_storage
-      changed_when: false
-
-    - name: Execute remote initial install safety preflight
-      ansible.builtin.command:
-        argv:
-          - python3
-          - -m
-          - ocpp_csms.install_preflight
-          - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
-          - --data-dir
-          - "{{ ocpp_csms_remote_active_storage.stdout }}"
-          - --json
-      environment:
-        PYTHONPATH: "{{ ocpp_csms_remote_preflight_dir.path }}/src"
-      changed_when: false
-  always:
-    - name: Remove temporary remote preflight source
-      ansible.builtin.file:
-        path: "{{ ocpp_csms_remote_preflight_dir.path }}"
-        state: absent
-      when: ocpp_csms_remote_preflight_dir.path is defined
+    ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout ~ ('-dev' if ocpp_csms_dev | bool else '') }}"
 
 - name: Install Python prerequisites
   become: true
@@ -175,7 +44,6 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
-  when: ocpp_csms_install_mode == 'online'
 
 - name: Create OCPP CSMS base directories
   ansible.builtin.file:
@@ -190,10 +58,59 @@
     - "{{ ocpp_csms_dependencies_dir }}"
     - "{{ ocpp_csms_candidate_dir }}"
 
-- name: Check whether immutable release is already complete
+# Existing releases are immutable: validate actual files and imports, never markers.
+- name: Inspect immutable release directory
   ansible.builtin.stat:
-    path: "{{ ocpp_csms_release_dir }}/.ready"
-  register: ocpp_csms_release_ready
+    path: "{{ ocpp_csms_release_dir }}"
+    follow: false
+  register: ocpp_csms_release_directory
+
+- name: Verify existing release distribution and executable
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -c
+      - >-
+        from importlib.metadata import distribution;
+        from pathlib import Path;
+        import ocpp_csms;
+        d = distribution('ocpp-csms');
+        assert d.version;
+        assert Path('{{ ocpp_csms_release_command }}').is_file();
+        assert Path(ocpp_csms.__file__).resolve().is_relative_to(Path('{{ ocpp_csms_release_venv }}').resolve())
+  register: ocpp_csms_release_probe
+  changed_when: false
+  failed_when: false
+  when: ocpp_csms_release_directory.stat.exists | default(false)
+
+- name: Verify existing release command
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_command }}"
+      - --help
+  register: ocpp_csms_release_command_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - ocpp_csms_release_directory.stat.exists | default(false)
+    - ocpp_csms_release_probe.rc | default(1) == 0
+
+- name: Reject incomplete immutable release without modifying it
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_release_directory.stat.isdir | default(false)
+      - ocpp_csms_release_probe.rc | default(1) == 0
+      - ocpp_csms_release_command_probe.rc | default(1) == 0
+    fail_msg: >-
+      Existing immutable release is incomplete or unusable; refusing
+      to modify it in place. Inspect before retrying deployment.
+  when: ocpp_csms_release_directory.stat.exists | default(false)
+
+- name: Capture verified immutable release readiness
+  ansible.builtin.set_fact:
+    ocpp_csms_release_ready:
+      stat:
+        exists: "{{ ocpp_csms_release_directory.stat.exists | default(false) }}"
 
 - name: Create immutable release directory
   ansible.builtin.file:
@@ -214,7 +131,6 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) == 'local'
-    - ocpp_csms_install_mode == 'online'
 
 - name: Create remote release source directory
   ansible.builtin.file:
@@ -224,7 +140,6 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
-    - ocpp_csms_install_mode == 'online'
 
 - name: Copy remote package metadata
   ansible.builtin.copy:
@@ -237,7 +152,6 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
-    - ocpp_csms_install_mode == 'online'
 
 - name: Copy remote Python package source
   ansible.builtin.copy:
@@ -247,7 +161,6 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
-    - ocpp_csms_install_mode == 'online'
 
 - name: Use release source as install source for remote execution
   ansible.builtin.set_fact:
@@ -255,145 +168,67 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
-    - ocpp_csms_install_mode == 'online'
 
-- name: Find bundled OCPP CSMS application wheel
-  ansible.builtin.find:
-    paths: "{{ ocpp_csms_bundle_wheels_dir }}"
-    patterns: "ocpp_csms-*.whl"
-    file_type: file
-  register: ocpp_csms_bundle_application_wheels
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'bundle'
-
-- name: Validate bundled OCPP CSMS application wheel
-  ansible.builtin.assert:
-    that:
-      - ocpp_csms_bundle_application_wheels.matched | int == 1
-    fail_msg: >-
-      Expected exactly one OCPP CSMS application wheel in the offline bundle.
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'bundle'
-
-- name: Install bundled runtime dependencies
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - pip
-      - install
-      - --no-index
-      - --find-links
-      - "{{ ocpp_csms_bundle_wheels_dir }}"
-      - "ocpp>=0.26,<1"
-      - "websockets>=12,<14"
-  changed_when: true
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'bundle'
-
-- name: Install bundled OCPP CSMS application
-  ansible.builtin.pip:
-    name: "{{ ocpp_csms_bundle_application_wheels.files[0].path }}"
-    virtualenv: "{{ ocpp_csms_release_venv }}"
-    extra_args: "--no-index --no-deps"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'bundle'
-
-- name: Check reusable build environment
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_build_dir }}/.ready"
-  register: ocpp_csms_build_ready
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-
+# Build tools are converged from the actual venv, not from a completion marker.
+# A missing interpreter is repaired before pip reconciles required packages.
 - name: Create reusable build environment directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_build_dir }}"
     state: directory
     mode: "0755"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Create reusable build virtual environment
   ansible.builtin.command:
     cmd: "python3 -m venv {{ ocpp_csms_build_venv }}"
     creates: "{{ ocpp_csms_build_venv }}/bin/python"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Install reusable build requirements
+- name: Converge reusable build requirements
   ansible.builtin.pip:
     name: "{{ ocpp_csms_build_requirements }}"
     virtualenv: "{{ ocpp_csms_build_venv }}"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Mark reusable build environment ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_build_dir }}/.ready"
-    content: "{{ ocpp_csms_build_key }}\n"
-    mode: "0644"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_build_ready.stat.exists
+- name: Verify reusable build environment can build wheels
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_build_venv }}/bin/python"
+      - -c
+      - "import pip, setuptools; from setuptools import build_meta; assert hasattr(build_meta, 'build_wheel')"
+  changed_when: false
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Check reusable runtime dependency environment
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_dependency_dir }}/.ready"
-  register: ocpp_csms_dependency_ready
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-
+# Runtime dependencies are checked against their actual installed distributions.
+# The cache key still identifies the requested dependency set, but no marker
+# file is trusted as evidence of successful installation.
 - name: Create reusable runtime dependency directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_dependency_dir }}"
     state: directory
     mode: "0755"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Create reusable runtime dependency virtual environment
   ansible.builtin.command:
     cmd: "python3 -m venv {{ ocpp_csms_dependency_venv }}"
     creates: "{{ ocpp_csms_dependency_venv }}/bin/python"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Install reusable runtime dependencies
+- name: Converge reusable runtime dependencies
   ansible.builtin.pip:
     name: "{{ ocpp_csms_runtime_dependencies }}"
     virtualenv: "{{ ocpp_csms_dependency_venv }}"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_dependency_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Mark reusable runtime dependency environment ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_dependency_dir }}/.ready"
-    content: "{{ ocpp_csms_dependency_key }}\n"
-    mode: "0644"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
-    - not ocpp_csms_dependency_ready.stat.exists
+- name: Verify reusable runtime dependencies
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_dependency_venv }}/bin/python"
+      - -c
+      - "import ocpp, websockets; from importlib.metadata import version; assert version('ocpp') and version('websockets')"
+  changed_when: false
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Resolve reusable runtime dependency site packages
   ansible.builtin.command:
@@ -405,7 +240,6 @@
   changed_when: false
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Resolve release site packages
   ansible.builtin.command:
@@ -417,7 +251,6 @@
   changed_when: false
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Link reusable runtime dependencies into release
   ansible.builtin.copy:
@@ -426,7 +259,6 @@
     mode: "0644"
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Create release wheel directory
   ansible.builtin.file:
@@ -435,7 +267,6 @@
     mode: "0755"
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Build OCPP CSMS application wheel
   ansible.builtin.command:
@@ -452,7 +283,6 @@
   changed_when: true
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Find built OCPP CSMS application wheel
   ansible.builtin.find:
@@ -462,7 +292,6 @@
   register: ocpp_csms_built_application_wheels
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Validate built OCPP CSMS application wheel
   ansible.builtin.assert:
@@ -472,7 +301,6 @@
       Expected exactly one built OCPP CSMS application wheel for the release.
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Install release development dependencies
   ansible.builtin.pip:
@@ -483,7 +311,6 @@
     virtualenv: "{{ ocpp_csms_release_venv }}"
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
     - ocpp_csms_dev | bool
 
 - name: Install OCPP CSMS application wheel into immutable release
@@ -493,19 +320,11 @@
     extra_args: "--no-index --no-deps"
   when:
     - not ocpp_csms_release_ready.stat.exists
-    - ocpp_csms_install_mode == 'online'
 
 - name: Verify immutable release command
   ansible.builtin.command:
     cmd: "{{ ocpp_csms_release_command }} --help"
   changed_when: false
-  when: not ocpp_csms_release_ready.stat.exists
-
-- name: Mark immutable release ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_release_dir }}/.ready"
-    content: "{{ ocpp_csms_release_id }}\n"
-    mode: "0644"
   when: not ocpp_csms_release_ready.stat.exists
 
 - name: Resolve OCPP CSMS service group
@@ -605,6 +424,13 @@
     - ocpp_csms_tls_config_stat.stat.exists | default(false)
     - ocpp_csms_tls_enablement.stdout == 'enabled'
 
+- name: Inspect versioned storage plan for staged handoff
+  ansible.builtin.include_tasks: storage_plan.yml
+
+- name: Select candidate service storage directory
+  ansible.builtin.set_fact:
+    ocpp_csms_service_data_dir: "{{ ocpp_csms_storage_selection.target }}"
+
 - name: Render candidate OCPP CSMS systemd unit
   ansible.builtin.template:
     src: ocpp-csms.service.j2
@@ -619,75 +445,8 @@
       - "{{ ocpp_csms_candidate_service_path }}"
   changed_when: false
 
-- name: Run final install safety preflight
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - ocpp_csms.install_preflight
-      - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
-      - --data-dir
-      - "{{ ocpp_csms_initial_active_storage.stdout if (ansible_connection | default('ssh')) == 'local' else ocpp_csms_remote_active_storage.stdout }}"
-      - --json
-  register: ocpp_csms_final_preflight
-  changed_when: false
-
-- name: Capture final preflight state
-  ansible.builtin.set_fact:
-    ocpp_csms_final_preflight_result: "{{ ocpp_csms_final_preflight.stdout | from_json }}"
-
-- name: Report connector occupancy warnings
-  ansible.builtin.debug:
-    msg: "{{ item }}"
-  loop: "{{ ocpp_csms_final_preflight_result.warnings | default([]) }}"
-
-- name: Report forced charging-safety handoff
-  ansible.builtin.debug:
-    msg: "FORCED HANDOFF: active charging on {{ ocpp_csms_final_preflight_result.active_chargers | join(', ') }}; proceeding at operator request."
-  when:
-    - ocpp_csms_force_handoff | bool
-    - ocpp_csms_final_preflight_result.active_chargers | length > 0
-
-# Identify an incumbent only from observed host-local OCPP traffic. Product
-# names and historical ports are intentionally irrelevant; the observed port is
-# resolved to its owning PID and systemd service before any downtime begins.
-- name: Inspect incumbent host-local OCPP service
-  ansible.builtin.include_tasks: incumbent.yml
-
-# B3.2: compute the versioned storage plan during staging, without
-# preparing or activating a database. The live cutover remains disabled until
-# the evidence-aware B3.3 rescue gate is implemented.
-- name: Inspect versioned storage plan for staged handoff
-  ansible.builtin.include_tasks: storage_plan.yml
-
-- name: Select candidate service storage directory
-  ansible.builtin.set_fact:
-    ocpp_csms_service_data_dir: "{{ ocpp_csms_storage_selection.target }}"
-
-- name: Inspect database schema cutover action
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - ocpp_csms.install_cutover
-      - schema-check
-      - --data-dir
-      - "{{ ocpp_csms_active_data_dir }}"
-  register: ocpp_csms_schema_check
-  changed_when: false
-
-- name: Validate schema cutover action
-  ansible.builtin.assert:
-    that:
-      - ocpp_csms_schema_check.stdout in ['create', 'current', 'upgrade']
-    fail_msg: "Unexpected schema cutover action: {{ ocpp_csms_schema_check.stdout }}"
-
-- name: Capture schema cutover action
-  ansible.builtin.set_fact:
-    ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
-
 # Prepare a fresh schema candidate only for a real handoff. Staging must
-# never create or activate storage; this task does not touch the active pointer.
+# never create storage; no database activation pointer exists.
 - name: Prepare versioned candidate before service downtime
   ansible.builtin.include_tasks: storage_prepare.yml
   when:
@@ -698,16 +457,23 @@
   ansible.builtin.debug:
     msg:
       release: "{{ ocpp_csms_release_id }}"
-      incumbent_service: "{{ ocpp_csms_incumbent_service | default('') }}"
-      incumbent_port: "{{ ocpp_csms_incumbent_port | default(0) }}"
-      schema_action: "{{ ocpp_csms_schema_action }}"
-      preflight: "{{ ocpp_csms_final_preflight_result }}"
+      schema_action: "{{ ocpp_csms_storage_selection.action }}"
       handoff: skipped
   when: ocpp_csms_stage_only | bool
 
 - name: End host after safe staging
   ansible.builtin.meta: end_host
   when: ocpp_csms_stage_only | bool
+
+# JSON archives are diagnostic projections alongside the selected schema database.
+# Prepare their parent directory before cutover, without writing transaction data.
+- name: Prepare selected schema transaction archive directory
+  ansible.builtin.file:
+    path: "{{ ocpp_csms_transactions_dir }}"
+    state: directory
+    owner: "{{ ocpp_csms_service_user }}"
+    group: "{{ ocpp_csms_service_group }}"
+    mode: "0750"
 
 # Versioned cutover remains explicitly gated until recovery is verified.
 - name: Perform controlled OCPP CSMS handoff

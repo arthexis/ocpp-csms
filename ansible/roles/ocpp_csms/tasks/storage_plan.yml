@@ -17,15 +17,15 @@
     ocpp_csms_storage_selection: "{{ ocpp_csms_storage_plan.stdout | from_json }}"
 
 # Resolve the database currently owned by the service. This is read-only and
-# must not select the prepared candidate before pointer activation.
+# must not select the prepared candidate before service handoff.
 - name: Capture active storage directory for preflight and handoff
   ansible.builtin.set_fact:
     ocpp_csms_active_data_dir: >-
       {{ ocpp_csms_storage_selection.active | default(ocpp_csms_data_dir, true) }}
 
-- name: Assert storage discovery never selects an unactivated candidate
+- name: Assert new schema preparation never reuses active storage
   ansible.builtin.assert:
     that:
       - ocpp_csms_storage_selection.action == 'reuse' or
         ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
-    fail_msg: Candidate storage cannot be treated as active before activation.
+    fail_msg: New schema storage must not be treated as the previous active database.

@@ -2,8 +2,6 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"
-DIAGNOSE_PLAYBOOK="$ROOT/ansible/playbooks/diagnose.yml"
 
 if [ "$(id -u)" -eq 0 ]; then
     printf 'Do not run deploy.sh as root or with sudo.\n' >&2
@@ -12,313 +10,68 @@ fi
 
 if ! command -v ansible-playbook >/dev/null 2>&1; then
     printf 'Missing required command: ansible-playbook\n' >&2
-    printf 'Install Ansible before running this deployment helper.\n' >&2
     exit 1
 fi
 
-observe_seconds=""
-interface=""
-reconnect_seconds=""
-stage_only=0
-diagnose=0
-dev=0
+playbook="$ROOT/ansible/playbooks/install.yml"
 expose=""
-delegate=0
-satellite=0
-certbot_email=""
+email=""
 no_certbot=0
-adopt=0
 uninstall=0
-force_handoff=0
-offline=0
+dev=0
+stage_only=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --observe)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --observe.\n' >&2; exit 2; }
-            observe_seconds=$2
-            shift 2
-            ;;
-        --observe=*)
-            observe_seconds=${1#--observe=}
-            shift
-            ;;
-        --interface)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --interface.\n' >&2; exit 2; }
-            interface=$2
-            shift 2
-            ;;
-        --interface=*)
-            interface=${1#--interface=}
-            shift
-            ;;
-        --reconnect)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --reconnect.\n' >&2; exit 2; }
-            reconnect_seconds=$2
-            shift 2
-            ;;
-        --reconnect=*)
-            reconnect_seconds=${1#--reconnect=}
-            shift
-            ;;
-        --offline)
-            offline=1
-            shift
-            ;;
-        --force)
-            force_handoff=1
-            shift
-            ;;
-        --stage-only)
-            stage_only=1
-            shift
-            ;;
-        --diagnose)
-            diagnose=1
-            shift
-            ;;
-        --dev)
-            dev=1
-            shift
-            ;;
-        --satellite)
-            satellite=1
-            shift
-            ;;
-        --delegate)
-            delegate=1
-            shift
-            ;;
-        --expose)
-            [ "$#" -ge 2 ] || { printf 'Missing DNS hostname for --expose.\n' >&2; exit 2; }
-            expose=$2
-            shift 2
-            ;;
-        --expose=*)
-            expose=${1#--expose=}
-            shift
-            ;;
-        --email)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --email.\n' >&2; exit 2; }
-            certbot_email=$2
-            shift 2
-            ;;
-        --email=*)
-            certbot_email=${1#--email=}
-            shift
-            ;;
-        --no-certbot)
-            no_certbot=1
-            shift
-            ;;
-        --adopt)
-            adopt=1
-            shift
-            ;;
-        --uninstall)
-            uninstall=1
-            shift
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            break
-            ;;
+        --expose|--email)
+            [ "$#" -ge 2 ] || { printf 'Missing value for %s.\n' "$1" >&2; exit 2; }
+            if [ "$1" = --expose ]; then expose=$2; else email=$2; fi
+            shift 2 ;;
+        --expose=*) expose=${1#--expose=}; shift ;;
+        --email=*) email=${1#--email=}; shift ;;
+        --no-certbot) no_certbot=1; shift ;;
+        --uninstall) uninstall=1; shift ;;
+        --dev) dev=1; shift ;;
+        --stage-only) stage_only=1; shift ;;
+        --) shift; break ;;
+        -*) printf 'Unknown deployment option: %s\n' "$1" >&2; exit 2 ;;
+        *) break ;;
     esac
 done
 
-validate_positive_seconds() {
-    option=$1
-    value=$2
-    case "$value" in
-        *[!0-9]*|'')
-            printf '%s must be a positive integer number of seconds.\n' "$option" >&2
-            exit 2
-            ;;
-        0)
-            printf '%s must be greater than zero.\n' "$option" >&2
-            exit 2
-            ;;
-    esac
-}
-
-# Deployment identity is immutable until a successful uninstall.
-# Resolve it before choosing playbooks so even a flagless invocation is safe.
-profile_path="${OCPP_CSMS_DEPLOY_PROFILE_PATH:-$HOME/.local/state/ocpp-csms/deployment.json}"
-profile_helper="$ROOT/scripts/deployment_profile.py"
 if [ "$uninstall" -eq 1 ]; then
-    if [ ! -f "$profile_path" ]; then
-        printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
+    if [ -n "$expose" ] || [ -n "$email" ] || [ "$no_certbot" -eq 1 ] || [ "$dev" -eq 1 ] || [ "$stage_only" -eq 1 ] || [ "$#" -gt 0 ]; then
+        printf '%s\n' '--uninstall must be used alone.' >&2
         exit 2
     fi
-    if [ "$offline" -eq 1 ] || [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
-        printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
-        exit 2
-    fi
-fi
-profile_assignments=$(python3 "$profile_helper" resolve --path "$profile_path" \
-    --satellite "$satellite" --delegate "$delegate" \
-    --expose "$expose" --email "$certbot_email" \
-    --no-certbot "$no_certbot" --interface "$interface" \
-    --adopt "$adopt") || exit 2
-eval "$profile_assignments"
-satellite=0
-delegate=0
-if [ "$profile_mode" = delegate ]; then
-    delegate=1
-else
-    satellite=1
-fi
-expose=$profile_expose
-certbot_email=$profile_email
-no_certbot=$profile_no_certbot
-interface=$profile_interface
-
-# Diagnostics inspect the installed profile but do not rerun exposure setup.
-if [ "$diagnose" -eq 1 ]; then
-    if [ "$delegate" -eq 1 ]; then
-        set -- -e ocpp_csms_diagnose_delegate=true "$@"
-    fi
-    expose=""
-    certbot_email=""
-    no_certbot=0
+    exec ansible-playbook "$ROOT/ansible/playbooks/uninstall.yml" -i localhost, -c local
 fi
 
-if [ "$uninstall" -eq 1 ]; then
-    PLAYBOOK="$ROOT/ansible/playbooks/uninstall.yml"
-    if ansible-playbook "$PLAYBOOK" -i localhost, -c local \
-      -e "ocpp_csms_expose=$expose"; then
-        python3 "$profile_helper" clear --path "$profile_path"
-        printf 'OCPP CSMS uninstalled; deployment profile cleared. Application data preserved.\\n'
-        exit 0
-    fi
-    printf '%s\\n' 'Uninstall failed; deployment profile preserved.' >&2
-    exit 1
-fi
-
-if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then
-    printf '%s\n' '--satellite cannot be combined with --delegate or --expose.' >&2
-    exit 2
-fi
-
-if [ "$delegate" -eq 1 ]; then
-    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
-    set -- -e ocpp_csms_host=127.0.0.1 "$@"
+if [ -n "$email" ] || [ "$no_certbot" -eq 1 ]; then
+    [ -n "$expose" ] || { printf '%s\n' '--email and --no-certbot require --expose.' >&2; exit 2; }
 fi
 
 if [ -n "$expose" ]; then
     case "$expose" in
-        *[!a-z0-9.-]*|.*|*..*|"")
-            printf 'Invalid public DNS hostname for --expose: %s\n' "$expose" >&2
-            exit 2
-            ;;
-    esac
-    case "$expose" in
+        *[!a-z0-9.-]*|.*|*..*|'') printf 'Invalid public DNS hostname.\n' >&2; exit 2 ;;
         *.*) ;;
         *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
     esac
-    if [ "$diagnose" -eq 1 ]; then
-        printf '%s\n' '--expose cannot be combined with --diagnose.' >&2
-        exit 2
-    fi
-    PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
-    if [ -n "$certbot_email" ]; then
-        set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
-    fi
-    if [ "$no_certbot" -eq 1 ]; then
-        set -- -e ocpp_csms_no_certbot=true "$@"
-    fi
-    set -- -e "ocpp_csms_expose=$expose" -e ocpp_csms_host=127.0.0.1 "$@"
+    playbook="$ROOT/ansible/playbooks/expose.yml"
+    set -- -e "ocpp_csms_expose=$expose" "$@"
+    if [ -n "$email" ]; then set -- -e "ocpp_csms_certbot_email=$email" "$@"; fi
+    if [ "$no_certbot" -eq 1 ]; then set -- -e ocpp_csms_no_certbot=true "$@"; fi
 fi
 
-if [ -z "$expose" ] && { [ -n "$certbot_email" ] || [ "$no_certbot" -eq 1 ]; }; then
-    printf '%s\n' '--email and --no-certbot require --expose.' >&2
-    exit 2
-fi
-
-if [ -n "$observe_seconds" ]; then
-    validate_positive_seconds --observe "$observe_seconds"
-    set -- -e "ocpp_csms_incumbent_observe_seconds=$observe_seconds" "$@"
-fi
-
-if [ -n "$interface" ]; then
-    case "$interface" in
-        *[!A-Za-z0-9_.:-]*|'')
-            printf 'Invalid --interface value: %s\n' "$interface" >&2
-            exit 2
-            ;;
-    esac
-    set -- -e "ocpp_discover_interface=$interface" "$@"
-fi
-
-if [ -n "$reconnect_seconds" ]; then
-    validate_positive_seconds --reconnect "$reconnect_seconds"
-    set -- -e "ocpp_csms_reconnect_timeout=$reconnect_seconds" "$@"
-fi
-
-if [ "$offline" -eq 1 ]; then
-    set -- -e ocpp_csms_offline=true "$@"
-fi
-
-if [ "$force_handoff" -eq 1 ]; then
-    set -- -e ocpp_csms_force_handoff=true "$@"
-fi
-
-if [ "$dev" -eq 1 ]; then
-    set -- -e ocpp_csms_dev=true "$@"
-fi
-
-if [ "$diagnose" -eq 1 ]; then
-    if [ "$offline" -eq 1 ]; then
-        printf '%s\n' '--offline does not apply to --diagnose.' >&2
-        exit 2
-    fi
-    if [ "$stage_only" -eq 1 ]; then
-        printf '%s\n' '--diagnose and --stage-only cannot be combined.' >&2
-        exit 2
-    fi
-    if [ -n "$reconnect_seconds" ]; then
-        printf '%s\n' '--reconnect does not apply to --diagnose.' >&2
-        exit 2
-    fi
-    PLAYBOOK=$DIAGNOSE_PLAYBOOK
-elif [ "$stage_only" -eq 1 ]; then
-    set -- -e ocpp_csms_stage_only=true "$@"
-fi
+if [ "$dev" -eq 1 ]; then set -- -e ocpp_csms_dev=true "$@"; fi
+if [ "$stage_only" -eq 1 ]; then set -- -e ocpp_csms_stage_only=true "$@"; fi
 
 started_at=$(date +%s)
-
-if ansible-playbook "$PLAYBOOK" -i localhost, -c local "$@"; then
+if ansible-playbook "$playbook" -i localhost, -c local "$@"; then
     status=0
 else
     status=$?
 fi
-
-finished_at=$(date +%s)
-duration=$((finished_at - started_at))
-minutes=$((duration / 60))
-seconds=$((duration % 60))
-
-if [ "$minutes" -gt 0 ]; then
-    printf '\nOCPP CSMS deploy finished in %dm %02ds\n' "$minutes" "$seconds"
-else
-    printf '\nOCPP CSMS deploy finished in %ds\n' "$seconds"
-fi
-
-# Only successful normal deployments update durable intent; diagnostics,
-# stage-only, development and tuning invocations never do.
-if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
-    commit_delegate=$delegate
-    if [ -n "$expose" ]; then
-        commit_delegate=0
-    fi
-    python3 "$profile_helper" commit --path "$profile_path" \
-        --satellite "$((1 - delegate))" --delegate "$commit_delegate" \
-        --expose "$expose" --email "$certbot_email" \
-        --no-certbot "$no_certbot" --interface "$interface" \
-        --adopt 1 || exit 2
-fi
-
+duration=$(($(date +%s) - started_at))
+printf 'OCPP deployment finished in %ds\n' "$duration"
 exit "$status"

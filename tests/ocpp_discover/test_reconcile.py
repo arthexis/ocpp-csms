@@ -18,18 +18,6 @@ def receipt(port):
     )
 
 
-def allow_preflight(monkeypatch):
-    monkeypatch.setattr(reconcile, "evaluate_preflight", lambda data_dir, rollover: SimpleNamespace(allowed=True, reason=None))
-
-
-def test_reconcile_requires_no_active_charging(tmp_path, monkeypatch):
-    monkeypatch.setattr(reconcile, "evaluate_preflight", lambda data_dir, rollover: SimpleNamespace(allowed=False, reason="active charging detected"))
-    monkeypatch.setattr(reconcile, "_replace_live", lambda candidate: pytest.fail("must not mutate while charging"))
-
-    with pytest.raises(RuntimeError, match="active charging"):
-        reconcile.reconcile(data_dir=tmp_path / "data", persistent_dir=tmp_path / "state", expected=receipt(8080), candidate=receipt(9999))
-
-
 def test_reconcile_proves_candidate_before_durable_commit(tmp_path, monkeypatch):
     old = receipt(8080)
     candidate = receipt(9999)
@@ -37,7 +25,6 @@ def test_reconcile_proves_candidate_before_durable_commit(tmp_path, monkeypatch)
     ruleset = tmp_path / "nftables.conf"
     handoff.persist_discovered(state, old)
     ruleset.write_text(persistence.render_persistent_ruleset(old))
-    allow_preflight(monkeypatch)
     calls = []
     monkeypatch.setattr(reconcile, "connection_markers", lambda data_dir, chargers: {"CP7": 4})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda data_dir, chargers: {"CP7": 8})
@@ -61,7 +48,6 @@ def test_reconnect_failure_restores_old_live_adaptation_and_keeps_durable_state(
     ruleset = tmp_path / "nftables.conf"
     handoff.persist_discovered(state, old)
     ruleset.write_text(persistence.render_persistent_ruleset(old))
-    allow_preflight(monkeypatch)
     live = []
     monkeypatch.setattr(reconcile, "connection_markers", lambda data_dir, chargers: {"CP7": 0})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda data_dir, chargers: {"CP7": 0})
@@ -83,7 +69,6 @@ def test_ocpp_failure_also_rolls_back_live_candidate(tmp_path, monkeypatch):
     ruleset = tmp_path / "nftables.conf"
     handoff.persist_discovered(state, old)
     ruleset.write_text(persistence.render_persistent_ruleset(old))
-    allow_preflight(monkeypatch)
     live = []
     monkeypatch.setattr(reconcile, "connection_markers", lambda data_dir, chargers: {"CP7": 0})
     monkeypatch.setattr(handoff, "_ocpp_markers", lambda data_dir, chargers: {"CP7": 0})

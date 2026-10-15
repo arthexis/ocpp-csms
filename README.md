@@ -16,70 +16,34 @@ The CSMS is permissive by default:
 
 The design principle is: **observe aggressively; block reluctantly.**
 
-## Standalone public CSMS (cloud)
+## Installation and public WSS exposure
 
-Use `ansible/playbooks/delegate.yml` for a delegate CSMS instance instead of
-`satellite.yml`. The cloud playbook installs only `ocpp_csms`: no Discover,
-and no traffic interception. It supports Debian-family ARM64
-and x86_64 machines, including Ubuntu 24.04.
+Run `./deploy.sh` as a non-root operator. It invokes
+`ansible/playbooks/install.yml` on cloud and satellite hosts. CSMS always
+listens on `0.0.0.0:9000`. Discover is installed whenever `eth0` exists,
+even without a connected charger. Discover redirects supported plaintext
+traffic; it does not terminate TLS.
 
-### Expose one hostname through nginx (Lightsail)
+Public TLS/WSS is optional and independent of installation:
 
-Use `--expose` for an isolated hostname such as
-`porsche-abb.gelectriic.com`; the nginx file and enabled site symlink
-are named **exactly** `porsche-abb.gelectriic.com`. This deployment uses
-nginx TLS termination on public 443 and a **loopback-only** CSMS WS backend
-on 127.0.0.1:9000, with the Authorization header passed through.
-The explicit trusted-loopback setting allows the backend to verify Basic
-credentials after nginx terminates TLS; it cannot be enabled on a publicly
-bound WS listener. Do not expose port 9000 externally.
+```bash
+./deploy.sh
+ocpp-csms auth basic --limit 3d
+sudo systemctl restart ocpp-csms.service
+./deploy.sh --expose ocpp.example.com --email operator@example.com
+```
 
-Bootstrap in this order:
+`--expose` invokes `ansible/playbooks/expose.yml`, which configures nginx,
+Certbot and port 443 WSS forwarding to `127.0.0.1:9000`. This is nginx's
+local upstream destination, **not** a change to the CSMS listener. Port 80
+serves ACME HTTP-01 challenges only. Configure DNS and external firewall rules
+for the desired reachability. Direct WS on port 9000 remains available wherever
+network policy permits it; nginx does not disable direct connections.
 
-1. Provision Ubuntu 24.04 Lightsail with a static IPv4 address; point DNS A
-   for the desired hostname at that address.
-2. Configure Lightsail networking and UFW: allow inbound **TCP 443** from
-   ABB's egress addresses (or 0.0.0.0/0 if those are not known), inbound
-   **TCP 80** temporarily for ACME HTTP-01 issuance/renewal as needed,
-   and inbound **TCP 22** only from an operator-approved IP range.
-   **Do not** open TCP 9000 or 9443, database ports, or local control sockets.
-   Allow outbound DNS (53), NTP (123), HTTPS (443) and package/ACME
-   traffic as required; do not assume ABB uses a fixed source IP.
-3. Bootstrap the CSMS CLI safely with `./deploy.sh --delegate`; this runs the
-   cloud playbook with the CSMS listener bound only to `127.0.0.1` and does
-   not install nginx or expose an anonymous public OCPP service.
-4. Configure Basic auth using `ocpp-csms auth basic --limit 3d`, restart
-   the service and verify `ocpp-csms auth status` reports `basic`.
-5. Run `./deploy.sh --expose porsche-abb.gelectriic.com --email admin@gelectriic.com`
-   as a non-root operator with sudo/become rights. This installs nginx and
-   Certbot, creates a temporary port-80 HTTP-01 challenge site without a
-   plaintext OCPP proxy, issues the certificate for the exact hostname,
-   and enables the final port-443 WSS nginx site. The certificate is reused
-   on subsequent deploys. Replace the sample email with an inbox you manage.
-6. Verify `certbot.timer` is enabled and a `certbot renew --dry-run`
-   succeeds. A deploy renewal hook reloads nginx after certificate updates.
-   With externally managed Let's Encrypt-format certificate files, use
-   `--no-certbot`; the hostname certificate must already exist.
-7. Verify `sudo nginx -t`, `systemctl status nginx ocpp-csms`,
-   correct public hostname/certificate and **401 for missing/wrong Basic**
-   credentials on the WSS upgrade. Prove port 9000 is unreachable
-   from outside the instance before ABB handover.
-8. Run a full authenticated public WSS simulator charge from Gway-001
-   and verify stored evidence on Lightsail. Do not hand ABB the URL until
-   this succeeds.
-
-`./deploy.sh --satellite` is identical to `./deploy.sh` with no deployment-mode flag. It cannot be combined with `--delegate` or `--expose`.
-
-
-The `--delegate` mode bootstraps a loopback-only CSMS for credential setup;
-`--expose` adds nginx/Certbot after credentials exist. The `--expose` path
-is opt-in; plain `./deploy.sh` continues to
-deploy a satellite as before. One cloud instance is intended to host
-one client-vendor's CSMS; separate hostnames on a shared nginx process
-alone do **not** isolate databases or credentials. Use a separate
-instance/configuration for a truly independent client deployment.
-
-
+Use `--no-certbot` only with an already-provisioned compatible certificate.
+Verify `nginx -t`, `certbot renew --dry-run` when applicable, and a full
+authenticated WSS session before commissioning a charger. Separate clients
+requiring isolated credentials or databases need separate CSMS instances.
 
 ### Internal WSS smoke test (no DNS or public ports)
 
@@ -515,7 +479,7 @@ contents, so the CSMS keeps this accepted-list history itself.
 
 The WebSocket listener uses a direct event loop. Normal OCPP handling persists evidence after each handler completes; there is no Django, Celery worker, async queue, or desired-state engine behind the protocol path.
 
-The listener uses plain `ws://` and is intended for a trusted charger LAN or equivalent private boundary. Do not expose it directly to an untrusted/public network.
+The listener uses plain `ws://` on `0.0.0.0:9000`. Configure network reachability deliberately; use nginx TLS termination for public `wss://` endpoints.
 
 Operator control uses `<data-dir>/control.sock`, a Unix-domain socket, rather than a second TCP control service.
 
@@ -545,60 +509,19 @@ The canonical appliance deployment is Ansible:
 
 Do not run the wrapper itself with `sudo`; the playbook uses privilege escalation only for host-level integration.
 
-The deployment wrapper exposes a small operator surface before any raw
-Ansible arguments:
-
-```bash
-./deploy.sh --observe 180
-./deploy.sh --interface eno1
-./deploy.sh --reconnect 60
-./deploy.sh --stage-only
-./deploy.sh --diagnose
-```
-
-`--observe SECONDS` changes the bounded incumbent-traffic observation window
-(default 15 seconds). `--interface NAME` selects the charger-facing interface
-for both Discover and incumbent observation. `--reconnect SECONDS` changes the
-post-cutover charger reconnect timeout. `--stage-only` installs and validates
-the candidate, runs safety and incumbent inspection, reports the planned handoff,
-then exits before stopping any service. `--diagnose` runs a separate read-only
-playbook that reports safety preflight, observed incumbent ownership, current
-managed release/service state, and Discover diagnostics without staging or
-handoff.
-
-Wrapper options must appear before raw Ansible arguments. `--diagnose` may be
-combined with `--observe` and `--interface`, but not with `--stage-only` or
-`--reconnect`.
-
-The satellite playbook installs and manages both:
-
-```text
-ocpp-csms.service
-ocpp-discover.service
-```
-
-Check the appliance with:
+The installation installs `ocpp-csms.service` on every host and
+`ocpp-discover.service` on hosts with `eth0`. Verify with:
 
 ```bash
 ocpp-csms status
-ocpp-discover status
-sudo ocpp-discover diagnostics
-sudo systemctl status ocpp-csms ocpp-discover
+sudo systemctl status ocpp-csms
+sudo systemctl status ocpp-discover  # only when eth0 exists
 ```
 
-If the charger-facing interface is not `eth0`, prefer the wrapper form
-`./deploy.sh --interface eno1`. Raw Ansible `-e` arguments remain
-available for advanced overrides.
-
-## Appliance handoff and rollback
-
-Installation performs read-only safety checks before replacement. Active charging blocks replacement.
-
-For an existing appliance, the candidate release is installed into an immutable release directory and started before `current` is promoted. Previously connected chargers must reconnect with fresh evidence before the release becomes active.
-
-If a charger cannot reconnect because it still targets an old local endpoint, the handoff can temporarily run the **candidate release's** OCPP Discover implementation. That recovery must produce a valid persistent ownership receipt before deployment proceeds. If verification fails, the previous service/unit is restored when rollback is safe.
-
-The active release is therefore the last release that completed handoff successfully; an in-progress candidate does not become `current` early.
+The optional exposure command uses `--expose HOSTNAME`, `--email EMAIL`,
+and `--no-certbot`. Uninstall is explicit: `./deploy.sh --uninstall`.
+No satellite/delegate selection, charger activity preflight, or deployment
+profile is used.
 
 ## OCPP Discover
 
@@ -909,36 +832,14 @@ ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 
 Unlike start/stop, firmware delivery uses the OCPP `retrieveDate` parameter: `--after` and `--at` send the request now **with a future retrieval date**, not a CSMS-side queued command. OCPP does not guarantee when installation starts or finishes. Omission of timing is an error; the charger only receives an immediate retrieval date with explicit `--now`. `--within` is intentionally unavailable because it would require a separate CSMS queue that waits for an idle charger.
 
 
-### Remembered deployment profile
+### Uninstall
 
-A successful normal `./deploy.sh` records its nonsecret installation
-profile at `~/.local/state/ocpp-csms/deployment.json` (mode 0600).
-Subsequent deployments without mode flags reuse the recorded satellite/delegate
-mode, public `--expose` hostname, Certbot email and management switch,
-and interface. In particular, an exposed delegate never
-silently becomes a satellite when `./deploy.sh` is rerun.
-
-Only the original *deployment identity* can be retained: satellite versus
-delegate cannot change in place, and changing an exposed hostname also requires
-uninstallation. An unexposed delegate can acquire `--expose` without reinstalling.
-
-Temporary `--diagnose`, `--stage-only`, `--dev`,
-`--observe` and `--reconnect` do not persist as future defaults.
-Arbitrary Ansible extra variables (especially tokens/secrets) are never
-recorded. Failed deployments never update the profile.
-
-To remove the managed service and permit changing the installation mode, run
-`./deploy.sh --uninstall`. It stops and removes managed systemd units,
-removes the hostname-specific nginx site if installed, and removes replaceable
-code releases, then clears the saved profile only upon successful completion.
-Transaction archives, the database, and certificate archives are preserved.
-Basic authentication is deactivated and its protected file is archived at
-`/etc/ocpp-csms/auth.uninstalled.json`. Back up durable records before uninstalling. Installation
-from an older version with no saved profile requires explicit mode plus
-`--adopt` after verifying the installed role; it will not guess the role
-from an existing systemd unit.
-
-
+`./deploy.sh --uninstall` runs `ansible/playbooks/uninstall.yml` and removes
+managed systemd services, replaceable application releases, Discover-owned
+persistent nftables integration, and identifiable CSMS-managed nginx sites.
+It does not delete SQLite databases, transaction archives, Basic authentication
+credentials, or TLS certificate archives. No deployment profile is recorded
+or cleared. Back up durable data before uninstalling.
 
 ### Gway-001 deployment and validation
 

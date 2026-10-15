@@ -12,7 +12,7 @@ server {
 }
 
 # Restrict attempted WebSocket handshakes, not established connections.
-limit_req_zone $binary_remote_addr zone=ocpp_wss_handshake:10m rate=2r/s;
+limit_req_zone $binary_remote_addr zone=ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }}:10m rate=2r/s;
 server {
     listen 443 ssl;
     server_name {{ ocpp_csms_expose }};
@@ -24,9 +24,9 @@ server {
     client_header_timeout 15s;
     add_header X-Content-Type-Options "nosniff" always;
     location / {
-        limit_req zone=ocpp_wss_handshake burst=20 nodelay;
+        limit_req zone=ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }} burst=20 nodelay;
         limit_req_status 429;
-        proxy_pass http://127.0.0.1:{{ ocpp_csms_port }};
+        proxy_pass http://127.0.0.1:{{ ocpp_expose_upstream_port }};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

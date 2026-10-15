@@ -1,0 +1,15 @@
+---
+# Public TLS/WSS exposure is independent of CSMS installation and Discover.
+- name: Configure public OCPP CSMS exposure
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Require a public hostname
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_expose | default('') | length > 0
+        fail_msg: Pass --expose with a fully qualified DNS hostname.
+
+    - name: Configure nginx and TLS for OCPP CSMS
+      ansible.builtin.include_role:
+        name: ocpp_expose

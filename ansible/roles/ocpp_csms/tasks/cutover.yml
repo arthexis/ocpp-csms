@@ -23,36 +23,12 @@
     ocpp_csms_activation_required: >-
       {{
         (ocpp_csms_storage_selection.action == 'create')
-        or (ocpp_csms_incumbent_service | length > 0)
         or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
         or (not (ocpp_csms_live_service_state.stat.exists | default(false)))
         or ((ocpp_csms_live_service_state.stat.checksum | default('')) !=
             (ocpp_csms_candidate_service_state.stat.checksum | default('candidate-missing')))
       }}
-
-- name: Save final preflight payload for handoff
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_final_preflight_path }}"
-    content: "{{ ocpp_csms_final_preflight.stdout }}\n"
-    mode: "0600"
-  when: ocpp_csms_activation_required | bool
-
-- name: Capture charger reconnect baseline
-  ansible.builtin.command:
-    argv:
-      - "{{ ocpp_csms_release_venv }}/bin/python"
-      - -m
-      - ocpp_csms.install_cutover
-      - capture-baseline
-      - --data-dir
-      - "{{ ocpp_csms_active_data_dir }}"
-      - --preflight-json
-      - "{{ ocpp_csms_final_preflight_path }}"
-      - --output
-      - "{{ ocpp_csms_reconnect_baseline_path }}"
-  changed_when: true
-  when: ocpp_csms_activation_required | bool
 
 - name: Preserve previous live systemd unit
   become: true
@@ -73,14 +49,9 @@
     - ocpp_csms_activation_required | bool
     - not (ocpp_csms_live_service_state.stat.exists | default(false))
 
-# Downtime starts here. An observed incumbent OCPP listener is stopped only after
-# the candidate, systemd unit, final safety gate and schema decision are ready.
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
-    - name: Stop incumbent OCPP service listener at cutover
-      ansible.builtin.include_tasks: incumbent_stop.yml
-
     - name: Stop existing OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -110,27 +81,6 @@
           - --data-dir
           - "{{ ocpp_csms_storage_selection.target }}"
       changed_when: false
-
-    # Activate a fresh prepared schema only with every prior writer stopped.
-    - name: Record that versioned storage activation started
-      ansible.builtin.set_fact:
-        ocpp_csms_versioned_activation_started: true
-      when: ocpp_csms_storage_selection.action == 'create'
-
-    - name: Atomically select prepared schema storage
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - storage-activate
-          - --storage-root
-          - "{{ ocpp_csms_data_dir }}"
-          - --target
-          - "{{ ocpp_csms_storage_selection.target }}"
-      register: ocpp_csms_storage_activation
-      changed_when: true
-      when: ocpp_csms_storage_selection.action == 'create'
 
     - name: Install live OCPP CSMS systemd unit
       become: true
@@ -232,10 +182,6 @@
           - status
       changed_when: false
 
-    - name: Verify previously connected chargers reconnect
-      ansible.builtin.include_tasks: reconnect.yml
-      when: not (ocpp_csms_offline | bool)
-
     - name: Point previous at successfully active release
       ansible.builtin.file:
         src: "{{ ocpp_csms_current_state.stat.lnk_source }}"
@@ -253,31 +199,15 @@
         state: link
         force: true
 
-    # A successful takeover must not allow the incumbent listener to return on the
-    # next boot and race the new CSMS for the production port.
-    - name: Disable incumbent OCPP service after verified takeover
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ ocpp_csms_incumbent_service }}"
-        enabled: false
-      when: ocpp_csms_incumbent_service | length > 0
-
   rescue:
-    # Once storage has been activated, or the replacement writer might have
-    # started, repair forward. Never infer rollback safety from an empty table:
+    # Once the replacement writer might have started, repair forward.
+    # Never infer rollback safety from an empty table:
     # a restarted installer cannot know what a previous process acknowledged.
     - name: Refuse automatic rollback after activation or writer start
       ansible.builtin.assert:
         that:
-          - not (ocpp_csms_versioned_activation_started | default(false) | bool)
           - not (ocpp_csms_reused_writer_started | default(false) | bool)
-        fail_msg: Activation or candidate writer started; preserve database and release for forward repair.
-
-    # Only failures before activation may restore the incumbent. No database
-    # pointer or transaction archive is ever modified by this rescue path.
-    - name: Restore incumbent after pre-activation failure
-      ansible.builtin.include_tasks: incumbent_restore.yml
-      when: ocpp_csms_incumbent_service | length > 0
+        fail_msg: Candidate writer started; preserve database and release for forward repair.
 
     - name: Restore previous systemd unit before candidate start
       become: true
@@ -288,7 +218,6 @@
         mode: "0644"
       notify: Reload systemd daemon
       when:
-        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
@@ -302,7 +231,6 @@
         enabled: true
         state: started
       when:
-        - ocpp_csms_incumbent_service | length == 0
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 

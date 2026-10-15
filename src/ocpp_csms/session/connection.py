@@ -29,6 +29,8 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
         self.transactions = transactions
         self.events = events
         self.connection = connection
+        # Live occupancy belongs to this connection, never to archival evidence.
+        self.connector_statuses: dict[int, str] = {}
 
     def _record(
         self,

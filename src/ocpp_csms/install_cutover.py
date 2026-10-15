@@ -8,15 +8,13 @@ import time
 from pathlib import Path
 
 from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
-from ocpp_csms.schema_storage import discover_active_storage, plan_storage, prepare_storage, activate_schema
+from ocpp_csms.schema_storage import plan_storage, prepare_storage
 from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
-    can_upgrade_schema,
     inspect_schema,
     ensure_wal,
-    upgrade_schema,
 )
 
 
@@ -33,17 +31,11 @@ def schema_action(data_dir: str | Path) -> str:
         raise RuntimeError(
             f"events database schema {info.version} is newer than supported {CURRENT_SCHEMA_VERSION}"
         )
-    if can_upgrade_schema(info):
-        return "upgrade"
-    raise RuntimeError(
-        f"no supported schema upgrade from {info.version} to {CURRENT_SCHEMA_VERSION}"
-    )
+    raise RuntimeError(f"events database schema {info.version} is older than required {CURRENT_SCHEMA_VERSION}; prepare a new schema database")
 
 
 def apply_schema_action(data_dir: str | Path) -> str:
     action = schema_action(data_dir)
-    if action == "upgrade":
-        upgrade_schema(data_dir)
     if action != "create":
         ensure_wal(data_dir)
     return action
@@ -169,9 +161,6 @@ def _parser() -> argparse.ArgumentParser:
     check = subcommands.add_parser("schema-check")
     check.add_argument("--data-dir", required=True)
 
-    upgrade = subcommands.add_parser("schema-upgrade")
-    upgrade.add_argument("--data-dir", required=True)
-
     plan = subcommands.add_parser("storage-plan")
     plan.add_argument("--storage-root", required=True)
     plan.add_argument("--active-data-dir")
@@ -179,10 +168,6 @@ def _parser() -> argparse.ArgumentParser:
     prepare = subcommands.add_parser("storage-prepare")
     prepare.add_argument("--storage-root", required=True)
     prepare.add_argument("--active-data-dir")
-
-    activate = subcommands.add_parser("storage-activate")
-    activate.add_argument("--storage-root", required=True)
-    activate.add_argument("--target", required=True)
 
     checkpoint = subcommands.add_parser("storage-checkpoint")
     checkpoint.add_argument("--data-dir", required=True)
@@ -193,19 +178,6 @@ def _parser() -> argparse.ArgumentParser:
     verify = subcommands.add_parser("schema-verify")
     verify.add_argument("--data-dir", required=True)
 
-    capture = subcommands.add_parser("capture-baseline")
-    capture.add_argument("--data-dir", required=True)
-    capture.add_argument("--preflight-json", required=True)
-    capture.add_argument("--output", required=True)
-
-    reconnect = subcommands.add_parser("wait-reconnect")
-    reconnect.add_argument("--data-dir", required=True)
-    reconnect.add_argument("--baseline", required=True)
-    reconnect.add_argument("--timeout", type=float, default=30.0)
-
-    wait_any = subcommands.add_parser("wait-any")
-    wait_any.add_argument("--data-dir", required=True)
-    wait_any.add_argument("--timeout", type=float, default=30.0)
     return parser
 
 
@@ -213,17 +185,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command in ("storage-plan", "storage-prepare"):
-            active = (args.active_data_dir if args.active_data_dir is not None
-                      else discover_active_storage(args.storage_root))
-            plan = plan_storage(args.storage_root, active)
+            plan = plan_storage(args.storage_root, args.active_data_dir)
             if args.command == "storage-prepare":
                 prepare_storage(plan)
             print(json.dumps({"action": plan.action, "target": str(plan.target),
                               "active_schema": plan.active_schema,
                               "active": str(plan.active) if plan.active else None}, sort_keys=True))
-            return 0
-        if args.command == "storage-activate":
-            print(str(activate_schema(args.storage_root, args.target)))
             return 0
         if args.command == "storage-checkpoint":
             checkpoint_stopped_storage(args.data_dir)
@@ -236,36 +203,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "schema-check":
             print(schema_action(args.data_dir))
             return 0
-        if args.command == "schema-upgrade":
-            print(apply_schema_action(args.data_dir))
-            return 0
         if args.command == "schema-verify":
             verify_schema_integrity(args.data_dir)
             print("ok")
             return 0
-        if args.command == "capture-baseline":
-            payload = json.loads(Path(args.preflight_json).read_text(encoding="utf-8"))
-            expected = tuple(str(value) for value in payload.get("connected_chargers", ()))
-            markers = connection_markers(args.data_dir, expected)
-            Path(args.output).write_text(json.dumps(markers, sort_keys=True), encoding="utf-8")
-            return 0
-        if args.command == "wait-any":
-            charger = wait_for_any_connection(args.data_dir, timeout=args.timeout)
-            if charger is None:
-                print("No charger connected")
-                return 1
-            print(charger)
-            return 0
-
-        markers = {
-            str(key): int(value)
-            for key, value in json.loads(Path(args.baseline).read_text(encoding="utf-8")).items()
-        }
-        missing = wait_for_reconnect(args.data_dir, markers, timeout=args.timeout)
-        if missing:
-            print("Missing charger(s): " + ", ".join(missing))
-            return 1
-        return 0
+        raise RuntimeError(f"unsupported installer command: {args.command}")
     except (RuntimeError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(str(exc))
         return 1

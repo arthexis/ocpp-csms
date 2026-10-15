@@ -40,7 +40,9 @@ class SessionHandlers:
         self._record("StatusNotification", payload)
         try:
             accepted = self.events.record_connector_status(self.id, payload)
-            if not accepted:
+            if accepted:
+                self.connector_statuses[int(payload['connector_id'])] = str(payload['status'])
+            else:
                 LOGGER.info(
                     "ignored status %s connector %s",
                     payload.get("status"),

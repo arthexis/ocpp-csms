@@ -21,6 +21,9 @@ class WebSocket:
         self.subprotocol = subprotocol
         self.closed = asyncio.Event()
 
+    async def close(self, *, code, reason):
+        self.closed.set()
+
 
 def install_waiting_session(monkeypatch, started=None, sessions=None):
     class Session:
@@ -54,6 +57,7 @@ async def test_older_disconnect_does_not_override_newer_connection(monkeypatch):
     install_waiting_session(monkeypatch, started, sessions)
     events = RuntimeEvents()
     server = make_server(events)
+    assert server.session("missing") is None
     first = WebSocket(path="/charger-a")
     second = WebSocket(path="/charger-a")
 

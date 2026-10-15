@@ -31,36 +31,11 @@ async def test_archive_persists_receive_time_for_each_event(tmp_path, monkeypatc
     assert record["stop_received_at"] == "2026-10-06T12:10:01Z"
 
 
-@pytest.mark.asyncio
-async def test_legacy_meter_values_keep_receive_time_alignment(tmp_path, monkeypatch):
-    directory = tmp_path / "transactions" / "2026-10-06"
-    directory.mkdir(parents=True)
-    path = directory / "charger-a-1.json"
-    path.write_text(json.dumps({
-        "transaction_id": 1,
-        "origin": "local",
-        "charge_point_id": "charger-a",
-        "status": "open",
-        "created_at": "2026-10-06T10:00:00Z",
-        "updated_at": "2026-10-06T10:05:00Z",
-        "start": {"connector_id": 1, "timestamp": "2026-10-06T10:00:00Z"},
-        "meter_values": [{"transaction_id": 1, "connector_id": 1, "meter_value": [{"timestamp": "2026-10-06T10:05:00Z"}]}],
-        "stop": None,
-    }))
-    monkeypatch.setattr(transactions_module, "utc_now_iso", lambda: "2026-10-06T10:10:00Z")
-
-    archive = TransactionArchive(tmp_path)
-    await archive.meter_values("charger-a", {"transaction_id": 1, "connector_id": 1, "meter_value": [{"timestamp": "2026-10-06T10:10:00Z"}]})
-
-    record = json.loads(path.read_text())
-    assert record["meter_values_received_at"] == [None, "2026-10-06T10:10:00Z"]
-
-
 
 def test_json_diagnostics_do_not_create_query_transactions(tmp_path):
     directory = tmp_path / "transactions" / "2026-10-06"
     directory.mkdir(parents=True)
-    (directory / "legacy.json").write_text(json.dumps({
+    (directory / "diagnostic.json").write_text(json.dumps({
         "transaction_id": 1, "charge_point_id": "charger-a",
         "status": "stopped", "updated_at": "2026-10-06T11:00:00Z",
     }))

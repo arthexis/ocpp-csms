@@ -18,13 +18,12 @@ def test_schema_verification_rejects_older_database(tmp_path):
     with sqlite3.connect(database_path(tmp_path)) as db:
         db.execute("ALTER TABLE connector_status DROP COLUMN info")
         db.execute("PRAGMA user_version=5")
-    assert schema_action(tmp_path) == "upgrade"
+    with pytest.raises(RuntimeError, match="older than required"):
+        schema_action(tmp_path)
     with pytest.raises(RuntimeError, match="schema verification failed"):
         verify_schema_integrity(tmp_path)
-    assert apply_schema_action(tmp_path) == "upgrade"
-    verify_schema_integrity(tmp_path)
-    # An already upgraded database must be idempotent.
-    assert apply_schema_action(tmp_path) == "current"
+    with pytest.raises(RuntimeError, match="older than required"):
+        apply_schema_action(tmp_path)
 
 
 def test_schema_verification_rejects_missing_db(tmp_path):

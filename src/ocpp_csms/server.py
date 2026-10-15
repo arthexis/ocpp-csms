@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import sqlite3
@@ -10,7 +11,6 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
-from ocpp_csms.occupancy import connector_occupancy as read_connector_occupancy
 from ocpp_csms.connector_query import physical_connector_ids
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.control import ControlServer, control_socket_path
@@ -29,6 +29,27 @@ OCPP_16_SUBPROTOCOL = "ocpp1.6"
 def charge_point_id_from_path(path: str) -> str:
     clean_path = path.split("?", 1)[0].rstrip("/")
     return clean_path.rsplit("/", 1)[-1] if clean_path else ""
+
+
+class AuthenticatedWebSocketProtocol(WebSocketServerProtocol):
+    """Recognize local TLS termination from the TCP peer, not HTTP headers."""
+
+    def __init__(self, *args, auth: dict, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.auth = auth
+
+    async def process_request(self, path, headers):
+        peer = self.remote_address
+        local_proxy = False
+        if peer:
+            try:
+                local_proxy = ipaddress.ip_address(peer[0]).is_loopback
+            except ValueError:
+                pass
+        return basic_upgrade_check(
+            self.auth, path, headers, secure=local_proxy,
+            config_path=auth_path() if local_proxy else None,
+        )
 
 
 class RecordedWebSocket:
@@ -79,9 +100,8 @@ class CSMSServer:
 
     def connector_occupancy(self, charge_point_id: str) -> dict[int, str]:
         """Latest connector reports from the current WebSocket connection only."""
-        if self.session(charge_point_id) is None:
-            return {}
-        return read_connector_occupancy(self.events.data_dir, charge_point_id)
+        session = self.session(charge_point_id)
+        return dict(session.connector_statuses) if session is not None else {}
 
     def record_control_event(
         self,
@@ -131,12 +151,6 @@ class CSMSServer:
         self._record_runtime("server_started")
         # Invalid auth configuration must fail startup, not open an anonymous listener.
         auth = load_auth()
-        # Trust nginx TLS termination only on the local loopback listener.
-        proxy_tls = os.environ.get("OCPP_CSMS_TRUST_LOOPBACK_TLS_PROXY") == "1"
-        if proxy_tls and self.host not in ("127.0.0.1", "::1", "localhost"):
-            raise ValueError("trusted TLS proxy requires loopback-only CSMS bind")
-        if proxy_tls and auth["mode"] != "basic":
-            raise ValueError("trusted TLS proxy requires Basic authentication")
         socket_path = control_socket_path(self.events.data_dir)
         try:
             async with ControlServer(self, socket_path):
@@ -145,7 +159,9 @@ class CSMSServer:
                     self.host,
                     self.port,
                     subprotocols=[OCPP_16_SUBPROTOCOL],
-                    process_request=lambda path, headers: basic_upgrade_check(auth, path, headers, secure=proxy_tls, config_path=auth_path() if proxy_tls else None),
+                    create_protocol=lambda *args, **kwargs: AuthenticatedWebSocketProtocol(
+                        *args, auth=auth, **kwargs
+                    ),
                 ):
                     # TLS startup is independent of the already-bound WS listener.
                     # A bad certificate or occupied WSS port must not stop WS.
@@ -190,7 +206,10 @@ class CSMSServer:
             self.transactions,
             self.events,
         )
+        previous = self._active_sessions.get(charge_point_id)
         self._active_sessions[charge_point_id] = session
+        if previous is not None:
+            await previous.connection.close(code=1001, reason="Superseded connection")
         LOGGER.info("Charge point connected: %s", charge_point_id)
         self._record_runtime(
             "charger_connected",
