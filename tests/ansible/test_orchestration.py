@@ -1,3 +1,7 @@
+import sqlite3
+import subprocess
+import sys
+
 from .helpers import (
     DEFAULTS,
     DEPLOY_SCRIPT,
@@ -184,6 +188,34 @@ def test_storage_probe_uses_service_identity_and_checks_sqlite_writer_access():
     assert "mode=rw" in script
     assert "BEGIN IMMEDIATE" in script
     assert "connection.rollback()" in script
+
+
+
+def test_storage_probe_executes_read_write_check_without_persisting_changes(tmp_path):
+    """Exercise the embedded probe against real SQLite, not variable spelling."""
+    task = task_by_name(TASKS / "cutover.yml", "Verify OCPP CSMS storage access as systemd service user")
+    argv = task["ansible.builtin.command"]["argv"]
+    script = argv[argv.index("-c") + 1]
+
+    archives = tmp_path / "transactions"
+    archives.mkdir()
+    database = tmp_path / "ocpp-csms.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE evidence (id INTEGER PRIMARY KEY)")
+        connection.execute("INSERT INTO evidence VALUES (1)")
+
+    command = [sys.executable, "-c", script, str(tmp_path), str(database), str(archives)]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT id FROM evidence").fetchall() == [(1,)]
+
+    # A missing database must not be silently created by the readiness probe.
+    database.unlink()
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0
+    assert not database.exists()
+
 
 
 def test_stable_command_is_exposed_after_handoff():
