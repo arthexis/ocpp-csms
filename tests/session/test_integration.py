@@ -352,7 +352,7 @@ async def test_websocket_reconnect_and_server_restart_keep_distinct_session_iden
 
 @pytest.mark.asyncio
 async def test_websocket_orphan_stop_then_valid_start_does_not_adopt_foreign_id(tmp_path):
-    """Orphan evidence is acknowledged without creating a session or consuming its ID."""
+    """Unknown stop evidence recovers a historical record and reserves its ID."""
     server = CSMSServer(
         host="127.0.0.1", port=0,
         transactions=TransactionArchive(tmp_path), events=EventStore(tmp_path),
@@ -385,8 +385,8 @@ async def test_websocket_orphan_stop_then_valid_start_does_not_adopt_foreign_id(
             "SELECT charger_id, transaction_id, payload_json FROM events "
             "WHERE action = 'StopTransaction' AND direction = 'in'"
         ).fetchone()
-    assert transactions == [(valid_id, "charger-a")]
-    assert valid_id == 1
+    assert transactions == [(900000, "charger-a"), (valid_id, "charger-a")]
+    assert valid_id == 900001
     assert orphan[0:2] == ("charger-a", 900000)
     assert json.loads(orphan[2])["meter_stop"] == 900
 
