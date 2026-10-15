@@ -127,6 +127,26 @@ def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
     if row["transaction_id"] is not None:
         details.append(f"tx={row['transaction_id']}")
 
+    if action == "BootNotification":
+        if direction == "in":
+            # Boot identity is valuable diagnostic evidence; the compact view
+            # keeps the standard OCPP action name without inventing a boot event.
+            if detail:
+                for key in ("charge_point_vendor", "charge_point_model",
+                            "charge_point_serial_number", "charge_box_serial_number",
+                            "firmware_version", "iccid", "imsi", "meter_type",
+                            "meter_serial_number"):
+                    if payload.get(key) is not None:
+                        details.append(f"{key}={payload[key]}")
+            return " ".join([action, *details])
+        if direction == "out":
+            for key in ("status", "interval"):
+                if payload.get(key) is not None:
+                    details.append(f"{key}={payload[key]}")
+            if detail and (payload.get("current_time") or payload.get("currentTime")):
+                details.append(f"current_time={payload.get('current_time') or payload.get('currentTime')}")
+            return "→ " + " ".join([action, *details or ["response"]])
+
     if action == "StatusNotification":
         details.extend(str(value) for value in (
             payload.get("status"), payload.get("error_code"), payload.get("info")
