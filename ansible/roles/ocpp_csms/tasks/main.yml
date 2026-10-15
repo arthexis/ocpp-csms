@@ -627,7 +627,7 @@
       - ocpp_csms.install_preflight
       - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_initial_active_storage.stdout if (ansible_connection | default('ssh')) == 'local' else ocpp_csms_remote_active_storage.stdout }}"
       - --json
   register: ocpp_csms_final_preflight
   changed_when: false
@@ -662,7 +662,7 @@
       - ocpp_csms.install_cutover
       - schema-check
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_active_data_dir }}"
   register: ocpp_csms_schema_check
   changed_when: false
 
