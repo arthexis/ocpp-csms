@@ -341,7 +341,9 @@ def test_incoming_stop_advances_allocator_without_creating_transaction(tmp_path)
         "transaction_id": 700, "meter_stop": 125, "timestamp": "2026-10-14T12:00:00Z",
     })
     assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (700,)
-    assert fetchall(tmp_path, "SELECT transaction_id FROM transactions") == []
+    assert fetchall(
+        tmp_path, "SELECT transaction_id, state, meter_start, meter_stop FROM transactions"
+    ) == [(700, "stopped", None, 125)]
     assert store.commit_start("charger-a", {
         "connector_id": 1, "id_tag": "card-a", "meter_start": 125,
         "timestamp": "2026-10-14T12:01:00Z",
@@ -367,3 +369,35 @@ def test_invalid_external_ids_do_not_advance_allocator(tmp_path):
             "transaction_id": transaction_id,
         })
     assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (0,)
+
+
+def test_unknown_meter_values_creates_incomplete_transaction_without_active_start(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 420})
+    assert fetchall(
+        tmp_path,
+        "SELECT transaction_id, charger_id, state, started_at, start_received_at "
+        "FROM transactions",
+    ) == [(420, "charger-a", "unknown", None, None)]
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": 420, "meter_stop": 90, "timestamp": "2026-10-14T12:10:00Z",
+    })
+    assert fetchone(
+        tmp_path, "SELECT state, meter_stop FROM transactions WHERE transaction_id = 420",
+    ) == ("stopped", 90)
+
+
+def test_unknown_stop_from_other_charger_does_not_mutate_existing_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "a", "meter_start": 10,
+        "timestamp": "2026-10-14T12:00:00Z",
+    })
+    store.commit_transaction_evidence("charger-b", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 99,
+        "timestamp": "2026-10-14T12:11:00Z",
+    })
+    assert fetchone(
+        tmp_path, "SELECT charger_id, state, meter_stop FROM transactions WHERE transaction_id = 1",
+    ) == ("charger-a", "open", None)
+    assert fetchone(tmp_path, "SELECT COUNT(*) FROM events WHERE charger_id = 'charger-b'") == (1,)
