@@ -27,14 +27,14 @@ def test_download_uses_full_guarded_configuration_query(monkeypatch, parse_cli):
     monkeypatch.setattr(config_cli, "_connected_charger", lambda data_dir: "charger-a")
 
     assert cli.run_config_download(parse_cli("config", "download")) == 0
-    assert install_control_response.request == {"command": "config", "force": False}
+    assert install_control_response.request == {"command": "config"}
 
 
-def test_download_forwards_explicit_charger_and_force(monkeypatch, parse_cli):
+def test_download_forwards_explicit_charger(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"ok": True, "response": {"configuration_key": [], "unknown_key": []}})
 
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--force")) == 0
-    assert install_control_response.request == {"command": "config", "force": True, "charger": "charger-a"}
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a")) == 0
+    assert install_control_response.request == {"command": "config", "charger": "charger-a"}
 
 
 def test_download_reports_active_transaction_guard(monkeypatch, parse_cli, capsys):
