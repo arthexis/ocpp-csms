@@ -239,7 +239,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_data"}
             response = await session.data_transfer(vendor_id, message_id, data)
         elif command == "reserve":
-            from datetime import datetime, timezone
+            from datetime import datetime
             connector = request.get("connector")
             reservation_id = request.get("reservation_id")
             id_tag = request.get("id_tag")
@@ -294,8 +294,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_retries"}
             if retry_interval is not None and not _non_negative_int(retry_interval):
                 return {"error": "invalid_retry_interval"}
-            if not isinstance(request.get("immediate"), bool):
-                return {"error": "invalid_immediate"}
             response = await session.update_firmware(
                 location, retrieve_date, retries=retries, retry_interval=retry_interval
             )
