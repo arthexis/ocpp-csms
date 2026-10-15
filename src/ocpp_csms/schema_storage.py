@@ -47,9 +47,9 @@ def discover_active_storage(root: str | Path) -> Path | None:
     if current.exists():
         raise RuntimeError(f"active schema pointer is not a symlink: {current}")
     legacy = database_path(root)
-    if legacy.exists() and (root / "schemas").exists():
-        raise RuntimeError("ambiguous legacy and unactivated versioned storage")
     if legacy.exists():
+        # The legacy database remains authoritative until current is selected.
+        # An interrupted preparation may leave an unactivated schemas directory.
         return root
     if (root / "schemas").exists():
         raise RuntimeError("versioned storage exists without an active current pointer")
