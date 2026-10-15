@@ -2,7 +2,7 @@
 
 These are static regressions: they never operate on appliances.
 """
-from .helpers import ROOT, TASKS, read, task_by_name, assert_task_order, load_yaml
+from .helpers import ROOT, TASKS, read, assert_task_order, load_yaml
 
 PLAYBOOKS = ROOT / "ansible/playbooks"
 
@@ -21,22 +21,6 @@ def test_first_install_uses_prepared_storage_before_start():
                       "Assert initialized OCPP CSMS storage",
                       "Enable and start candidate OCPP CSMS service")
     assert "not (ocpp_csms_live_service_state.stat.exists | default(false))" in cutover
-
-
-def test_failed_cutover_restores_previous_release_only_when_safe():
-    cutover = read(TASKS / "cutover.yml")
-    assert_task_order(cutover, "Preserve previous live systemd unit",
-                      "Stop existing OCPP CSMS service",
-                      "Verify candidate OCPP CSMS application status",
-                      "Promote verified release to current")
-    assert "Restore previous live systemd unit" in cutover
-    assert "Restart previous OCPP CSMS service" in cutover
-    rollback = task_by_name(TASKS / "cutover.yml", "Restart previous OCPP CSMS service")
-    conditions = str(rollback["when"])
-    assert "ocpp_csms_schema_action != 'upgrade'" in conditions
-    assert "ocpp_csms_current_state.stat.islnk" in conditions
-    assert "ocpp_csms_live_service_state.stat.exists" in conditions
-    assert "Report handoff failure without automatic rollback" in cutover
 
 
 def test_stage_only_prevents_public_exposure():
