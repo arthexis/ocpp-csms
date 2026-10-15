@@ -68,7 +68,7 @@ def test_boot_notification_is_distinct_from_connection_and_has_details(tmp_path)
     detailed = format_events(rows, detail=True)
     assert "charger connected" in compact
     assert "BootNotification" in compact
-    assert "→ BootNotification Accepted" in compact
+    assert "→ BootNotification status=Accepted interval=60" in compact
     assert "charge_point_vendor=Acme" not in compact
     assert "charge_point_vendor=Acme" in detailed
     assert "charge_point_model=Dual" in detailed
