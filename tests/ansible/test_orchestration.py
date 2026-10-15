@@ -186,7 +186,7 @@ def test_storage_probe_uses_service_identity_and_checks_sqlite_writer_access():
     argv = task["ansible.builtin.command"]["argv"]
     assert "{{ ocpp_csms_database_path }}" in argv
     assert "{{ ocpp_csms_transactions_dir }}" in argv
-    assert "{{ ocpp_csms_data_dir }}" in argv
+    assert "{{ ocpp_csms_service_data_dir }}" in argv
     script = argv[argv.index("-c") + 1]
     assert "mode=rw" in script
     assert "uri=True" in script
