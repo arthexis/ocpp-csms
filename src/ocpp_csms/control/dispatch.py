@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from .protocols import Session, SessionRegistry
@@ -234,20 +233,6 @@ async def _send_rfid_list(
     return result
 
 
-def _control_timing(request: dict[str, Any]) -> tuple[str | None, int | None, dict[str, Any] | None]:
-    timing = request.get("timing")
-    seconds = request.get("seconds")
-    if timing not in {"now", "after", "within"}:
-        return None, None, {"error": "invalid_timing"}
-    if timing == "now":
-        if seconds is not None:
-            return None, None, {"error": "invalid_timing"}
-        return timing, None, None
-    if not _positive_int(seconds):
-        return None, None, {"error": "invalid_timing_seconds"}
-    return timing, seconds, None
-
-
 def _occupancy(registry: SessionRegistry, charger: str, connector: int | None) -> tuple[list[int], list[str]]:
     """Return busy connectors and warnings; historical opens are not occupancy."""
     statuses = registry.connector_occupancy(charger)
@@ -287,40 +272,6 @@ def _blocking_transactions(
     return [transaction_id for transaction_id, connector_id in active if connector_id == connector]
 
 
-async def _wait_for_control_window(
-    registry: SessionRegistry,
-    charger: str,
-    *,
-    command: str,
-    connector: int | None,
-    timing: str,
-    seconds: int | None,
-) -> dict[str, Any] | None:
-    if timing == "after":
-        assert seconds is not None
-        await asyncio.sleep(seconds)
-
-    active = _blocking_transactions(registry, charger, command=command, connector=connector)
-    if not active:
-        return None
-
-    if timing != "within":
-        return {"error": "active_transaction", "charger": charger, "transactions": active}
-
-    assert seconds is not None
-    for _ in range(seconds):
-        await asyncio.sleep(1)
-        active = _blocking_transactions(registry, charger, command=command, connector=connector)
-        if not active:
-            return None
-    return {
-        "error": "active_transaction_timeout",
-        "charger": charger,
-        "transactions": active,
-        "seconds": seconds,
-    }
-
-
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     if not isinstance(command, str) or not command:
@@ -337,41 +288,18 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
 
-    timing, seconds, timing_error = _control_timing(request)
     if command in {"start", "reset"}:
-        if timing_error is not None:
-            return timing_error
-        assert timing is not None
         force = request.get("force", False)
         if not isinstance(force, bool):
             return {"error": "invalid_force"}
-        guard = None if force else await _wait_for_control_window(
-            registry,
-            charger,
-            command=command,
+        active = _blocking_transactions(
+            registry, charger, command=command,
             connector=request.get("connector") if command == "start" else None,
-            timing=timing,
-            seconds=seconds,
         )
-        if guard is not None:
-            return guard
-        session = registry.session(charger)
-        if session is None:
-            return {"error": "charger_not_connected", "charger": charger}
-
-    if command == "stop":
-        if timing_error is not None:
-            return timing_error
-        if request.get("force", False) is not False:
-            return {"error": "invalid_force"}
-        if timing == "after":
-            assert seconds is not None
-            await asyncio.sleep(seconds)
-            session = registry.session(charger)
-            if session is None:
-                return {"error": "charger_not_connected", "charger": charger}
-        elif timing == "within":
-            return {"error": "invalid_timing"}
+        if active and not force:
+            return {"error": "active_transaction", "charger": charger, "transactions": active}
+    if command == "stop" and request.get("force", False) is not False:
+        return {"error": "invalid_force"}
 
     warnings: list[str] = []
     if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
