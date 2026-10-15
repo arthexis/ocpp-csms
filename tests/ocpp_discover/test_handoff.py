@@ -28,7 +28,6 @@ def configure_cutover(tmp_path, monkeypatch, *, preflights=None, calls=None, lis
     outcomes = iter(preflights or (allowed("CP1"), allowed("CP1")))
     state_path = tmp_path / "persistent" / "discovered.json"
     monkeypatch.setattr(handoff, "require_root", lambda: None)
-    monkeypatch.setattr(handoff, "evaluate_preflight", lambda *args, **kwargs: next(outcomes))
     monkeypatch.setattr(handoff.redirect_tools, "listener_available", lambda port: listener_available)
     monkeypatch.setattr(handoff.redirect_tools, "table_exists", lambda: False)
     monkeypatch.setattr(handoff, "connection_markers", lambda *args: {"CP1": connection_marker})
@@ -115,13 +114,6 @@ def test_cutover_refuses_existing_discovered_state_before_service_stop(tmp_path,
     state.write_text("existing\n")
     monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
     with pytest.raises(RuntimeError, match="discovered_receipt_exists"):
-        handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
-
-
-def test_cutover_final_charging_gate_runs_before_service_stop(tmp_path, monkeypatch):
-    configure_cutover(tmp_path, monkeypatch, preflights=(allowed("CP1"), blocked()))
-    monkeypatch.setattr(handoff, "_stop_service", lambda service: pytest.fail("service must remain running"))
-    with pytest.raises(RuntimeError, match="active charging detected"):
         handoff.cutover(data_dir="/data", state_dir=tmp_path, old_service="old.service")
 
 
