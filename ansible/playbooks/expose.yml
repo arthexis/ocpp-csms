@@ -3,8 +3,6 @@
 - name: Configure public OCPP CSMS exposure
   hosts: all
   gather_facts: true
-  vars:
-    ocpp_csms_host: 127.0.0.1
   tasks:
     - name: Require a public hostname
       ansible.builtin.assert:
