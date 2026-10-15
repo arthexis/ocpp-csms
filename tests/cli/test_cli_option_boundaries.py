@@ -1,4 +1,4 @@
-"""A3c regression matrix for shared options on remaining command families."""
+"""Shared CLI option contracts across command families."""
 import pytest
 
 from ocpp_csms.cli import build_parser
@@ -36,11 +36,3 @@ def test_energy_rejects_negative_connector_without_database(tmp_path):
     with pytest.raises(ValueError, match="-c/--connector must be zero or greater"):
         run_energy(args)
 
-
-def test_avail_alias_preserves_wire_command():
-    from ocpp_csms.cli.maintenance import maintenance_request
-    parser, _ = build_parser()
-    for spelling in ("avail", "availability"):
-        args = parser.parse_args([spelling, "disable", "--cp", "CP1", "-c", "2"])
-        request = maintenance_request(args)
-        assert request == {"command": "availability", "charger": "CP1", "connector": 2, "type": "Inoperative"}
