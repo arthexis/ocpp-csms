@@ -88,6 +88,14 @@
         state: stopped
       when: ocpp_csms_live_service_state.stat.exists | default(false)
 
+    # Versioned storage is never switched by an in-place schema upgrade.
+    # The versioned cutover is intentionally opt-in until recovery wiring is complete.
+    - name: Reject unsafe versioned storage activation until recovery is wired
+      ansible.builtin.assert:
+        that:
+          - not (ocpp_csms_enable_versioned_cutover | default(false) | bool)
+        fail_msg: Versioned cutover is not yet enabled; evidence-aware recovery must be completed first.
+
     - name: Upgrade schema and enable WAL after service stop
       ansible.builtin.command:
         argv:
