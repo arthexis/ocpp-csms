@@ -189,3 +189,17 @@ def test_handoff_baseline_reads_active_storage_not_candidate():
     assert "ocpp_csms_active_data_dir" in baseline
     assert "ocpp_csms_storage_selection.target" not in baseline
     assert "Verify prepared storage handoff contract after service stop" in cutover
+
+
+def test_stopped_storage_adoption_is_prepared_but_not_enabled():
+    from pathlib import Path
+
+    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
+    adoption = (tasks / "storage_adopt.yml").read_text()
+    cutover = (tasks / "cutover.yml").read_text()
+    assert "storage-adopt" in adoption
+    assert "ocpp_csms_storage_selection.active == ocpp_csms_data_dir" in adoption
+    assert "ocpp_csms_adopted_storage.stdout" in adoption
+    assert "storage-activate" not in adoption
+    assert "storage_adopt.yml" not in cutover
+    assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
