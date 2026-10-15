@@ -38,6 +38,12 @@ test "$(active_data_dir)" = "$before_data" || die "same schema changed data dire
 test "$(stat -c '%d:%i' "$before_data/ocpp-csms.sqlite3")" = "$db_identity" || die "same schema replaced database"
 test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$archive_hash" || die "same schema changed archive"
 
+# Safe staging must never perform a live handoff or change database identity.
+./deploy.sh --stage-only
+test "$(pid)" = "$before_pid" || die "stage-only interrupted service"
+test "$(readlink -f "$current")" = "$before_release" || die "stage-only switched release"
+test "$(stat -c '%d:%i' "$before_data/ocpp-csms.sqlite3")" = "$db_identity" || die "stage-only replaced database"
+
 # Argument validation must fail before invoking Ansible or interrupting the
 # running service. This is not a substitute for an injected Ansible failure.
 if ./deploy.sh --nonexistent-ci-option; then
