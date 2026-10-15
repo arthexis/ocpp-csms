@@ -52,6 +52,12 @@
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
+    - name: Start critical handoff timer
+      ansible.builtin.command: date +%s%N
+      register: ocpp_csms_handoff_start
+      changed_when: false
+      when: ocpp_csms_timing_file is defined
+
     - name: Stop existing OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -181,6 +187,19 @@
           - "{{ ocpp_csms_service_data_dir }}"
           - status
       changed_when: false
+
+    - name: End critical handoff timer after health verification
+      ansible.builtin.command: date +%s%N
+      register: ocpp_csms_handoff_end
+      changed_when: false
+      when: ocpp_csms_timing_file is defined
+
+    - name: Write critical handoff time to deploy wrapper
+      ansible.builtin.copy:
+        dest: "{{ ocpp_csms_timing_file }}"
+        content: "{{ ((ocpp_csms_handoff_end.stdout | int) - (ocpp_csms_handoff_start.stdout | int)) // 1000000 }}\n"
+        mode: "0600"
+      when: ocpp_csms_timing_file is defined
 
     - name: Point previous at successfully active release
       ansible.builtin.file:
