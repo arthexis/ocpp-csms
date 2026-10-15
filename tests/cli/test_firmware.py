@@ -9,10 +9,10 @@ from ocpp_csms.control.dispatch import dispatch_control
 NOW = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
 
 @pytest.mark.parametrize("timing,expected_date,immediate", [
-    ((,), NOW, True),
+    ((), NOW, True),
     (("--at", (NOW + timedelta(days=1)).isoformat()), NOW + timedelta(days=1), False),
 ])
-def test_firmware_timing_contract(parse_cli, timing, expected_date, immediate):
+def test_firmware_retrieval_date_contract(parse_cli, timing, expected_date, immediate):
     args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
                      *timing, "--confirm")
     request = firmware_request(args, now=NOW)
@@ -21,7 +21,7 @@ def test_firmware_timing_contract(parse_cli, timing, expected_date, immediate):
 
 
 @pytest.mark.parametrize("args", [
-    (,),
+    (),
     ("--at", "2026-10-11T12:00:00Z"),
 ])
 def test_confirmation_required(args, parse_cli):
