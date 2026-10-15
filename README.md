@@ -181,8 +181,8 @@ ocpp-csms rfid report [RFID]
 ocpp-csms rfid export [CHARGER]
 ocpp-csms rfid version [CHARGER]
 ocpp-csms rfid clear [CHARGER]
-ocpp-csms config [KEY ...] [--cp CHARGE_POINT] [-f|--force]
-ocpp-csms config download [CHARGER] [-f|--force] [--show-sensitive] [--json] [--output FILE]
+ocpp-csms config [KEY ...] [--cp CHARGE_POINT]
+ocpp-csms config download [CHARGER] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
@@ -273,11 +273,11 @@ Optional `--parent-rfid` maps to `parentIdTag`. Requests and responses use the e
 
 ### Firmware management (OCPP 1.6J)
 
-`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` is required; retrieval is immediate by default, or scheduled with `--at`.
+`UpdateFirmware` tells a connected charge point to retrieve a firmware image from a charger-reachable external URL. This may interrupt charging or reboot the charger. An explicit `--confirm` is required; retrieval is requested immediately.
 
 ```bash
 ocpp-csms firmware update --location https://example.org/fw.bin --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T03:00:00Z --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
 ocpp-csms firmware status --cp CP001
 ocpp-csms firmware history --cp CP001 --since 7d
 ```
@@ -286,7 +286,7 @@ The CLI also supports `--retries`, `--retry-interval`, and `--json`. The OCPP `U
 
 ### Charger diagnostic upload requests
 
-\`ocpp-csms diagnose\` reads stored diagnostic evidence by default and sends **no OCPP request**. Use \`--list\` to request the same history view explicitly, or \`--now --location URL\` to send OCPP 1.6 \`GetDiagnostics\` to a connected charge point. The upload URL must be reachable by the **charger**; an external server receives uploads.
+\`ocpp-csms diagnose\` reads stored diagnostic evidence by default and sends **no OCPP request**. Use \`--list\` to request the same history view explicitly, or `--location URL` to send OCPP 1.6 \`GetDiagnostics\` to a connected charge point. The upload URL must be reachable by the **charger**; an external server receives uploads.
 
 \`\`\`bash
 ocpp-csms diagnose --cp CP001
@@ -342,7 +342,7 @@ ocpp-csms report --since 7d --cp CP001 --json
 
 When exactly one charger is connected, the charger ID may be omitted. With multiple connected chargers, an explicit charger is required.
 
-Full configuration queries are blocked while the selected charger has an active transaction. This keeps nonessential OCPP traffic out of the active-charging path. `-f` / `--force` deliberately bypasses that guard.
+Configuration commands are dispatched to the connected charge point without an inferred charger-state gate.
 
 Sensitive values are masked by default using `[REDACTED]`. Use `--show-sensitive` only when the actual secret-bearing values are intentionally required.
 
@@ -354,7 +354,7 @@ ocpp-csms config download CHARGER
 ocpp-csms config download CHARGER --json
 ocpp-csms config download CHARGER --output charger-config.json
 ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
-ocpp-csms config download CHARGER --force
+ocpp-csms config download CHARGER
 ```
 
 `--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.
@@ -367,7 +367,7 @@ Remote start, stop, and reset commands require one timing mode:
 
 Control commands are dispatched immediately to connected chargers. Known busy-connector safety checks remain in effect; there is no delayed or queued execution.
 
-Start and reset are rejected while the selected charger has an active transaction. No waiting or scheduling is performed by the control service.
+Start and reset requests are dispatched to connected charge points without a busy-state gate; the charger decides whether to accept them.
 
 ### Smart Charging
 
@@ -822,12 +822,11 @@ Firmware updates require `--confirm` and exactly one explicit timing option:
 
 ```bash
 ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-16T03:00:00Z --confirm
-ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --at 2026-10-12T18:00:00Z --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
+ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
 ```
 
-Unlike start/stop, firmware delivery uses the OCPP `retrieveDate` parameter: `--after` and `--at` send the request now **with a future retrieval date**, not a CSMS-side queued command. OCPP does not guarantee when installation starts or finishes. Omission of timing is an error; the charger only receives an immediate retrieval date with explicit `--now`. `--within` is intentionally unavailable because it would require a separate CSMS queue that waits for an idle charger.
-
+Firmware delivery sends the OCPP `retrieveDate` parameter with the current time. The request is immediate; actual installation timing remains charger-controlled.\n
 
 ### Uninstall
 
