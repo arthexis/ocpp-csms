@@ -6,13 +6,11 @@ never upgrades, deletes, or reopens historical evidence.
 from __future__ import annotations
 
 import os
-import sqlite3
-from contextlib import closing
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, DATABASE_FILENAME, SchemaInfo, create_current_schema, inspect_schema, database_path
+from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, SchemaInfo, create_current_schema, inspect_schema, database_path
 
 
 @dataclass(frozen=True)
@@ -39,12 +37,18 @@ def discover_active_storage(root: str | Path) -> Path | None:
     current = root / "current"
     if current.is_symlink():
         target = current.resolve(strict=True)
-        if not target.is_dir() or not target.is_relative_to((root / "schemas").resolve()):
+        if (not target.is_dir() or target.parent != (root / "schemas").resolve()
+                or not target.name.isdecimal()):
             raise RuntimeError(f"invalid active schema pointer: {current}")
+        info = inspect_schema(target)
+        if not info.exists or info.version != int(target.name):
+            raise RuntimeError(f"active schema pointer has mismatched or missing database: {current}")
         return target
     if current.exists():
         raise RuntimeError(f"active schema pointer is not a symlink: {current}")
     legacy = database_path(root)
+    if legacy.exists() and (root / "schemas").exists():
+        raise RuntimeError("ambiguous legacy and unactivated versioned storage")
     if legacy.exists():
         return root
     if (root / "schemas").exists():
@@ -91,58 +95,6 @@ def prepare_storage(plan: StoragePlan) -> SchemaInfo:
     # Reserve the directory exclusively so concurrent preparations cannot reuse it.
     plan.target.mkdir(parents=True, exist_ok=False)
     return create_current_schema(plan.target)
-
-
-def adopt_legacy_storage(root: str | Path) -> Path:
-    """Checkpoint, verify, and relocate stopped legacy storage as one operation.
-
-    The deployment controller MUST stop all database users before calling this.
-    SQLite sidecars are moved together, never interpreted or deleted.
-    """
-    root = Path(root).expanduser()
-    current = root / "current"
-    if current.exists() or current.is_symlink():
-        raise RuntimeError("legacy adoption requires no active current pointer")
-    database = root / DATABASE_FILENAME
-    archive = root / "transactions"
-    if not database.is_file() or database.is_symlink():
-        raise RuntimeError("legacy database missing or unsafe")
-    if not archive.is_dir() or archive.is_symlink():
-        raise RuntimeError("legacy transaction archive missing or unsafe")
-    sidecars = [root / (DATABASE_FILENAME + suffix) for suffix in ("-wal", "-shm", "-journal")]
-    if any(p.is_symlink() or (p.exists() and not p.is_file()) for p in sidecars):
-        raise RuntimeError("unsafe SQLite sidecar")
-    # SQLite, rather than filesystem heuristics, determines checkpoint safety.
-    # The connection is closed before any file is moved.
-    try:
-        with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=rw", uri=True, timeout=0.2)) as db:
-            version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version < 1:
-                raise RuntimeError("legacy database schema invalid")
-            target = schema_directory(root, version)
-            if target.exists() or target.is_symlink():
-                raise RuntimeError(f"legacy schema destination already exists: {target}")
-            result = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-            if result is None or result[0] != 0:
-                raise RuntimeError(f"legacy WAL checkpoint incomplete: {result}")
-            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise RuntimeError("legacy database integrity check failed")
-    except sqlite3.Error as exc:
-        raise RuntimeError(f"legacy SQLite checkpoint/verification failed: {exc}") from exc
-    # No further SQLite opens at the source location after the checkpoint.
-    entries = [database, archive] + [p for p in sidecars if p.exists()]
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.mkdir(exist_ok=False)
-    try:
-        for entry in entries:
-            entry.rename(target / entry.name)
-    except OSError as exc:
-        raise RuntimeError(f"legacy adoption interrupted; manual recovery required: {exc}") from exc
-    # Reopen only at the destination, after every sidecar has been relocated.
-    info = inspect_schema(target)
-    if info.version != version:
-        raise RuntimeError("relocated legacy database schema mismatch")
-    return target
 
 
 def activate_schema(root: str | Path, target: str | Path) -> Path:
