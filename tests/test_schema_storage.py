@@ -216,3 +216,20 @@ def test_adoption_guards_active_identity_and_skipped_result():
     guard = "ocpp_csms_adopted_storage is defined and not (ocpp_csms_adopted_storage.skipped | default(false))"
     assert tasks.count(guard) == 2
     assert "ocpp_csms_adopted_storage is not skipped" not in tasks
+
+
+def test_service_storage_path_is_separate_from_storage_root():
+    from pathlib import Path
+
+    role = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms"
+    defaults = (role / "defaults/main.yml").read_text()
+    service = (role / "templates/ocpp-csms.service.j2").read_text()
+    reconnect = (role / "tasks/reconnect.yml").read_text()
+    cutover = (role / "tasks/cutover.yml").read_text()
+    assert 'ocpp_csms_service_data_dir: "{{ ocpp_csms_data_dir }}"' in defaults
+    assert '{{ ocpp_csms_service_data_dir }}/ocpp-csms.sqlite3' in defaults
+    assert '{{ ocpp_csms_service_data_dir }}/transactions' in defaults
+    assert '--data-dir "{{ ocpp_csms_service_data_dir }}"' in service
+    assert "ocpp_csms_service_data_dir" in reconnect
+    assert "ocpp_csms_service_data_dir" in cutover
+    assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
