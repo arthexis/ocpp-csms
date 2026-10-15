@@ -8,15 +8,12 @@ from ocpp_csms.control.dispatch import dispatch_control
 
 NOW = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
 
-@pytest.mark.parametrize("timing,expected_date,immediate", [
-    ((), NOW, True),
-])
-def test_firmware_retrieval_date_contract(parse_cli, timing, expected_date, immediate):
+def test_firmware_retrieval_date_contract(parse_cli):
     args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
-                     *timing, "--confirm")
+                     "--confirm")
     request = firmware_request(args, now=NOW)
-    assert request["retrieve_date"] == expected_date.isoformat()
-    assert request["immediate"] is immediate
+    assert request["retrieve_date"] == NOW.isoformat()
+    assert "immediate" not in request
 
 
 @pytest.mark.parametrize("args", [
@@ -37,7 +34,7 @@ async def test_dispatch_empty_acknowledgment():
     registry = SimpleNamespace(connected_chargers=lambda: ["CP1"], session=lambda _: session)
     data = {"command": "update_firmware", "location": "https://example.org/fw",
             "retrieve_date": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-            "immediate": False}
+            }
     result = await dispatch_control(registry, data)
     assert result == {"ok": True, "response": {}}
     session.update_firmware.assert_awaited_once()
@@ -47,6 +44,6 @@ async def test_dispatch_rejects_bad_retries():
     registry = SimpleNamespace(connected_chargers=lambda: ["CP1"], session=lambda _: object())
     result = await dispatch_control(registry, {"command": "update_firmware",
             "location": "https://example.org/fw", "retrieve_date": NOW.isoformat(),
-            "retries": -1, "immediate": True})
+            "retries": -1})
     assert result["error"] == "invalid_retries"
 
