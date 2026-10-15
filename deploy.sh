@@ -66,12 +66,23 @@ fi
 if [ "$dev" -eq 1 ]; then set -- -e ocpp_csms_dev=true "$@"; fi
 if [ "$stage_only" -eq 1 ]; then set -- -e ocpp_csms_stage_only=true "$@"; fi
 
+timing_file=$(mktemp)
+trap 'rm -f "$timing_file"' EXIT HUP INT TERM
 started_at=$(date +%s)
-if ansible-playbook "$playbook" -i localhost, -c local "$@"; then
+if ansible-playbook "$playbook" -i localhost, -c local -e "ocpp_csms_timing_file=$timing_file" "$@"; then
     status=0
 else
     status=$?
 fi
 duration=$(($(date +%s) - started_at))
 printf 'OCPP deployment finished in %ds\n' "$duration"
+if [ -s "$timing_file" ]; then
+    critical_ms=$(cat "$timing_file")
+    case "$critical_ms" in
+        *[!0-9]*|'') printf 'OCPP critical handoff time unavailable (invalid measurement)\n' ;;
+        *) printf 'OCPP critical handoff time: %d.%03ds (stop requested to verified recovery)\n' "$((critical_ms / 1000))" "$((critical_ms % 1000))" ;;
+    esac
+else
+    printf 'OCPP critical handoff time: n/a (no verified handoff)\n'
+fi
 exit "$status"
