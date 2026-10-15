@@ -47,7 +47,7 @@ def test_invalid_prepared_target_is_rejected_without_overwriting(tmp_path):
     assert (target / "evidence.txt").read_text() == "preserve"
 
 
-def test_installer_storage_commands_are_separate_from_legacy_ansible(tmp_path, capsys):
+def test_installer_storage_commands_plan_and_prepare_separately(tmp_path, capsys):
     import json
     from ocpp_csms.install_cutover import main
     root = str(tmp_path)
