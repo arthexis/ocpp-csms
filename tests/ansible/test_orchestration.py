@@ -84,48 +84,73 @@ def test_incumbent_takeover_requires_a_real_charger_reconnect():
 
 
 
-def test_active_healthy_target_commit_exits_before_mutating_installation():
-    """Only an active healthy target release may bypass installation."""
-    main = load_yaml(TASKS / "main.yml")
-    names = [task.get("name") for task in main]
-    release = names.index("Capture immutable release identifier")
-    early_exit = names.index("End CSMS role when requested release is already healthy")
-    install = names.index("Install Python prerequisites")
-    assert release < early_exit < install
-    task = main[early_exit]
-    assert task["ansible.builtin.meta"] == "end_role"
-    condition = str(task["when"])
-    assert "ocpp_csms_active_release_matches" in condition
-    assert "ocpp_csms_active_service_healthy" in condition
+def test_active_healthy_commit_is_noop(tmp_path):
+    from ocpp_csms.install_environment import inspect_deployment
+
+    releases = tmp_path / "releases"
+    target = releases / "abc123def456"
+    target.mkdir(parents=True)
+    (tmp_path / "current").symlink_to(target, target_is_directory=True)
+    decision = inspect_deployment(tmp_path / "current", target, service_healthy=True)
+    assert decision == "skip"
 
 
-def test_existing_inactive_release_cannot_skip_installation():
-    """The presence of a release directory is not proof it is deployed."""
-    main = read(TASKS / "main.yml")
-    assert "ocpp_csms_current_link" in main
-    assert "ocpp_csms_active_release_matches" in main
-    assert "ocpp_csms_active_service_healthy" in main
-    assert "ocpp_csms_release_ready.stat.exists" not in main
+def test_inactive_release_does_not_skip(tmp_path):
+    from ocpp_csms.install_environment import inspect_deployment
+
+    releases = tmp_path / "releases"
+    target = releases / "abc123def456"
+    other = releases / "fed654cba321"
+    target.mkdir(parents=True)
+    other.mkdir(parents=True)
+    (tmp_path / "current").symlink_to(other, target_is_directory=True)
+    assert inspect_deployment(tmp_path / "current", target, service_healthy=True) == "install"
 
 
-def test_environment_is_inspected_once_then_repaired_if_incomplete():
-    """Use actual installed artifacts, not readiness markers or repeated probes."""
-    main = load_yaml(TASKS / "main.yml")
-    names = [task.get("name") for task in main]
-    assert names.count("Inspect target release environment") == 1
-    inspect = main[names.index("Inspect target release environment")]
-    assert inspect.get("changed_when") is False
-    assert names.index("Inspect target release environment") < names.index("Install Python prerequisites")
-    assert "ocpp_csms_environment_valid" in str(main)
-    assert ".ready" not in str(main)
+def test_unhealthy_active_commit_is_not_success(tmp_path):
+    from ocpp_csms.install_environment import inspect_deployment
+
+    target = tmp_path / "releases" / "abc123def456"
+    target.mkdir(parents=True)
+    (tmp_path / "current").symlink_to(target, target_is_directory=True)
+    assert inspect_deployment(tmp_path / "current", target, service_healthy=False) != "skip"
 
 
-def test_unhealthy_active_commit_does_not_report_success():
-    """A matching commit alone must not short-circuit service recovery."""
-    main = load_yaml(TASKS / "main.yml")
-    exit_task = next(t for t in main if t.get("name") == "End CSMS role when requested release is already healthy")
-    assert "ocpp_csms_active_service_healthy" in str(exit_task["when"])
-    assert "ocpp_csms_active_release_matches" in str(exit_task["when"])
+def test_missing_or_broken_active_release_is_not_success(tmp_path):
+    from ocpp_csms.install_environment import inspect_deployment
+
+    target = tmp_path / "releases" / "abc123def456"
+    target.mkdir(parents=True)
+    current = tmp_path / "current"
+    assert inspect_deployment(current, target, service_healthy=True) == "install"
+    current.symlink_to(tmp_path / "missing", target_is_directory=True)
+    assert inspect_deployment(current, target, service_healthy=True) == "install"
+
+
+def test_environment_validation_uses_real_interpreter_and_detects_missing_packages(tmp_path):
+    import venv
+    from ocpp_csms.install_environment import inspect_environment
+
+    venv_dir = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    python = venv_dir / "bin" / "python"
+    assert inspect_environment(python, required_modules=("sys", "json")) is True
+    assert inspect_environment(python, required_modules=("module_that_is_not_installed_abc123",)) is False
+    assert inspect_environment(venv_dir / "missing-python", required_modules=("sys",)) is False
+
+
+def test_environment_validation_is_read_only(tmp_path):
+    import venv
+    from ocpp_csms.install_environment import inspect_environment
+
+    venv_dir = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    before = sorted(str(p.relative_to(venv_dir)) for p in venv_dir.rglob("*"))
+    assert inspect_environment(venv_dir / "bin" / "python", required_modules=("sys",)) is True
+    after = sorted(str(p.relative_to(venv_dir)) for p in venv_dir.rglob("*"))
+    assert after == before
+
+
 
 def test_candidate_unit_is_staged_and_verified_before_handoff():
     main = read(TASKS / "main.yml")
