@@ -240,6 +240,61 @@ jobs:
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
 
 
+  upgrade_deploy:
+    name: Ansible real two-commit upgrade
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
+
+      - name: Deploy base commit, then candidate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
+          (cd /tmp/ocpp-csms-base && ./deploy.sh)
+          old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          old_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
+          old_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
+          test -f "$old_db"
+          old_inode="$(stat -c '%d:%i' "$old_db")"
+          python3 - "$old_db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("UPDATE transaction_allocator SET last_id=314159")
+          PY
+          ./deploy.sh
+          new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
+          test "$new_release" != "$old_release"
+          test "$new_pid" != "$old_pid"
+          test "$(stat -c '%d:%i' "$old_db")" = "$old_inode"
+          python3 - "$old_db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
+          PY
+          sudo systemctl is-active --quiet ocpp-csms.service
+          test -d "$old_release"
+          test -L "$HOME/.local/share/ocpp-csms/previous"
+          test "$(readlink -f "$HOME/.local/share/ocpp-csms/previous")" = "$old_release"
+
+      - name: Show service logs on failure
+        if: failure()
+        run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
+
+
   ci:
     name: CI
     needs:
@@ -249,6 +304,7 @@ jobs:
       - ubuntu
       - ansible
       - ansible_deploy
+      - upgrade_deploy
     if: always()
     runs-on: ubuntu-latest
 
@@ -263,6 +319,7 @@ jobs:
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
           ANSIBLE_DEPLOY_RESULT: ${{ needs.ansible_deploy.result }}
+          UPGRADE_DEPLOY_RESULT: ${{ needs.upgrade_deploy.result }}
         run: |
           set -euo pipefail
 
@@ -291,6 +348,11 @@ jobs:
 
           if [[ "$ANSIBLE_DEPLOY_RESULT" != "success" ]]; then
             echo "Ansible end-to-end deployment did not succeed: $ANSIBLE_DEPLOY_RESULT"
+            exit 1
+          fi
+
+          if [[ "$UPGRADE_DEPLOY_RESULT" != "success" && "$UPGRADE_DEPLOY_RESULT" != "skipped" ]]; then
+            echo "Two-commit deployment did not succeed: $UPGRADE_DEPLOY_RESULT"
             exit 1
           fi
 
