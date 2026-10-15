@@ -82,3 +82,29 @@ def test_connection_without_boot_notification_does_not_invent_one(tmp_path):
     store = EventStore(tmp_path)
     store.record_runtime("charger_connected", charger_id="charger-a")
     assert "BootNotification" not in format_events(events_between(tmp_path), detail=True)
+
+
+def test_connection_detail_shows_only_recorded_safe_fields(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_runtime("charger_connected", charger_id="charger-a", details={
+        "path": "/ocpp/charger-a", "subprotocol": "ocpp1.6",
+        "remote": "192.0.2.10:54321", "user_agent": "ChargerWS/1.0",
+        "requested_subprotocols": "ocpp1.6", "authorization": "secret",
+    })
+    rows = events_between(tmp_path)
+    compact = format_events(rows)
+    detail = format_events(rows, detail=True)
+    assert "user_agent" not in compact
+    assert 'path="/ocpp/charger-a"' in detail
+    assert 'subprotocol="ocpp1.6"' in detail
+    assert 'remote="192.0.2.10:54321"' in detail
+    assert 'user_agent="ChargerWS/1.0"' in detail
+    assert 'requested_subprotocols="ocpp1.6"' in detail
+    assert "secret" not in detail
+
+
+def test_old_connection_record_still_expands_existing_fields(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_runtime("charger_connected", charger_id="charger-a",
+                         details={"path": "/charger-a", "subprotocol": None})
+    assert 'path="/charger-a"' in format_events(events_between(tmp_path), detail=True)
