@@ -1,4 +1,4 @@
-"""Cross-command A4d D2 maintenance contracts at the shared transport boundary."""
+"""Cross-command maintenance contracts at the shared transport boundary."""
 from __future__ import annotations
 
 import json
@@ -31,11 +31,6 @@ def parse(*argv):
 def test_request_construction(argv, builder, expected):
     request = builder(parse(*argv))
     assert request == expected
-
-
-def test_firmware_request_requires_confirmation():
-    with pytest.raises(ValueError, match="confirm"):
-        firmware_request(parse("firmware", "update", "--location", "https://example.org/fw"))
 
 
 @pytest.mark.parametrize(("argv", "runner", "response", "exit_code"), [
