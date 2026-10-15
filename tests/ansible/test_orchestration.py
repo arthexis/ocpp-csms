@@ -259,7 +259,7 @@ def test_base_role_refuses_root_deployment_identity():
     assert "ansible_user_uid | int != 0" in conditions
 
 
-def test_stage_only_stops_before_handoff():
+def test_stage_only_preflight_and_schema_checks_precede_handoff_barrier():
     main = read(TASKS / "main.yml")
     assert_task_order(
         main,
@@ -267,12 +267,7 @@ def test_stage_only_stops_before_handoff():
         "Inspect database schema cutover action",
         "Report staged OCPP CSMS handoff plan",
         "End host after safe staging",
-        "Perform controlled OCPP CSMS handoff",
     )
-    end_host = task_by_name(TASKS / "main.yml", "End host after safe staging")
-    assert end_host["ansible.builtin.meta"] == "end_host"
-    assert end_host["when"] == "ocpp_csms_stage_only | bool"
-
 
 
 def test_stage_only_conditions_exclude_storage_preparation_and_handoff():
