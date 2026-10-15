@@ -195,7 +195,7 @@
     argv:
       - "{{ ocpp_csms_build_venv }}/bin/python"
       - -c
-      - "import pip, setuptools; from setuptools import build_meta; assert hasattr(build_meta, 'build_wheel')"
+      - "from setuptools import build_meta; assert callable(build_meta.build_wheel)"
   changed_when: false
   when: not ocpp_csms_release_ready.stat.exists
 
