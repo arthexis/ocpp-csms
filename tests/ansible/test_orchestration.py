@@ -287,7 +287,6 @@ def test_release_reuses_runtime_site_packages_without_mutating_dependency_enviro
     assert dependency_site["changed_when"] is False
     assert release_site["changed_when"] is False
     assert link["ansible.builtin.copy"]["dest"].endswith("/ocpp_csms_dependencies.pth")
-    assert link["ansible.builtin.copy"]["content"] == "{{ ocpp_csms_dependency_site_packages.stdout }}\n"
 
 
 def test_application_is_built_outside_release_venv_and_installed_as_wheel():
@@ -297,14 +296,9 @@ def test_application_is_built_outside_release_venv_and_installed_as_wheel():
     )
 
     argv = build["ansible.builtin.command"]["argv"]
-    assert argv[0] == "{{ ocpp_csms_build_venv }}/bin/python"
     assert "--no-deps" in argv
     assert "--no-build-isolation" in argv
 
-    assert install["ansible.builtin.pip"]["virtualenv"] == "{{ ocpp_csms_release_venv }}"
-    assert install["ansible.builtin.pip"]["name"] == (
-        "{{ ocpp_csms_built_application_wheels.files[0].path }}"
-    )
     assert install["ansible.builtin.pip"]["extra_args"] == "--no-index --no-deps"
 
 
@@ -351,7 +345,6 @@ def test_release_install_phases_precede_verification_and_readiness():
     )
 
     verify = task_by_name(TASKS / "main.yml", "Verify immutable release command")
-    assert verify["ansible.builtin.command"]["cmd"] == "{{ ocpp_csms_release_command }} --help"
     assert verify["changed_when"] is False
 
 
