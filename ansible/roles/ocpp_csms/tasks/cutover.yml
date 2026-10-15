@@ -205,6 +205,11 @@
           - "{{ ocpp_csms_transactions_dir }}"
       changed_when: false
 
+    - name: Mark reused database as potentially written before candidate starts
+      ansible.builtin.set_fact:
+        ocpp_csms_reused_writer_started: true
+      when: ocpp_csms_storage_selection.action == 'reuse'
+
     - name: Enable and start candidate OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -259,6 +264,13 @@
       when: ocpp_csms_incumbent_service | length > 0
 
   rescue:
+    - name: Refuse rollback of reused database after candidate may have written
+      ansible.builtin.assert:
+        that:
+          - not (ocpp_csms_reused_writer_started | default(false) | bool)
+        fail_msg: Reused database may contain new evidence; preserve service and repair forward.
+      when: ocpp_csms_storage_selection.action == 'reuse'
+
     # Always stop the candidate before considering restoration of an incumbent.
     # A stopped writer is a prerequisite for reliable evidence inspection.
     - name: Stop failed candidate before inspecting committed evidence
