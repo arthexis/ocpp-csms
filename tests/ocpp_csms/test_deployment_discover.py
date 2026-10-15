@@ -2,7 +2,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PLAYBOOK = ROOT / "ansible/playbooks/satellite.yml"
+PLAYBOOK = ROOT / "ansible/playbooks/install.yml"
 
 
 def _task(name):
