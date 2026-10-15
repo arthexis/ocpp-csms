@@ -7,7 +7,6 @@ from pathlib import Path
 from ocpp_discover import handoff, persistence, redirect
 from ocpp_discover.redirect import RedirectReceipt
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
-from ocpp_csms.install_preflight import evaluate_preflight
 
 
 def charger_ids(receipt: RedirectReceipt) -> tuple[str, ...]:
@@ -66,10 +65,6 @@ def reconcile(
     handoff.validate_discovered_redirect(candidate)
     if expected == candidate:
         return expected
-
-    preflight = evaluate_preflight(data_dir, rollover=True)
-    if not preflight.allowed:
-        raise RuntimeError(preflight.reason or "reconciliation_preflight_failed")
 
     chargers = charger_ids(candidate)
     connection_baseline = connection_markers(data_dir, chargers)
