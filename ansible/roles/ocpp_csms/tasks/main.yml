@@ -120,46 +120,35 @@
     - not ocpp_csms_release_ready.stat.exists
     - (ansible_connection | default('ssh')) != 'local'
 
-- name: Check reusable build environment
-  ansible.builtin.stat:
-    path: "{{ ocpp_csms_build_dir }}/.ready"
-  register: ocpp_csms_build_ready
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-
+# Build tools are converged from the actual venv, not from a completion marker.
+# A missing interpreter is repaired before pip reconciles required packages.
 - name: Create reusable build environment directory
   ansible.builtin.file:
     path: "{{ ocpp_csms_build_dir }}"
     state: directory
     mode: "0755"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Create reusable build virtual environment
   ansible.builtin.command:
     cmd: "python3 -m venv {{ ocpp_csms_build_venv }}"
     creates: "{{ ocpp_csms_build_venv }}/bin/python"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Install reusable build requirements
+- name: Converge reusable build requirements
   ansible.builtin.pip:
     name: "{{ ocpp_csms_build_requirements }}"
     virtualenv: "{{ ocpp_csms_build_venv }}"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_build_ready.stat.exists
+  when: not ocpp_csms_release_ready.stat.exists
 
-- name: Mark reusable build environment ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_build_dir }}/.ready"
-    content: "{{ ocpp_csms_build_key }}\n"
-    mode: "0644"
-  when:
-    - not ocpp_csms_release_ready.stat.exists
-    - not ocpp_csms_build_ready.stat.exists
+- name: Verify reusable build environment can build wheels
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_build_venv }}/bin/python"
+      - -c
+      - "import pip, setuptools; from setuptools import build_meta; assert hasattr(build_meta, 'build_wheel')"
+  changed_when: false
+  when: not ocpp_csms_release_ready.stat.exists
 
 - name: Check reusable runtime dependency environment
   ansible.builtin.stat:
