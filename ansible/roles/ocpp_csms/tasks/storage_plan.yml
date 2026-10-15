@@ -16,8 +16,8 @@
   ansible.builtin.set_fact:
     ocpp_csms_storage_selection: "{{ ocpp_csms_storage_plan.stdout | from_json }}"
 
-# Resolve the database currently owned by the service. This is read-only and
-# must not select the prepared candidate before service handoff.
+# The selected current-schema target is the only candidate. Historical databases
+# are never opened or migrated by storage planning.
 - name: Capture active storage directory for preflight and handoff
   ansible.builtin.set_fact:
     ocpp_csms_active_data_dir: >-
