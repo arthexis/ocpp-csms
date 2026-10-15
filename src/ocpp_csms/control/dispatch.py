@@ -218,6 +218,17 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         return {"error": "missing_command"}
     if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
         return await registry.tls_control(command.removeprefix("tls_"))
+    if command == "data_reset_cp":
+        cp = request.get("charger")
+        if not isinstance(cp, str) or not cp or "/" in cp:
+            return {"error": "invalid_charger"}
+        if cp in registry.connected_chargers():
+            return {"error": "charger_connected", "charger": cp}
+        from ocpp_csms.cli.data import reset_live_cp
+        try:
+            return {"ok": True, "response": reset_live_cp(registry.events.data_dir, cp)}
+        except (ValueError, OSError, RuntimeError) as exc:
+            return {"error": "data_reset_failed", "detail": str(exc)}
     charger, request, resolution_error = _resolve_charger(registry, request)
     if resolution_error is not None:
         return resolution_error
