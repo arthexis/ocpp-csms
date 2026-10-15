@@ -664,6 +664,7 @@
   ansible.builtin.meta: end_host
   when: ocpp_csms_stage_only | bool
 
+# Versioned cutover remains explicitly gated until recovery is verified.
 - name: Perform controlled OCPP CSMS handoff
   ansible.builtin.include_tasks: cutover.yml
 
