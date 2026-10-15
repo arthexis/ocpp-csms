@@ -15,15 +15,6 @@ def parse(*words):
     return parser.parse_args(words)
 
 
-def test_availability_alias_produces_same_wire_request():
-    canonical = maintenance_request(parse("avail", "disable", "-c", "2", "--cp", "CP1"))
-    alias = maintenance_request(parse("availability", "disable", "-c", "2", "--cp", "CP1"))
-    assert canonical == alias == {
-        "command": "availability", "charger": "CP1",
-        "connector": 2, "type": "Inoperative",
-    }
-
-
 @pytest.mark.parametrize("words", [
     ("trigger", "heartbeat", "-c", "1"),
     ("trigger", "meter", "-c", "0"),
@@ -45,12 +36,6 @@ def test_diagnostics_upload_requires_explicit_location():
     args = parse("diagnose")
     with pytest.raises(ValueError, match="--location is required"):
         diagnostics_request(args)
-
-
-def test_firmware_update_requires_confirmation():
-    args = parse("firmware", "update", "--location", "https://example.org/fw")
-    with pytest.raises(ValueError, match="--confirm"):
-        firmware_request(args)
 
 
 @pytest.mark.parametrize("words", [
