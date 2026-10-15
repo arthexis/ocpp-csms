@@ -365,7 +365,7 @@ Remote commands are sent only to chargers connected to the current CSMS process 
 
 Remote start, stop, and reset commands require one timing mode:
 
-Control commands are dispatched immediately to connected chargers. Known busy-connector safety checks remain in effect; there is no delayed or queued execution.
+Control commands are dispatched immediately to connected chargers. There are no inferred charger-state gates or delayed/queued execution; the charger responds to each OCPP command.
 
 Start and reset requests are dispatched to connected charge points without a busy-state gate; the charger decides whether to accept them.
 
