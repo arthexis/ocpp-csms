@@ -649,6 +649,14 @@
 - name: Inspect versioned storage plan for staged handoff
   ansible.builtin.include_tasks: storage_plan.yml
 
+# Prepare a fresh schema candidate only for a real handoff. Staging must
+# never create or activate storage; this task does not touch the active pointer.
+- name: Prepare versioned candidate before service downtime
+  ansible.builtin.include_tasks: storage_prepare.yml
+  when:
+    - not (ocpp_csms_stage_only | bool)
+    - ocpp_csms_storage_selection.action == 'create'
+
 - name: Report staged OCPP CSMS handoff plan
   ansible.builtin.debug:
     msg:
