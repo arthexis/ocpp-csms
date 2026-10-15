@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -302,6 +303,11 @@ def _charger_status(
     )
 
 
+def display_timestamp(value: str | None) -> str:
+    """Drop fractional seconds for human-readable timestamps only."""
+    return re.sub(r"(\\d{2}:\\d{2}:\\d{2})\\.\\d+", r"\\1", value) if value else "-"
+
+
 def format_status(data: dict[str, Any], *, charger_id: str | None = None, charging_only: bool = False, appliance: bool = True) -> str:
     chargers: list[ChargerStatus] = data.get("chargers", [])
     active_chargers = set(data.get("active_chargers", []))
@@ -317,9 +323,9 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         lines = [
             item.charger_id,
             f"Connected: {'yes' if item.connected else 'no'}",
-            f"Connected since: {item.connected_at or '-'}",
+            f"Connected since: {display_timestamp(item.connected_at)}",
             f"Protocol: {item.subprotocol or 'not negotiated'}",
-            f"Last seen: {item.last_seen or '-'}",
+            f"Last seen: {display_timestamp(item.last_seen)}",
             f"Status: {item.derived_status or item.status or 'Unknown'}",
             *( [f"OCPP status: {item.status or 'not reported'}"] if item.derived_status != item.status else [] ),
         ]
@@ -358,7 +364,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     if appliance:
         lines.extend([
         f"CSMS: {data.get('server', 'unknown')}",
-        f"Started: {data.get('started_at') or '-'}",
+        f"Started: {display_timestamp(data.get('started_at'))}",
         f"Database: {data.get('database', 'unknown')}",
         f"Schema (code): {data.get('schema_compiled', CURRENT_SCHEMA_VERSION)}",
         f"Schema (database): {data.get('schema_database') if data.get('schema_database') is not None else '-'}",
@@ -388,7 +394,8 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     # Never invent C2 merely because a charger model might support it.
     status_headers = [f"Status C{connector_id}" for connector_id in physical_ids] if physical_ids else ["Status"]
     widths = [max(12, len(header)) for header in status_headers]
-    lines.append(f"{'ID':<18} {'Connected':<10} " +
+    id_width = max(22, *(len(item.charger_id) + 2 for item in chargers))
+    lines.append(f"{'ID':<{id_width}} {'Connected':<10} " +
                  "  ".join(f"{header:<{width}}" for header, width in zip(status_headers, widths)) +
                  "  Charging  Last seen")
     for item in chargers:
@@ -399,7 +406,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             for connector_id in physical_ids
         ] if physical_ids else [item.derived_status or item.status or "Unknown"]
         lines.append(
-            f"{item.charger_id:<18} {'yes' if item.connected else 'no':<10} " +
+            f"{item.charger_id:<{id_width}} {'yes' if item.connected else 'no':<10} " +
             "  ".join(f"{value:<{width}}" for value, width in zip(statuses, widths)) +
             f"  {'yes' if item.charger_id in active_chargers else 'no':<8}  {item.last_seen or '-'}"
         )
