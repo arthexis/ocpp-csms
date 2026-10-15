@@ -11,7 +11,6 @@ from typing import Any
 import websockets
 from websockets.server import WebSocketServerProtocol
 
-from ocpp_csms.occupancy import connector_occupancy as read_connector_occupancy
 from ocpp_csms.connector_query import physical_connector_ids
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.control import ControlServer, control_socket_path
@@ -101,9 +100,8 @@ class CSMSServer:
 
     def connector_occupancy(self, charge_point_id: str) -> dict[int, str]:
         """Latest connector reports from the current WebSocket connection only."""
-        if self.session(charge_point_id) is None:
-            return {}
-        return read_connector_occupancy(self.events.data_dir, charge_point_id)
+        session = self.session(charge_point_id)
+        return dict(session.connector_statuses) if session is not None else {}
 
     def record_control_event(
         self,
@@ -208,7 +206,10 @@ class CSMSServer:
             self.transactions,
             self.events,
         )
+        previous = self._active_sessions.get(charge_point_id)
         self._active_sessions[charge_point_id] = session
+        if previous is not None:
+            await previous.connection.close(code=1001, reason="Superseded connection")
         LOGGER.info("Charge point connected: %s", charge_point_id)
         self._record_runtime(
             "charger_connected",
