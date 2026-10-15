@@ -397,7 +397,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     id_width = max(22, *(len(item.charger_id) + 2 for item in chargers))
     lines.append(f"{'ID':<{id_width}} {'Connected':<10} " +
                  "  ".join(f"{header:<{width}}" for header, width in zip(status_headers, widths)) +
-                 "  Charging  Last seen")
+                 "  Last seen")
     for item in chargers:
         by_connector = {connector.connector_id: connector for connector in item.connectors}
         statuses = [
@@ -408,6 +408,6 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         lines.append(
             f"{item.charger_id:<{id_width}} {'yes' if item.connected else 'no':<10} " +
             "  ".join(f"{value:<{width}}" for value, width in zip(statuses, widths)) +
-            f"  {'yes' if item.charger_id in active_chargers else 'no':<8}  {item.last_seen or '-'}"
+            f"  {display_timestamp(item.last_seen)}"
         )
     return "\n".join(lines)
