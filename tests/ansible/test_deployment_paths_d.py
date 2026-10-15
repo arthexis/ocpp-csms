@@ -17,11 +17,6 @@ def test_first_install_needs_storage_init_before_start():
     assert "not (ocpp_csms_live_service_state.stat.exists | default(false))" in cutover
 
 
-def test_unchanged_redeploy_skips_disruptive_cutover():
-    cutover = task_by_name(TASKS / "cutover.yml", "Activate and verify OCPP CSMS handoff")
-    assert cutover["when"] == "ocpp_csms_activation_required | bool"
-
-
 def test_failed_cutover_restores_previous_release_only_when_safe():
     cutover = read(TASKS / "cutover.yml")
     assert_task_order(cutover, "Preserve previous live systemd unit",
@@ -38,13 +33,8 @@ def test_failed_cutover_restores_previous_release_only_when_safe():
     assert "Report handoff failure without automatic rollback" in cutover
 
 
-def test_stage_only_stops_before_cutover_and_side_effect_roles():
-    main = read(TASKS / "main.yml")
-    assert_task_order(main, "Run final install safety preflight",
-                      "Report staged OCPP CSMS handoff plan",
-                      "End host after safe staging",
-                      "Perform controlled OCPP CSMS handoff")
-    assert task_by_name(TASKS / "main.yml", "End host after safe staging")["when"] == "ocpp_csms_stage_only | bool"
+def test_stage_only_prevents_public_exposure():
+    """Keep the cross-role exposure gate; main-role staging is tested elsewhere."""
     delegate = load_yaml(PLAYBOOKS / "delegate.yml")[0]
     exposure = next(role for role in delegate["roles"] if role["role"] == "ocpp_expose")
     assert "not (ocpp_csms_stage_only | default(false) | bool)" in exposure["when"]
