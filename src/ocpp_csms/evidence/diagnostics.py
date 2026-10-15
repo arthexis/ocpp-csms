@@ -107,7 +107,18 @@ def transaction_events(
 def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
     """Summarize one stored event without assuming frame correlation."""
     if row["kind"] == "runtime":
-        return str(row["action"]).replace("_", " ")
+        label = str(row["action"]).replace("_", " ")
+        if not detail or row["action"] != "charger_connected":
+            return label
+        try:
+            metadata = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            return label
+        if not isinstance(metadata, dict):
+            return label
+        fields = ("path", "subprotocol", "remote", "user_agent", "requested_subprotocols")
+        return " ".join([label, *(f"{key}={json.dumps(metadata[key], ensure_ascii=False)}"
+                                  for key in fields if metadata.get(key) is not None)])
 
     try:
         payload = json.loads(row["payload"] or "{}")
@@ -126,6 +137,26 @@ def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
         details.append(f"RFID {row['id_tag']}")
     if row["transaction_id"] is not None:
         details.append(f"tx={row['transaction_id']}")
+
+    if action == "BootNotification":
+        if direction == "in":
+            # Boot identity is valuable diagnostic evidence; the compact view
+            # keeps the standard OCPP action name without inventing a boot event.
+            if detail:
+                for key in ("charge_point_vendor", "charge_point_model",
+                            "charge_point_serial_number", "charge_box_serial_number",
+                            "firmware_version", "iccid", "imsi", "meter_type",
+                            "meter_serial_number"):
+                    if payload.get(key) is not None:
+                        details.append(f"{key}={payload[key]}")
+            return " ".join([action, *details])
+        if direction == "out":
+            for key in ("status", "interval"):
+                if payload.get(key) is not None:
+                    details.append(f"{key}={payload[key]}")
+            if detail and (payload.get("current_time") or payload.get("currentTime")):
+                details.append(f"current_time={payload.get('current_time') or payload.get('currentTime')}")
+            return "→ " + " ".join([action, *(details or ["response"])])
 
     if action == "StatusNotification":
         details.extend(str(value) for value in (

@@ -211,14 +211,28 @@ class CSMSServer:
         if previous is not None:
             await previous.connection.close(code=1001, reason="Superseded connection")
         LOGGER.info("Charge point connected: %s", charge_point_id)
+        # Persist only allowlisted, non-credential handshake diagnostics.
+        # Do not persist the entire request headers (Authorization/cookies).
+        headers = getattr(websocket, "request_headers", None)
+        remote = getattr(websocket, "remote_address", None)
+        details = {
+            "path": path.split("?", 1)[0],
+            "charge_point_id": charge_point_id,
+            "subprotocol": websocket.subprotocol,
+        }
+        if isinstance(remote, tuple) and len(remote) >= 2:
+            details["remote"] = f"{remote[0]}:{remote[1]}"
+        if headers is not None:
+            user_agent = headers.get("User-Agent")
+            requested = headers.get("Sec-WebSocket-Protocol")
+            if user_agent:
+                details["user_agent"] = user_agent[:256]
+            if requested:
+                details["requested_subprotocols"] = requested[:256]
         self._record_runtime(
             "charger_connected",
             charger_id=charge_point_id,
-            details={
-                "path": path,
-                "charge_point_id": charge_point_id,
-                "subprotocol": websocket.subprotocol,
-            },
+            details=details,
         )
         try:
             await session.start()
