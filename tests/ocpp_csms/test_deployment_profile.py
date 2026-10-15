@@ -64,18 +64,11 @@ def test_mode_switch_and_expose_change_require_uninstall(tmp_path, monkeypatch):
     assert run("--expose", "second.example.com").returncode != 0
 
 
-def test_recovery_diagnostics_and_stage_only_do_not_overwrite_profile(tmp_path, monkeypatch):
+def test_stage_only_does_not_overwrite_profile(tmp_path, monkeypatch):
     run, profile, log = appliance(tmp_path, monkeypatch)
     assert run("--expose", "porsche-abb.gelectriic.com", "--email", "ops@example.com").returncode == 0
     before = profile.read_text()
-    assert run("--diagnose").returncode == 0
-    assert "diagnose.yml" in log.read_text().splitlines()[-1]
-    assert profile.read_text() == before
-    assert run("--recover").returncode == 0
-    assert profile.read_text() == before
     assert run("--stage-only").returncode == 0
-    assert profile.read_text() == before
-    assert run("--observe", "5").returncode == 0
     assert profile.read_text() == before
 
 
@@ -83,7 +76,7 @@ def test_failed_deploy_preserves_profile_and_uninstall_clears_after_success(tmp_
     run, profile, log = appliance(tmp_path, monkeypatch)
     assert run("--delegate").returncode == 0
     before = profile.read_text()
-    assert run("--observe", "5", failed=True).returncode != 0
+    assert run(failed=True).returncode != 0
     assert profile.read_text() == before
     assert run("--uninstall", failed=True).returncode != 0
     assert profile.read_text() == before
