@@ -37,12 +37,12 @@ def test_unsafe_connector_selection_is_rejected(words):
 
 def test_diagnostics_history_is_default_read_only_mode():
     args = parse("diagnose", "--cp", "CP1")
-    assert args.now is False
+    assert args.location is None
     assert args.charger == "CP1"
 
 
 def test_diagnostics_upload_requires_explicit_location():
-    args = parse("diagnose", "--now")
+    args = parse("diagnose")
     with pytest.raises(ValueError, match="--location is required"):
         diagnostics_request(args)
 
