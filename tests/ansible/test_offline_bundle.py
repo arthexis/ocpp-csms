@@ -42,8 +42,6 @@ def test_bundle_mode_installs_only_from_bundle_wheels():
 
 def test_bundle_mode_uses_manifest_release_and_source():
     defaults = load_yaml(DEFAULTS)
-    capture = task_by_name(TASKS / "main.yml", "Capture immutable release identifier")
-    source = task_by_name(TASKS / "main.yml", "Select release source for preflight")
 
     assert defaults["ocpp_csms_install_mode"] == "online"
     assert defaults["ocpp_csms_bundle_manifest_path"].endswith("/manifest.yml")
