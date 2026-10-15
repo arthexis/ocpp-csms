@@ -13,10 +13,8 @@ from ocpp_csms.status import appliance_status
 from ocpp_csms.schema import (
     CURRENT_SCHEMA_VERSION,
     DATABASE_FILENAME,
-    can_upgrade_schema,
     inspect_schema,
     ensure_wal,
-    upgrade_schema,
 )
 
 
@@ -33,17 +31,11 @@ def schema_action(data_dir: str | Path) -> str:
         raise RuntimeError(
             f"events database schema {info.version} is newer than supported {CURRENT_SCHEMA_VERSION}"
         )
-    if can_upgrade_schema(info):
-        return "upgrade"
-    raise RuntimeError(
-        f"no supported schema upgrade from {info.version} to {CURRENT_SCHEMA_VERSION}"
-    )
+    raise RuntimeError(f"events database schema {info.version} is older than required {CURRENT_SCHEMA_VERSION}; prepare a new schema database")
 
 
 def apply_schema_action(data_dir: str | Path) -> str:
     action = schema_action(data_dir)
-    if action == "upgrade":
-        upgrade_schema(data_dir)
     if action != "create":
         ensure_wal(data_dir)
     return action
@@ -169,9 +161,6 @@ def _parser() -> argparse.ArgumentParser:
     check = subcommands.add_parser("schema-check")
     check.add_argument("--data-dir", required=True)
 
-    upgrade = subcommands.add_parser("schema-upgrade")
-    upgrade.add_argument("--data-dir", required=True)
-
     plan = subcommands.add_parser("storage-plan")
     plan.add_argument("--storage-root", required=True)
     plan.add_argument("--active-data-dir")
@@ -222,9 +211,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "schema-check":
             print(schema_action(args.data_dir))
-            return 0
-        if args.command == "schema-upgrade":
-            print(apply_schema_action(args.data_dir))
             return 0
         if args.command == "schema-verify":
             verify_schema_integrity(args.data_dir)
