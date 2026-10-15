@@ -274,7 +274,43 @@ jobs:
           with sqlite3.connect(sys.argv[1]) as db:
               db.execute("UPDATE transaction_allocator SET last_id=314159")
           PY
+          # Sample the TCP listener throughout the real handoff. This is a
+          # bounded approximation, not a charger reconnect measurement.
+          python3 - <<'PY' > /tmp/csms-listener-samples.csv &
+          import socket, time
+          deadline = time.monotonic() + 180
+          while time.monotonic() < deadline:
+              with socket.socket() as sock:
+                  sock.settimeout(0.08)
+                  try:
+                      sock.connect(("127.0.0.1", 9000))
+                      ready = 1
+                  except OSError:
+                      ready = 0
+              print(f"{time.monotonic():.6f},{ready}", flush=True)
+              time.sleep(0.05)
+          PY
+          sampler=$!
           ./deploy.sh
+          kill "$sampler" 2>/dev/null || true
+          wait "$sampler" 2>/dev/null || true
+          python3 - <<'PY'
+          from pathlib import Path
+          samples = [line.split(",") for line in Path("/tmp/csms-listener-samples.csv").read_text().splitlines()]
+          samples = [(float(t), int(ok)) for t, ok in samples]
+          assert samples and any(ok for _, ok in samples), "listener sampling did not observe service"
+          outage_start = None
+          longest = 0.0
+          for timestamp, ready in samples:
+              if not ready and outage_start is None:
+                  outage_start = timestamp
+              elif ready and outage_start is not None:
+                  longest = max(longest, timestamp - outage_start)
+                  outage_start = None
+          if outage_start is not None:
+              raise AssertionError("listener remained unavailable at end of sampling")
+          print(f"Longest sampled TCP listener outage: {longest:.3f}s ({len(samples)} samples)")
+          PY
           new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
           new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
           test "$new_release" != "$old_release"
