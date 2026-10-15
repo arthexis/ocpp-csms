@@ -51,7 +51,7 @@ def run_config_diff(args):
         if not charger:
             raise ValueError("snapshot has no charge point ID; specify --cp")
         try:
-            response = asyncio.run(send_control(args.data_dir, {"command": "config", "charger": charger, "force": bool(args.force)}))
+            response = asyncio.run(send_control(args.data_dir, {"command": "config", "charger": charger}))
         except (OSError, ConnectionError, ValueError) as exc:
             raise ValueError(f"live configuration query failed: {exc}") from exc
         if not isinstance(response, dict) or response.get("error") or not isinstance(response.get("response"), dict):
