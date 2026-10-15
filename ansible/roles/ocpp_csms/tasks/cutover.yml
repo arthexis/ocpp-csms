@@ -22,7 +22,7 @@
   ansible.builtin.set_fact:
     ocpp_csms_activation_required: >-
       {{
-        (ocpp_csms_schema_action == 'upgrade')
+        (ocpp_csms_storage_selection.action == 'create')
         or (ocpp_csms_incumbent_service | length > 0)
         or (not (ocpp_csms_current_state.stat.islnk | default(false)))
         or ((ocpp_csms_current_state.stat.lnk_source | default('')) != ocpp_csms_release_dir)
@@ -106,18 +106,9 @@
           - not (ocpp_csms_enable_versioned_cutover | default(false) | bool)
         fail_msg: Versioned cutover is not yet enabled; evidence-aware recovery must be completed first.
 
-    - name: Upgrade schema and enable WAL after service stop
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - schema-upgrade
-          - --data-dir
-          - "{{ ocpp_csms_service_data_dir }}"
-      when: ocpp_csms_schema_action != 'create'
-
-    - name: Verify database schema and SQLite integrity before activation
+    # Verify the already prepared candidate while all writers are stopped.
+    # No historical database is upgraded or relocated during a handoff.
+    - name: Verify selected storage before service activation
       ansible.builtin.command:
         argv:
           - "{{ ocpp_csms_release_venv }}/bin/python"
@@ -125,9 +116,8 @@
           - ocpp_csms.install_cutover
           - schema-verify
           - --data-dir
-          - "{{ ocpp_csms_service_data_dir }}"
+          - "{{ ocpp_csms_storage_selection.target }}"
       changed_when: false
-      when: ocpp_csms_schema_action != 'create'
 
     - name: Install live OCPP CSMS systemd unit
       become: true
