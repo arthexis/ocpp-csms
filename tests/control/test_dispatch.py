@@ -226,7 +226,7 @@ async def test_start_allows_free_connector_when_another_connector_is_active():
 
 
 @pytest.mark.asyncio
-async def test_a6_other_charge_point_activity_never_blocks_free_connector():
+async def test_other_charge_point_activity_never_blocks_free_connector():
     session = Session()
     registry = Registry(session, active={"charger-b": [(71, 1)]})
     response = await dispatch_control(registry, {
