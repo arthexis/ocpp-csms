@@ -185,54 +185,109 @@ jobs:
 
 
 
-  ansible_deploy:
-    name: Ansible end-to-end deployment
+  ansible_integration:
+    name: Ansible integration
     timeout-minutes: 25
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Check out repository
+      - name: Check out full history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      - name: Verify unprivileged deployment prerequisites
-        run: |
-          test "$(id -u)" -ne 0
-          sudo -n true
-          systemctl --version
-          command -v ansible-playbook
-
-      - name: Deploy OCPP CSMS using supported entrypoint
-        run: ./deploy.sh
-
-      - name: Verify deployed service and storage
+      - name: Deploy base commit, then candidate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
           set -euo pipefail
+          if [[ -n "$BASE_SHA" ]]; then
+            git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
+            (cd /tmp/ocpp-csms-base && ./deploy.sh)
+          else
+            ./deploy.sh
+          fi
           sudo systemctl is-active --quiet ocpp-csms.service
           sudo systemctl is-enabled --quiet ocpp-csms.service
           /usr/local/bin/ocpp-csms --help >/dev/null
           /usr/local/bin/ocpp-csms status
-          test -L "$HOME/.local/share/ocpp-csms/current"
-          # The running service must use the prepared versioned database, not the storage root.
-          unit_exec="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
-          [[ "$unit_exec" == *"--data-dir"* ]]
-          [[ "$unit_exec" == *"$HOME/ocpp-csms-data/schemas/"* ]]
-          test ! -e "$HOME/ocpp-csms-data/ocpp-csms.sqlite3"
-          sudo systemctl show ocpp-csms.service -p MainPID --value | grep -Eq '^[1-9][0-9]*$'
-          sudo systemctl show ocpp-csms.service -p MainPID --value > /tmp/ocpp-csms-before.pid
-
-      - name: Re-run deployment without restarting healthy service
-        run: |
-          set -euo pipefail
-          ./deploy.sh
+          old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          old_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
+          old_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
+          test -f "$old_db"
+          old_inode="$(stat -c '%d:%i' "$old_db")"
+          python3 - "$old_db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("UPDATE transaction_allocator SET last_id=314159")
+          PY
+          # Sample the TCP listener throughout the real handoff. This is a
+          # bounded approximation, not a charger reconnect measurement.
+          python3 - <<'PY' > /tmp/csms-listener-samples.csv &
+          import socket, time
+          deadline = time.monotonic() + 180
+          while time.monotonic() < deadline:
+              with socket.socket() as sock:
+                  sock.settimeout(0.08)
+                  try:
+                      sock.connect(("127.0.0.1", 9000))
+                      ready = 1
+                  except OSError:
+                      ready = 0
+              print(f"{time.monotonic():.6f},{ready}", flush=True)
+              time.sleep(0.05)
+          PY
+          sampler=$!
+          if [[ -n "$BASE_SHA" ]]; then
+            ./deploy.sh
+          fi
+          kill "$sampler" 2>/dev/null || true
+          wait "$sampler" 2>/dev/null || true
+          python3 - <<'PY'
+          from pathlib import Path
+          samples = [line.split(",") for line in Path("/tmp/csms-listener-samples.csv").read_text().splitlines()]
+          samples = [(float(t), int(ok)) for t, ok in samples]
+          assert samples and any(ok for _, ok in samples), "listener sampling did not observe service"
+          outage_start = None
+          longest = 0.0
+          for timestamp, ready in samples:
+              if not ready and outage_start is None:
+                  outage_start = timestamp
+              elif ready and outage_start is not None:
+                  longest = max(longest, timestamp - outage_start)
+                  outage_start = None
+          if outage_start is not None:
+              raise AssertionError("listener remained unavailable at end of sampling")
+          print(f"Longest sampled TCP listener outage: {longest:.3f}s ({len(samples)} samples)")
+          PY
+          new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
+          if [[ -n "$BASE_SHA" ]]; then
+            test "$new_release" != "$old_release"
+            test "$new_pid" != "$old_pid"
+          fi
+          test "$(stat -c '%d:%i' "$old_db")" = "$old_inode"
+          python3 - "$old_db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
+          PY
           sudo systemctl is-active --quiet ocpp-csms.service
-          test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$(cat /tmp/ocpp-csms-before.pid)"
+          test -d "$old_release"
+          if [[ -n "$BASE_SHA" ]]; then
+            test -L "$HOME/.local/share/ocpp-csms/previous"
+            test "$(readlink -f "$HOME/.local/share/ocpp-csms/previous")" = "$old_release"
+          fi
+          /usr/local/bin/ocpp-csms status
+          bash tests/deployment/acceptance.sh
 
-      - name: Show deployment journal on failure
+      - name: Show service logs on failure
         if: failure()
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
 
@@ -245,7 +300,7 @@ jobs:
       - test
       - ubuntu
       - ansible
-      - ansible_deploy
+      - ansible_integration
     if: always()
     runs-on: ubuntu-latest
 
@@ -259,7 +314,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
-          ANSIBLE_DEPLOY_RESULT: ${{ needs.ansible_deploy.result }}
+          ANSIBLE_INTEGRATION_RESULT: ${{ needs.ansible_integration.result }}
         run: |
           set -euo pipefail
 
@@ -286,8 +341,8 @@ jobs:
             exit 1
           fi
 
-          if [[ "$ANSIBLE_DEPLOY_RESULT" != "success" ]]; then
-            echo "Ansible end-to-end deployment did not succeed: $ANSIBLE_DEPLOY_RESULT"
+          if [[ "$ANSIBLE_INTEGRATION_RESULT" != "success" ]]; then
+            echo "Ansible integration did not succeed: $ANSIBLE_INTEGRATION_RESULT"
             exit 1
           fi
 

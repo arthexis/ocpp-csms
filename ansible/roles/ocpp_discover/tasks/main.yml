@@ -213,4 +213,7 @@
       - "{{ ocpp_discover_service_name }}"
   register: ocpp_discover_active
   changed_when: false
-  failed_when: ocpp_discover_active.stdout.strip() != 'active'
+  failed_when: false
+  until: ocpp_discover_active.stdout.strip() == 'active'
+  retries: 20
+  delay: 1
