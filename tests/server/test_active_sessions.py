@@ -18,6 +18,9 @@ class WebSocket:
         self.subprotocol = OCPP_16_SUBPROTOCOL
         self.closed = asyncio.Event()
 
+    async def close(self, *, code, reason):
+        self.closed.set()
+
 
 @pytest.mark.asyncio
 async def test_server_exposes_current_session_and_preserves_replacement(monkeypatch):
