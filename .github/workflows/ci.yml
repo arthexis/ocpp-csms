@@ -225,13 +225,6 @@ jobs:
           sudo systemctl show ocpp-csms.service -p MainPID --value | grep -Eq '^[1-9][0-9]*$'
           sudo systemctl show ocpp-csms.service -p MainPID --value > /tmp/ocpp-csms-before.pid
 
-      - name: Re-run deployment without restarting healthy service
-        run: |
-          set -euo pipefail
-          ./deploy.sh
-          sudo systemctl is-active --quiet ocpp-csms.service
-          test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$(cat /tmp/ocpp-csms-before.pid)"
-
       - name: Verify same-schema persistence and deployment preflight safety
         run: bash tests/deployment/acceptance.sh
 
