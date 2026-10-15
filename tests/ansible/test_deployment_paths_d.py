@@ -18,8 +18,6 @@ def test_first_install_needs_storage_init_before_start():
 
 
 def test_unchanged_redeploy_skips_disruptive_cutover():
-    decide = task_by_name(TASKS / "cutover.yml", "Decide whether release activation is required")
-    condition = decide["ansible.builtin.set_fact"]["ocpp_csms_activation_required"]
     cutover = task_by_name(TASKS / "cutover.yml", "Activate and verify OCPP CSMS handoff")
     assert cutover["when"] == "ocpp_csms_activation_required | bool"
 
