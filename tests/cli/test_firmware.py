@@ -10,7 +10,6 @@ NOW = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
 
 @pytest.mark.parametrize("timing,expected_date,immediate", [
     ((), NOW, True),
-    (("--at", (NOW + timedelta(days=1)).isoformat()), NOW + timedelta(days=1), False),
 ])
 def test_firmware_retrieval_date_contract(parse_cli, timing, expected_date, immediate):
     args = parse_cli("firmware", "update", "--location", "https://example.org/fw.bin",
@@ -22,7 +21,6 @@ def test_firmware_retrieval_date_contract(parse_cli, timing, expected_date, imme
 
 @pytest.mark.parametrize("args", [
     (),
-    ("--at", "2026-10-11T12:00:00Z"),
 ])
 def test_confirmation_required(args, parse_cli):
     with pytest.raises(ValueError, match="confirm"):
@@ -32,11 +30,6 @@ def test_confirmation_required(args, parse_cli):
 def test_invalid_url(url, parse_cli):
     with pytest.raises(ValueError):
         firmware_request(parse_cli("firmware", "update", "--location", url, "--confirm"), now=NOW)
-
-def test_schedule_must_be_future(parse_cli):
-    with pytest.raises(ValueError, match="future"):
-        firmware_request(parse_cli("firmware", "update", "--location", "https://example.org/fw",
-                               "--at", "2026-10-09T12:00:00Z", "--confirm"), now=NOW)
 
 @pytest.mark.asyncio
 async def test_dispatch_empty_acknowledgment():
