@@ -185,6 +185,53 @@ jobs:
 
 
 
+  ansible_deploy:
+    name: Ansible end-to-end deployment
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
+
+      - name: Verify unprivileged deployment prerequisites
+        run: |
+          test "$(id -u)" -ne 0
+          sudo -n true
+          systemctl --version
+          command -v ansible-playbook
+
+      - name: Deploy OCPP CSMS using supported entrypoint
+        run: ./deploy.sh
+
+      - name: Verify deployed service and storage
+        run: |
+          set -euo pipefail
+          sudo systemctl is-active --quiet ocpp-csms.service
+          sudo systemctl is-enabled --quiet ocpp-csms.service
+          /usr/local/bin/ocpp-csms --help >/dev/null
+          /usr/local/bin/ocpp-csms status
+          test -L "$HOME/.local/share/ocpp-csms/current"
+          sudo systemctl show ocpp-csms.service -p MainPID --value | grep -Eq '^[1-9][0-9]*$'
+          sudo systemctl show ocpp-csms.service -p MainPID --value > /tmp/ocpp-csms-before.pid
+
+      - name: Re-run deployment without restarting healthy service
+        run: |
+          set -euo pipefail
+          ./deploy.sh
+          sudo systemctl is-active --quiet ocpp-csms.service
+          test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$(cat /tmp/ocpp-csms-before.pid)"
+
+      - name: Show deployment journal on failure
+        if: failure()
+        run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
+
+
   ci:
     name: CI
     needs:
@@ -193,6 +240,7 @@ jobs:
       - test
       - ubuntu
       - ansible
+      - ansible_deploy
     if: always()
     runs-on: ubuntu-latest
 
@@ -206,6 +254,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
+          ANSIBLE_DEPLOY_RESULT: ${{ needs.ansible_deploy.result }}
         run: |
           set -euo pipefail
 
@@ -229,6 +278,11 @@ jobs:
 
           if [[ "$UBUNTU_RESULT" != "success" ]]; then
             echo "Ubuntu 24.04 / Python 3.13 tests did not succeed: $UBUNTU_RESULT"
+            exit 1
+          fi
+
+          if [[ "$ANSIBLE_DEPLOY_RESULT" != "success" ]]; then
+            echo "Ansible end-to-end deployment did not succeed: $ANSIBLE_DEPLOY_RESULT"
             exit 1
           fi
 
