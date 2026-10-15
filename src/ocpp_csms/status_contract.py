@@ -64,6 +64,8 @@ def status_contract(
         },
         "storage": {
             "database": status.get("database", "unknown"),
+            "schema_compiled": status.get("schema_compiled"),
+            "schema_database": status.get("schema_database"),
             "transactions": status.get("transactions", "unknown"),
         },
         "rfid_authorization": status.get("rfid_authorization"),
