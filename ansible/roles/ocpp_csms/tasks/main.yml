@@ -77,6 +77,24 @@
 
 # The first safety gate must run before appliance mutation. Idle connected
 # chargers are expected; only active charging or unsafe persistence state blocks.
+# Resolve existing storage before the first safety gate. This uses the
+# source checkout, so it does not require staging a release on the appliance.
+- name: Discover active storage for initial safety preflight
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        from ocpp_csms.schema_storage import discover_active_storage;
+        import sys;
+        print(discover_active_storage(sys.argv[1]) or sys.argv[1])
+      - "{{ ocpp_csms_data_dir }}"
+  environment:
+    PYTHONPATH: "{{ ocpp_csms_preflight_source_dir }}/src"
+  register: ocpp_csms_initial_active_storage
+  changed_when: false
+  when: (ansible_connection | default('ssh')) == 'local'
+
 - name: Run local initial install safety preflight
   ansible.builtin.command:
     argv:
@@ -85,7 +103,7 @@
       - ocpp_csms.install_preflight
       - "{{ (ocpp_csms_force_handoff | bool) | ternary('--force', '--json') }}"
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_initial_active_storage.stdout }}"
       - --json
   environment:
     PYTHONPATH: "{{ ocpp_csms_preflight_source_dir }}/src"
