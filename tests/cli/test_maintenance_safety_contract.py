@@ -1,4 +1,4 @@
-"""A4d D4: final regression checks for maintenance grammar and safety invariants."""
+"""final regression checks for maintenance grammar and safety invariants."""
 from __future__ import annotations
 
 

@@ -1,4 +1,4 @@
-"""A4d D2: lock CLI parser/dispatch contracts without executing charger actions."""
+"""lock CLI parser/dispatch contracts without executing charger actions."""
 from __future__ import annotations
 
 import sys
