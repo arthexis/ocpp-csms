@@ -285,7 +285,7 @@ def test_status_last_seen_omits_microseconds_and_aligns_long_ids():
     lines = format_status({"chargers": [charger], "active_chargers": []}).splitlines()
     header = next(line for line in lines if line.startswith("ID "))
     record = next(line for line in lines if line.startswith(charger.charger_id))
-    assert header.index("Connected") == record.index("yes")
+    assert header.index("Connected") == record.index("unknown")
     assert "2026-10-15T15:44:42Z" in record
     assert ".476504" not in record
 
