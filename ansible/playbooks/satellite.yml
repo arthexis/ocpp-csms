@@ -15,4 +15,6 @@
     - name: Deploy OCPP Discover when eth0 is available
       ansible.builtin.include_role:
         name: ocpp_discover
+      vars:
+        ocpp_discover_interface: eth0
       when: ocpp_eth0.stat.exists
