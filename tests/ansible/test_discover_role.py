@@ -24,8 +24,6 @@ def test_satellite_converges_csms_before_discover():
 
 def test_discover_uses_active_immutable_csms_runtime():
     defaults = load_yaml(DISCOVER_DEFAULTS)
-    template = read(DISCOVER_TEMPLATE)
-
     assert defaults["ocpp_discover_python"].endswith("/current/venv/bin/python")
     assert defaults["ocpp_discover_runtime_command"].endswith("/current/venv/bin/ocpp-discover")
 
