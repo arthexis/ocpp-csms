@@ -205,3 +205,14 @@ def test_stopped_storage_adoption_is_prepared_but_not_enabled():
     assert cutover.index("Reject unsafe versioned storage activation until recovery is wired") < cutover.index("Adopt stopped legacy storage for versioned handoff")
     assert "ocpp_csms_enable_versioned_cutover | default(false) | bool" in adoption
     assert "Reject unsafe versioned storage activation until recovery is wired" in cutover
+
+
+def test_adoption_guards_active_identity_and_skipped_result():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks/storage_adopt.yml"
+    tasks = path.read_text()
+    assert "ocpp_csms_storage_selection.active == ocpp_csms_active_data_dir" in tasks
+    guard = "ocpp_csms_adopted_storage is defined and not (ocpp_csms_adopted_storage.skipped | default(false))"
+    assert tasks.count(guard) == 2
+    assert "ocpp_csms_adopted_storage is not skipped" not in tasks
