@@ -163,3 +163,16 @@ def test_ansible_storage_preparation_is_not_live_cutover():
     assert "storage_prepare.yml" not in (tasks / "cutover.yml").read_text()
     assert "schema-verify" in preparation
     assert "storage-activate" not in preparation
+
+
+def test_ansible_storage_plan_keeps_active_and_candidate_distinct():
+    from pathlib import Path
+
+    tasks = Path(__file__).resolve().parents[1] / "ansible/roles/ocpp_csms/tasks"
+    plan = (tasks / "storage_plan.yml").read_text()
+    preparation = (tasks / "storage_prepare.yml").read_text()
+    assert "ocpp_csms_active_data_dir" in plan
+    assert "ocpp_csms_storage_selection.active" in plan
+    assert "ocpp_csms_storage_selection.target" in plan
+    assert "storage-activate" not in plan
+    assert "storage-activate" not in preparation
