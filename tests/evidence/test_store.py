@@ -333,3 +333,37 @@ def test_a5_failed_event_insert_never_advances_durable_cursor(tmp_path, monkeypa
     monkeypatch.setattr(store, "_connect", original_connect)
     store.record_ocpp("charger-a", "MeterValues", {"transaction_id": 41})
     assert len(export_events(tmp_path, after_id=before[-1][0])) == 1
+
+
+def test_incoming_stop_advances_allocator_without_creating_transaction(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": 700, "meter_stop": 125, "timestamp": "2026-10-14T12:00:00Z",
+    })
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (700,)
+    assert fetchall(tmp_path, "SELECT transaction_id FROM transactions") == []
+    assert store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 125,
+        "timestamp": "2026-10-14T12:01:00Z",
+    }) == 701
+
+
+def test_incoming_meter_values_advances_floor_monotonically_across_restart(tmp_path):
+    store = EventStore(tmp_path)
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 250})
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 17})
+    store.commit_transaction_evidence("charger-a", "MeterValues", {"transaction_id": 250})
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (250,)
+    assert EventStore(tmp_path).commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 1,
+        "timestamp": "2026-10-14T12:02:00Z",
+    }) == 251
+
+
+def test_invalid_external_ids_do_not_advance_allocator(tmp_path):
+    store = EventStore(tmp_path)
+    for transaction_id in (0, -5, 2147483648):
+        store.commit_transaction_evidence("charger-a", "MeterValues", {
+            "transaction_id": transaction_id,
+        })
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator WHERE singleton = 1") == (0,)
