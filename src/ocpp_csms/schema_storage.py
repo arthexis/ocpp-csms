@@ -6,6 +6,8 @@ never upgrades, deletes, or reopens historical evidence.
 from __future__ import annotations
 
 import os
+import sqlite3
+from contextlib import closing
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,48 +94,54 @@ def prepare_storage(plan: StoragePlan) -> SchemaInfo:
 
 
 def adopt_legacy_storage(root: str | Path) -> Path:
-    """Move stopped, checkpointed legacy storage into its version directory.
+    """Checkpoint, verify, and relocate stopped legacy storage as one operation.
 
-    Reject ambiguous or partially adopted layouts; never copy SQLite while live.
-    The caller must enforce service stop and WAL checkpoint before invoking.
+    The deployment controller MUST stop all database users before calling this.
+    SQLite sidecars are moved together, never interpreted or deleted.
     """
     root = Path(root).expanduser()
-    if (root / "current").exists() or (root / "current").is_symlink():
+    current = root / "current"
+    if current.exists() or current.is_symlink():
         raise RuntimeError("legacy adoption requires no active current pointer")
-    info = inspect_schema(root)
-    if not info.exists or info.version is None or info.version < 1:
-        raise RuntimeError("legacy database missing or schema invalid")
-    target = schema_directory(root, info.version)
-    if target.exists() or target.is_symlink():
-        raise RuntimeError(f"legacy schema destination already exists: {target}")
-    # TRUNCATE checkpoint can leave a zero-length WAL and its shared-memory
-    # index behind. Neither is evidence of pending frames. Preserve them with
-    # the database; never discard a nonempty WAL or a rollback journal.
-    wal = root / (DATABASE_FILENAME + "-wal")
-    shm = root / (DATABASE_FILENAME + "-shm")
-    journal = root / (DATABASE_FILENAME + "-journal")
-    if journal.exists() or journal.is_symlink():
-        raise RuntimeError("legacy SQLite rollback journal remains")
-    if wal.is_symlink() or shm.is_symlink():
-        raise RuntimeError("legacy SQLite sidecar symlink is unsafe")
-    if wal.exists() and (not wal.is_file() or wal.stat().st_size != 0):
-        raise RuntimeError("legacy SQLite WAL contains data; checkpoint required")
-    if shm.exists() and not shm.is_file():
-        raise RuntimeError("legacy SQLite shared-memory sidecar is unsafe")
-    entries = [root / DATABASE_FILENAME, root / "transactions"]
-    entries.extend(path for path in (wal, shm) if path.exists())
-    if not entries[1].is_dir() or entries[1].is_symlink():
+    database = root / DATABASE_FILENAME
+    archive = root / "transactions"
+    if not database.is_file() or database.is_symlink():
+        raise RuntimeError("legacy database missing or unsafe")
+    if not archive.is_dir() or archive.is_symlink():
         raise RuntimeError("legacy transaction archive missing or unsafe")
-    if any(entry.is_symlink() for entry in entries):
-        raise RuntimeError("legacy storage must not contain symlinks")
+    sidecars = [root / (DATABASE_FILENAME + suffix) for suffix in ("-wal", "-shm", "-journal")]
+    if any(p.is_symlink() or (p.exists() and not p.is_file()) for p in sidecars):
+        raise RuntimeError("unsafe SQLite sidecar")
+    # SQLite, rather than filesystem heuristics, determines checkpoint safety.
+    # The connection is closed before any file is moved.
+    try:
+        with closing(sqlite3.connect(f"{database.resolve().as_uri()}?mode=rw", uri=True, timeout=0.2)) as db:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version < 1:
+                raise RuntimeError("legacy database schema invalid")
+            target = schema_directory(root, version)
+            if target.exists() or target.is_symlink():
+                raise RuntimeError(f"legacy schema destination already exists: {target}")
+            result = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if result is None or result[0] != 0:
+                raise RuntimeError(f"legacy WAL checkpoint incomplete: {result}")
+            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("legacy database integrity check failed")
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"legacy SQLite checkpoint/verification failed: {exc}") from exc
+    # No further SQLite opens at the source location after the checkpoint.
+    entries = [database, archive] + [p for p in sidecars if p.exists()]
     target.parent.mkdir(parents=True, exist_ok=True)
     target.mkdir(exist_ok=False)
     try:
         for entry in entries:
             entry.rename(target / entry.name)
     except OSError as exc:
-        # Do not guess whether partial moves can be undone safely.
         raise RuntimeError(f"legacy adoption interrupted; manual recovery required: {exc}") from exc
+    # Reopen only at the destination, after every sidecar has been relocated.
+    info = inspect_schema(target)
+    if info.version != version:
+        raise RuntimeError("relocated legacy database schema mismatch")
     return target
 
 
