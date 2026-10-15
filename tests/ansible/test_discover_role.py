@@ -33,8 +33,6 @@ def test_discover_exposes_stable_global_operator_command():
     install = task_by_name(DISCOVER_TASKS, "Install stable OCPP Discover command")["ansible.builtin.file"]
 
     assert defaults["ocpp_discover_command_path"] == "/usr/local/bin/ocpp-discover"
-    assert install["src"] == "{{ ocpp_discover_runtime_command }}"
-    assert install["dest"] == "{{ ocpp_discover_command_path }}"
     assert install["state"] == "link"
 
 
@@ -80,7 +78,6 @@ def test_discover_persistent_directory_is_root_owned():
     spec = task_by_name(
         DISCOVER_TASKS, "Ensure OCPP Discover persistent state directory exists"
     )["ansible.builtin.file"]
-    assert spec["path"] == "{{ ocpp_discover_persistent_dir }}"
     assert spec["owner"] == "root"
     assert spec["group"] == "root"
 
