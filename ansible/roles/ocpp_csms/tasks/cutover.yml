@@ -131,14 +131,6 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    - name: Initialize OCPP CSMS storage with candidate release
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_command }}"
-          - --data-dir
-          - "{{ ocpp_csms_service_data_dir }}"
-          - init
-
     - name: Verify initialized database WAL and SQLite integrity
       ansible.builtin.command:
         argv:
