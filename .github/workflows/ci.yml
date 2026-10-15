@@ -232,6 +232,9 @@ jobs:
           sudo systemctl is-active --quiet ocpp-csms.service
           test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$(cat /tmp/ocpp-csms-before.pid)"
 
+      - name: Verify same-schema persistence and deployment preflight safety
+        run: bash tests/deployment/acceptance.sh
+
       - name: Show deployment journal on failure
         if: failure()
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
