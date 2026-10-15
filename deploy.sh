@@ -13,7 +13,7 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
     exit 1
 fi
 
-playbook="$ROOT/ansible/playbooks/satellite.yml"
+playbook="$ROOT/ansible/playbooks/install.yml"
 expose=""
 email=""
 no_certbot=0
