@@ -1,10 +1,9 @@
-"""Deployment-contract tests for public nginx WSS exposure."""
+"""Contract tests for independent CSMS installation and nginx WSS exposure."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "ansible/roles/ocpp_expose/templates/ocpp-csms-site.conf.j2"
 TASKS = ROOT / "ansible/roles/ocpp_expose/tasks/main.yml"
-CLOUD = ROOT / "ansible/playbooks/delegate.yml"
 
 
 def test_wss_site_forwards_auth_upgrade_and_ocpp_subprotocol():
@@ -13,7 +12,7 @@ def test_wss_site_forwards_auth_upgrade_and_ocpp_subprotocol():
     assert "listen 80;" in content
     assert "server_name {{ ocpp_csms_expose }}" in content
     assert 'if ($host != "{{ ocpp_csms_expose }}")' in content
-    assert "proxy_pass http://127.0.0.1:{{ ocpp_csms_port }}" in content
+    assert "proxy_pass http://127.0.0.1:{{ ocpp_expose_upstream_port }}" in content
     assert "proxy_set_header Authorization $http_authorization;" in content
     assert "proxy_set_header Upgrade $http_upgrade;" in content
     assert "proxy_set_header Sec-WebSocket-Protocol $http_sec_websocket_protocol;" in content
@@ -27,8 +26,9 @@ def test_nginx_acme_renewal_and_no_plaintext_ocpp():
     assert "/.well-known/acme-challenge/" in http
     assert "proxy_pass" not in http
     assert "location / { return 404; }" in http
-    assert "limit_req_zone" in tls
-    assert "limit_req zone=ocpp_wss_handshake burst=20 nodelay;" in tls
+    zone = "ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }}"
+    assert f"zone={zone}:10m rate=2r/s;" in tls
+    assert f"limit_req zone={zone} burst=20 nodelay;" in tls
     tasks = TASKS.read_text()
     assert "certbot.timer" in tasks
     assert "ocpp-csms-renew-hook.sh.j2" in tasks
@@ -43,14 +43,15 @@ def test_exposure_rollback_and_auth_gate():
     assert "Disable unvalidated site when there was no predecessor" in tasks
     assert "nginx -t" in tasks
     assert "mode == 'basic'" in tasks
-    cloud = CLOUD.read_text()
-    assert "Verify Basic auth is configured before cloud deployment" in cloud
 
 
-def test_explicit_satellite_flag_is_default_and_conflicts_with_other_modes():
+def test_install_expose_and_uninstall_are_independent():
     shell = (ROOT / "deploy.sh").read_text()
-    assert 'PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"' in shell
-    assert '        --satellite)' in shell
-    assert 'satellite=1' in shell
-    assert 'if [ "$satellite" -eq 1 ] && { [ "$delegate" -eq 1 ] || [ -n "$expose" ]; }; then' in shell
-    assert '--satellite cannot be combined with --delegate or --expose.' in shell
+    assert 'playbook="$ROOT/ansible/playbooks/install.yml"' in shell
+    assert 'playbook="$ROOT/ansible/playbooks/expose.yml"' in shell
+    assert 'exec ansible-playbook "$ROOT/ansible/playbooks/uninstall.yml"' in shell
+    assert '--satellite)' not in shell
+    assert '--delegate)' not in shell
+    assert (ROOT / "ansible/playbooks/install.yml").exists()
+    assert (ROOT / "ansible/playbooks/expose.yml").exists()
+    assert (ROOT / "ansible/playbooks/uninstall.yml").exists()
