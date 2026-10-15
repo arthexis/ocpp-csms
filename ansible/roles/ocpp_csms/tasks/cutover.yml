@@ -106,6 +106,13 @@
           - not (ocpp_csms_enable_versioned_cutover | default(false) | bool)
         fail_msg: Versioned cutover is not yet enabled; evidence-aware recovery must be completed first.
 
+    # Adoption is wired at the stopped-service boundary, but the preceding
+    # assertion rejects versioned cutover until pointer recovery is complete.
+    # Do not move this include above that assertion.
+    - name: Adopt stopped legacy storage for versioned handoff
+      ansible.builtin.include_tasks: storage_adopt.yml
+      when: ocpp_csms_enable_versioned_cutover | default(false) | bool
+
     - name: Upgrade schema and enable WAL after service stop
       ansible.builtin.command:
         argv:
