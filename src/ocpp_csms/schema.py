@@ -185,7 +185,6 @@ CURRENT_SCHEMA_SQL = (_SCHEMA_1_SQL + _SCHEMA_2_ADDITIONS_SQL + _SCHEMA_3_ADDITI
                       + _SCHEMA_4_ADDITIONS_SQL + _SCHEMA_7_ADDITIONS_SQL + _SCHEMA_8_ADDITIONS_SQL).replace(
     'CREATE TABLE IF NOT EXISTS connector_status (',
     'CREATE TABLE IF NOT EXISTS connector_status (\n    info TEXT,', 1)
-_SUPPORTED_UPGRADES = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8}
 
 
 @dataclass(frozen=True)
@@ -255,99 +254,6 @@ def require_supported_schema(info: SchemaInfo) -> int:
             f"events database schema {info.version} is older than required {CURRENT_SCHEMA_VERSION}; explicit upgrade required"
         )
     return info.version
-
-
-def can_upgrade_schema(info: SchemaInfo) -> bool:
-    """Return whether this historical schema has a complete upgrade path."""
-    if not info.exists or info.version is None:
-        return False
-    version = info.version
-    seen: set[int] = set()
-    while version < CURRENT_SCHEMA_VERSION and version not in seen:
-        seen.add(version)
-        next_version = _SUPPORTED_UPGRADES.get(version)
-        if next_version is None or next_version <= version:
-            return False
-        version = next_version
-    return version == CURRENT_SCHEMA_VERSION
-
-
-def schema_backup_path(info: SchemaInfo) -> Path:
-    if not info.exists or info.version is None:
-        raise RuntimeError("events database does not exist")
-    return info.path.with_name(f"{info.path.name}.schema-{info.version}.bak")
-
-
-def _backup_database(info: SchemaInfo) -> Path:
-    backup = schema_backup_path(info)
-    if backup.exists():
-        raise RuntimeError(f"schema backup already exists: {backup}")
-    source = sqlite3.connect(f"file:{info.path}?mode=ro", uri=True)
-    try:
-        with closing(sqlite3.connect(backup)) as destination:
-            source.backup(destination)
-    finally:
-        source.close()
-    return backup
-
-
-def upgrade_schema(data_dir: str | Path) -> SchemaInfo:
-    """Upgrade a known historical schema after first making a SQLite-safe backup."""
-    info = inspect_schema(data_dir)
-    if not info.exists or info.version is None:
-        raise RuntimeError("events database does not exist")
-    if info.version == CURRENT_SCHEMA_VERSION:
-        return info
-    if info.version > CURRENT_SCHEMA_VERSION:
-        raise RuntimeError(
-            f"events database schema {info.version} is newer than supported {CURRENT_SCHEMA_VERSION}"
-        )
-    if not can_upgrade_schema(info):
-        raise RuntimeError(
-            f"no supported schema upgrade from {info.version} to {CURRENT_SCHEMA_VERSION}"
-        )
-
-    _backup_database(info)
-    try:
-        with closing(sqlite3.connect(info.path)) as connection, connection:
-            if info.version == 1:
-                connection.executescript(_SCHEMA_2_ADDITIONS_SQL)
-                connection.execute("PRAGMA user_version = 2")
-                connection.commit()
-                info = SchemaInfo(path=info.path, exists=True, version=2)
-            if info.version == 2:
-                connection.executescript(_SCHEMA_3_ADDITIONS_SQL)
-                connection.execute("PRAGMA user_version = 3")
-                connection.commit()
-                info = SchemaInfo(path=info.path, exists=True, version=3)
-            if info.version == 3:
-                connection.executescript(_SCHEMA_4_ADDITIONS_SQL)
-                connection.execute(
-                    "INSERT OR IGNORE INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
-                    (str(uuid.uuid4()),),
-                )
-                connection.execute("PRAGMA user_version = 4")
-                connection.commit()
-                info = SchemaInfo(path=info.path, exists=True, version=4)
-            if info.version == 4:
-                connection.executescript(_SCHEMA_5_ADDITIONS_SQL)
-                info = SchemaInfo(path=info.path, exists=True, version=5)
-            if info.version == 5:
-                connection.executescript(_SCHEMA_6_ADDITIONS_SQL)
-                info = SchemaInfo(path=info.path, exists=True, version=6)
-            if info.version == 6:
-                connection.executescript(_SCHEMA_7_ADDITIONS_SQL)
-                info = SchemaInfo(path=info.path, exists=True, version=7)
-            if info.version == 7:
-                connection.executescript(_SCHEMA_8_ADDITIONS_SQL)
-            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
-    except Exception:
-        # Keep the backup as evidence/recovery material if the upgrade fails.
-        raise
-
-    upgraded = inspect_schema(data_dir)
-    require_supported_schema(upgraded)
-    return upgraded
 
 
 def source_id(data_dir: str | Path) -> str:
