@@ -51,3 +51,9 @@ def test_invalid_or_inapplicable_cli_options_are_rejected(parse_cli, argv):
 def test_outgoing_operation_names_are_explicit(operation, expected):
     assert hasattr(SessionCommands, operation)
     assert hasattr(call, expected + "Payload")
+
+
+def test_availability_alias_shares_registered_parser():
+    from ocpp_csms.cli import build_parser
+    _, commands = build_parser()
+    assert commands["avail"] is commands["availability"]
