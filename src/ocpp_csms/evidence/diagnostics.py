@@ -107,7 +107,18 @@ def transaction_events(
 def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
     """Summarize one stored event without assuming frame correlation."""
     if row["kind"] == "runtime":
-        return str(row["action"]).replace("_", " ")
+        label = str(row["action"]).replace("_", " ")
+        if not detail or row["action"] != "charger_connected":
+            return label
+        try:
+            metadata = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            return label
+        if not isinstance(metadata, dict):
+            return label
+        fields = ("path", "subprotocol", "remote", "user_agent", "requested_subprotocols")
+        return " ".join([label, *(f"{key}={json.dumps(metadata[key], ensure_ascii=False)}"
+                                  for key in fields if metadata.get(key) is not None)])
 
     try:
         payload = json.loads(row["payload"] or "{}")
