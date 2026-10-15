@@ -3,7 +3,6 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PLAYBOOK="$ROOT/ansible/playbooks/satellite.yml"
-DIAGNOSE_PLAYBOOK="$ROOT/ansible/playbooks/diagnose.yml"
 
 if [ "$(id -u)" -eq 0 ]; then
     printf 'Do not run deploy.sh as root or with sudo.\n' >&2
@@ -20,7 +19,6 @@ observe_seconds=""
 interface=""
 reconnect_seconds=""
 stage_only=0
-diagnose=0
 dev=0
 expose=""
 delegate=0
@@ -71,10 +69,6 @@ while [ "$#" -gt 0 ]; do
             ;;
         --stage-only)
             stage_only=1
-            shift
-            ;;
-        --diagnose)
-            diagnose=1
             shift
             ;;
         --dev)
@@ -153,7 +147,7 @@ if [ "$uninstall" -eq 1 ]; then
         printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
         exit 2
     fi
-    if [ "$offline" -eq 1 ] || [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$diagnose" -eq 1 ] || [ "$stage_only" -eq 1 ]; then
+    if [ "$offline" -eq 1 ] || [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
         exit 2
     fi
@@ -175,16 +169,6 @@ expose=$profile_expose
 certbot_email=$profile_email
 no_certbot=$profile_no_certbot
 interface=$profile_interface
-
-# Diagnostics inspect the installed profile but do not rerun exposure setup.
-if [ "$diagnose" -eq 1 ]; then
-    if [ "$delegate" -eq 1 ]; then
-        set -- -e ocpp_csms_diagnose_delegate=true "$@"
-    fi
-    expose=""
-    certbot_email=""
-    no_certbot=0
-fi
 
 if [ "$uninstall" -eq 1 ]; then
     PLAYBOOK="$ROOT/ansible/playbooks/uninstall.yml"
@@ -219,10 +203,6 @@ if [ -n "$expose" ]; then
         *.*) ;;
         *) printf '%s\n' '--expose requires a fully qualified DNS name.' >&2; exit 2 ;;
     esac
-    if [ "$diagnose" -eq 1 ]; then
-        printf '%s\n' '--expose cannot be combined with --diagnose.' >&2
-        exit 2
-    fi
     PLAYBOOK="$ROOT/ansible/playbooks/delegate.yml"
     if [ -n "$certbot_email" ]; then
         set -- -e "ocpp_csms_certbot_email=$certbot_email" "$@"
@@ -270,21 +250,7 @@ if [ "$dev" -eq 1 ]; then
     set -- -e ocpp_csms_dev=true "$@"
 fi
 
-if [ "$diagnose" -eq 1 ]; then
-    if [ "$offline" -eq 1 ]; then
-        printf '%s\n' '--offline does not apply to --diagnose.' >&2
-        exit 2
-    fi
-    if [ "$stage_only" -eq 1 ]; then
-        printf '%s\n' '--diagnose and --stage-only cannot be combined.' >&2
-        exit 2
-    fi
-    if [ -n "$reconnect_seconds" ]; then
-        printf '%s\n' '--reconnect does not apply to --diagnose.' >&2
-        exit 2
-    fi
-    PLAYBOOK=$DIAGNOSE_PLAYBOOK
-elif [ "$stage_only" -eq 1 ]; then
+if [ "$stage_only" -eq 1 ]; then
     set -- -e ocpp_csms_stage_only=true "$@"
 fi
 
@@ -307,9 +273,8 @@ else
     printf '\nOCPP CSMS deploy finished in %ds\n' "$seconds"
 fi
 
-# Only successful normal deployments update durable intent; diagnostics,
-# stage-only, development and tuning invocations never do.
-if [ "$status" -eq 0 ] && [ "$diagnose" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
+# Only successful normal deployments update durable intent; stage-only invocations do not.
+if [ "$status" -eq 0 ] && [ "$stage_only" -eq 0 ]; then
     commit_delegate=$delegate
     if [ -n "$expose" ]; then
         commit_delegate=0
