@@ -156,7 +156,7 @@ def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
                     details.append(f"{key}={payload[key]}")
             if detail and (payload.get("current_time") or payload.get("currentTime")):
                 details.append(f"current_time={payload.get('current_time') or payload.get('currentTime')}")
-            return "→ " + " ".join([action, *details or ["response"]])
+            return "→ " + " ".join([action, *(details or ["response"])])
 
     if action == "StatusNotification":
         details.extend(str(value) for value in (
