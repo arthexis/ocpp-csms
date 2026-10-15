@@ -252,15 +252,6 @@
       ansible.builtin.systemd_service:
         name: "{{ ocpp_csms_service_name }}"
         state: stopped
-      register: ocpp_csms_candidate_stop_result
-      failed_when: false
-
-    - name: Fail closed if candidate cannot be confirmed stopped
-      ansible.builtin.assert:
-        that:
-          - not (ocpp_csms_candidate_stop_result.failed | default(false))
-        fail_msg: Candidate stop failed; refusing to restore an older OCPP service.
-
     # B3.3: only a freshly prepared versioned candidate can be tested for
     # absence of evidence. Reused databases contain historical records, so
     # their evidence cannot be interpreted as post-cutover writes.
