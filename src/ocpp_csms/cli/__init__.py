@@ -1,7 +1,9 @@
 """Command-line interface for the OCPP CSMS appliance."""
 from __future__ import annotations
 import argparse
+import shlex
 import sys
+from pathlib import Path
 from ocpp_csms.cli.auth import add_auth_command, run_auth
 from ocpp_csms.cli.appliance import APPLIANCE_COMMANDS, add_appliance_commands, run_appliance
 from ocpp_csms.cli.chargers import CHARGER_COMMANDS, add_charger_commands, run_chargers
@@ -29,9 +31,30 @@ from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_par
 from ocpp_csms.transactions.archive import default_data_dir
 
 
+def cli_data_dir() -> str:
+    """Read the installed service selection, even while the service is stopped."""
+    unit = Path("/etc/systemd/system/ocpp-csms.service")
+    try:
+        lines = unit.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return str(default_data_dir())
+    for line in lines:
+        if not line.startswith("ExecStart="):
+            continue
+        try:
+            argv = shlex.split(line.partition("=")[2])
+            index = argv.index("--data-dir")
+            selected = Path(argv[index + 1]).expanduser()
+            if selected.is_absolute():
+                return str(selected)
+        except (ValueError, IndexError):
+            pass
+    return str(default_data_dir())
+
+
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = argparse.ArgumentParser(prog="ocpp-csms", description="Small OCPP 1.6J CSMS appliance.")
-    parser.add_argument("--data-dir", default=str(default_data_dir()), help="Writable data directory (default: %(default)s")
+    parser.add_argument("--data-dir", default=cli_data_dir(), help="Writable data directory (default: %(default)s")
     subcommands = parser.add_subparsers(dest="command")
     commands: dict[str, argparse.ArgumentParser] = {}
     commands.update(add_appliance_commands(subcommands))
@@ -81,7 +104,7 @@ def main() -> int:
     txn_offset = next((i for i, word in enumerate(argv) if word == "txn"), -1)
     if txn_offset >= 0 and len(argv) > txn_offset + 1 and argv[txn_offset + 1] in {"start", "stop", "explain"}:
         global_parser = argparse.ArgumentParser(add_help=False)
-        global_parser.add_argument("--data-dir", default=str(default_data_dir()))
+        global_parser.add_argument("--data-dir", default=cli_data_dir())
         global_args = global_parser.parse_args(argv[:txn_offset])
         operations = build_txn_operations_parser()
         args = operations.parse_args(argv[txn_offset + 1:])
