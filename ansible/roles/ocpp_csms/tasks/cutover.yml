@@ -112,7 +112,6 @@
       changed_when: false
 
     # Activate a fresh prepared schema only with every prior writer stopped.
-    # The safety gate above prevents this path until evidence-aware rescue is ready.
     - name: Record that versioned storage activation started
       ansible.builtin.set_fact:
         ocpp_csms_versioned_activation_started: true
@@ -264,91 +263,23 @@
       when: ocpp_csms_incumbent_service | length > 0
 
   rescue:
-    # Always stop the candidate before considering restoration of an incumbent.
-    # A stopped writer is a prerequisite for reliable evidence inspection.
-    - name: Stop failed candidate before inspecting committed evidence
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ ocpp_csms_service_name }}"
-        state: stopped
-    - name: Refuse rollback of reused database after candidate may have written
+    # Once storage has been activated, or the replacement writer might have
+    # started, repair forward. Never infer rollback safety from an empty table:
+    # a restarted installer cannot know what a previous process acknowledged.
+    - name: Refuse automatic rollback after activation or writer start
       ansible.builtin.assert:
         that:
+          - not (ocpp_csms_versioned_activation_started | default(false) | bool)
           - not (ocpp_csms_reused_writer_started | default(false) | bool)
-        fail_msg: Reused database may contain new evidence; preserve service and repair forward.
-      when: ocpp_csms_storage_selection.action == 'reuse'
+        fail_msg: Activation or candidate writer started; preserve database and release for forward repair.
 
-    # B3.3: only a freshly prepared versioned candidate can be tested for
-    # absence of evidence. Reused databases contain historical records, so
-    # their evidence cannot be interpreted as post-cutover writes.
-    - name: Inspect fresh candidate storage evidence before rollback
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - storage-evidence
-          - --data-dir
-          - "{{ ocpp_csms_storage_selection.target }}"
-      register: ocpp_csms_candidate_evidence
-      changed_when: false
-      when:
-        - ocpp_csms_versioned_activation_started | default(false) | bool
-        - ocpp_csms_storage_selection.action == 'create'
-
-    - name: Confirm fresh candidate is empty before restoring previous storage
-      ansible.builtin.assert:
-        that:
-          - not ((ocpp_csms_candidate_evidence.stdout | from_json).committed_ocpp_evidence | bool)
-        fail_msg: New database has committed evidence; preserve activation and repair forward.
-      when:
-        - ocpp_csms_versioned_activation_started | default(false) | bool
-        - ocpp_csms_storage_selection.action == 'create'
-
-    - name: Restore previous schema pointer only for an empty candidate
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - storage-restore
-          - --storage-root
-          - "{{ ocpp_csms_data_dir }}"
-          - --target
-          - "{{ ocpp_csms_active_data_dir }}"
-      when:
-        - ocpp_csms_versioned_activation_started | default(false) | bool
-        - ocpp_csms_storage_selection.action == 'create'
-        - ocpp_csms_storage_selection.active | default('', true) | length > 0
-
-    - name: Refuse automatic restoration without previous storage
-      ansible.builtin.assert:
-        that:
-          - ocpp_csms_storage_selection.active | default('', true) | length > 0
-        fail_msg: No previous database exists; keep the prepared schema for forward repair.
-      when:
-        - ocpp_csms_versioned_activation_started | default(false) | bool
-        - ocpp_csms_storage_selection.action == 'create'
-
-    # Incumbent takeover is independent of the new CSMS database. If it was the
-    # production owner before cutover, restore it first even when this was the
-    # first managed ocpp-csms release.
-    - name: Restore incumbent OCPP service after failed takeover
+    # Only failures before activation may restore the incumbent. No database
+    # pointer or transaction archive is ever modified by this rescue path.
+    - name: Restore incumbent after pre-activation failure
       ansible.builtin.include_tasks: incumbent_restore.yml
       when: ocpp_csms_incumbent_service | length > 0
 
-    - name: Stop failed replacement before rollback
-      become: true
-      ansible.builtin.systemd_service:
-        name: "{{ ocpp_csms_service_name }}"
-        state: stopped
-      failed_when: false
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-
-    - name: Restore previous live systemd unit
+    - name: Restore previous systemd unit before candidate start
       become: true
       ansible.builtin.copy:
         src: "{{ ocpp_csms_previous_service_path }}"
@@ -358,18 +289,13 @@
       notify: Reload systemd daemon
       when:
         - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Apply rollback systemd daemon reload
+    - name: Apply pre-activation systemd reload
       ansible.builtin.meta: flush_handlers
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
 
-    - name: Restart previous OCPP CSMS service
+    - name: Restart previous managed service after pre-activation failure
       become: true
       ansible.builtin.systemd_service:
         name: "{{ ocpp_csms_service_name }}"
@@ -377,51 +303,14 @@
         state: started
       when:
         - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
-    - name: Verify rollback listener
-      ansible.builtin.wait_for:
-        host: "{{ ocpp_csms_verify_host }}"
-        port: "{{ ocpp_csms_port }}"
-        timeout: "{{ ocpp_csms_listener_timeout }}"
-        state: started
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-        - ocpp_csms_live_service_state.stat.exists | default(false)
-
-    - name: Report failed incumbent OCPP service takeover after restoration
+    - name: Report unsuccessful pre-activation handoff
       ansible.builtin.fail:
         msg: >-
-          OCPP CSMS takeover failed and incumbent OCPP service was restored:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when: ocpp_csms_incumbent_service | length > 0
-
-    - name: Report handoff failure after safe rollback
-      ansible.builtin.fail:
-        msg: >-
-          OCPP CSMS handoff verification failed and the previous release was restored:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - ocpp_csms_schema_action != 'upgrade'
-        - ocpp_csms_current_state.stat.islnk | default(false)
-        - ocpp_csms_live_service_state.stat.exists | default(false)
-
-    - name: Report handoff failure without automatic rollback
-      ansible.builtin.fail:
-        msg: >-
-          OCPP CSMS handoff verification failed without a restorable previous managed release:
-          {{ ansible_failed_result.msg | default('verification failure') }}
-      when:
-        - ocpp_csms_incumbent_service | length == 0
-        - >-
-          (ocpp_csms_schema_action == 'upgrade')
-          or not (ocpp_csms_current_state.stat.islnk | default(false))
-          or not (ocpp_csms_live_service_state.stat.exists | default(false))
+          OCPP CSMS handoff failed before activation; previous service restored
+          when available: {{ ansible_failed_result.msg | default('verification failure') }}
 
 - name: Ensure converged OCPP CSMS service is enabled and running
   become: true
