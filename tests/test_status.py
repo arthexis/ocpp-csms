@@ -228,3 +228,46 @@ def test_status_displays_compiled_and_database_schema(tmp_path: Path):
     assert "Schema (database): 6" in format_status(different)
     assert status_contract(different)["data"]["storage"]["schema_compiled"] == CURRENT_SCHEMA_VERSION
     assert status_contract(different)["data"]["storage"]["schema_database"] == 6
+
+
+def test_connected_charger_defaults_to_available_without_contrary_evidence(tmp_path: Path):
+    from ocpp_csms.status_contract import status_contract
+
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert charger.connected is True
+    assert charger.status is None  # No fabricated StatusNotification.
+    assert charger.derived_status == "Available"
+    assert charger.availability == "available"
+    assert charger.activity == "inactive"
+    assert "Available" in format_status(appliance_status(tmp_path))
+    assert "OCPP status: not reported" in format_status(appliance_status(tmp_path), charger_id="charger-a")
+    data = status_contract(appliance_status(tmp_path))["data"]["chargers"][0]
+    assert data["status"] is None
+    assert data["derived_status"] == "Available"
+
+
+def test_open_transaction_prevents_assumed_available(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("server_started")
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.commit_start("charger-a", start_payload())
+    write_pid(tmp_path)
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert charger.status is None
+    assert charger.derived_status is None
+
+
+def test_disconnected_charger_is_not_assumed_available(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_runtime("charger_connected", charger_id="charger-a")
+    events.record_runtime("charger_disconnected", charger_id="charger-a")
+
+    charger = appliance_status(tmp_path)["chargers"][0]
+    assert not charger.connected
+    assert charger.derived_status is None
