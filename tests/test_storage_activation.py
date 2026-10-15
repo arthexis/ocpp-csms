@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from ocpp_csms.install_cutover import main as cutover_main
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, create_current_schema
@@ -6,7 +8,7 @@ from ocpp_csms.schema_storage import activate_schema, plan_storage, prepare_stor
 
 def test_fresh_schema_activation_preserves_legacy_storage(tmp_path):
     legacy = tmp_path / "ocpp-csms.sqlite3"
-    with __import__("sqlite3").connect(legacy) as db:
+    with sqlite3.connect(legacy) as db:
         db.execute("PRAGMA user_version = 7")
     before = legacy.read_bytes()
     plan = plan_storage(tmp_path, tmp_path)
