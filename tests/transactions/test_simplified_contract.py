@@ -387,7 +387,9 @@ def test_unknown_meter_is_preserved_with_payload_and_receipt_after_restart(tmp_p
     store.commit_transaction_evidence(CP, "MeterValues", payload)
     restarted = EventStore(tmp_path)
     with restarted._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+        assert db.execute(
+            "SELECT transaction_id, state, started_at FROM transactions"
+        ).fetchall() == [(225, "unknown", None)]
         row = db.execute("SELECT charger_id, received_at, payload_json FROM events WHERE action = 'MeterValues'").fetchone()
     assert row[0] == CP and row[1] and json.loads(row[2]) == payload
 
@@ -425,8 +427,10 @@ def test_orphan_external_id_not_adopted_after_restart(tmp_path):
     store = EventStore(tmp_path)
     store.commit_transaction_evidence("charger-b", "StopTransaction", stop(12345))
     local_id = EventStore(tmp_path).commit_start(CP, start())
-    assert local_id == 1
+    assert local_id == 12346
     with store._connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1
+        assert db.execute(
+            "SELECT transaction_id, charger_id FROM transactions ORDER BY transaction_id"
+        ).fetchall() == [(12345, "charger-b"), (12346, CP)]
         assert db.execute("SELECT charger_id, transaction_id FROM events WHERE action = 'StopTransaction'").fetchone() == ("charger-b", 12345)
 
