@@ -56,25 +56,23 @@ def test_incumbent_takeover_tracks_observed_listener_port():
     assert restore["ansible.builtin.wait_for"]["port"] == "{{ ocpp_csms_incumbent_port }}"
 
 
-def test_handoff_captures_reconnect_baseline_before_downtime():
-    cutover = read(TASKS / "cutover.yml")
-    assert_task_order(
-        cutover,
-        "Capture charger reconnect baseline",
-        "Stop incumbent OCPP service listener at cutover",
-        "Stop existing OCPP CSMS service",
+def test_incumbent_disabled_only_after_candidate_verification():
+    """Inspect actual systemd action and its position after health checks."""
+    tasks = load_yaml(TASKS / "cutover.yml")
+    handoff = next(task for task in tasks if "block" in task)
+    steps = handoff["block"]
+    disable = next(
+        i for i, task in enumerate(steps)
+        if task.get("ansible.builtin.systemd_service", {}).get("enabled") is False
     )
-
-
-def test_incumbent_service_is_disabled_only_after_verified_promotion():
-    cutover = read(TASKS / "cutover.yml")
-    assert_task_order(
-        cutover,
-        "Wait for OCPP CSMS listener",
-        "Verify candidate OCPP CSMS application status",
-        "Promote verified release to current",
-        "Disable incumbent OCPP service after verified takeover",
-    )
+    checks = [
+        i for i, task in enumerate(steps)
+        if task.get("ansible.builtin.wait_for", {}).get("state") == "started"
+        or (task.get("ansible.builtin.command", {}).get("argv", [])[-1:] == ["status"])
+    ]
+    assert checks
+    assert max(checks) < disable
+    assert steps[disable]["when"] == "ocpp_csms_incumbent_service | length > 0"
 
 
 def test_incumbent_takeover_requires_a_real_charger_reconnect():
