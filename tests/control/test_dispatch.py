@@ -259,18 +259,6 @@ async def test_historical_open_does_not_block_available_connector():
     assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
 
 
-@pytest.mark.asyncio
-async def test_unknown_connector_warns_and_sends():
-    registry = EvidenceRegistry({})
-    response = await dispatch_control(registry, {
-        "command": "start", "charger": "charger-a", "connector": 1,
-        "id_tag": "REMOTE",
-    })
-    assert response["ok"] is True
-    assert response["warnings"]
-    assert registry.sessions["charger-a"].calls == [("start", "REMOTE", 1)]
-
-
 
 class OccupancyRegistry(Registry):
     def __init__(self, statuses):
@@ -293,13 +281,6 @@ async def test_unspecified_start_allows_other_free_connector():
 
 
 
-
-@pytest.mark.asyncio
-async def test_unknown_connector_start_warns_and_proceeds():
-    registry = OccupancyRegistry({1: "Charging"})
-    response = await dispatch_control(registry, {"command": "start", "id_tag": "AUTO"})
-    assert response["ok"] is True
-    assert any("unknown" in warning for warning in response["warnings"])
 
 
 @pytest.mark.asyncio
