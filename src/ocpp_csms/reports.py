@@ -10,7 +10,7 @@ from typing import Any
 from ocpp_csms.evidence.alerts import classify_events
 from ocpp_csms.evidence.diagnostics import events_between
 from ocpp_csms.evidence.store import DATABASE_FILENAME
-from ocpp_csms.status import appliance_status
+from ocpp_csms.status import appliance_status, display_timestamp
 from ocpp_csms.output import json_command_result
 
 SCHEMA = "ocpp-csms/report/v1"
@@ -118,5 +118,5 @@ def format_report(report: dict[str, Any]) -> str:
     for charger in data["current_health"]["chargers"]:
         lines.append(f"{charger['charger_id']}: "
                      f"{'connected' if charger['connected'] else 'disconnected'}"
-                     f" | {charger['status'] or 'Unknown'} | last seen {charger['last_seen'] or '-'}")
+                     f" | {charger['status'] or 'Unknown'} | last seen {display_timestamp(charger['last_seen'])}")
     return "\n".join(lines)
