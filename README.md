@@ -363,7 +363,7 @@ ocpp-csms config download CHARGER
 
 Remote commands are sent only to chargers connected to the current CSMS process and are never queued for later delivery. Accepted commands and resulting charger behavior are recorded as separate facts.
 
-Remote start, stop, and reset commands require one timing mode:
+Remote start, stop, and reset commands have no scheduling options.
 
 Control commands are dispatched immediately to connected chargers. There are no inferred charger-state gates or delayed/queued execution; the charger responds to each OCPP command.
 
@@ -826,7 +826,8 @@ ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --con
 ocpp-csms firmware update --cp CP001 --location https://example.org/fw.bin --confirm
 ```
 
-Firmware delivery sends the OCPP `retrieveDate` parameter with the current time. The request is immediate; actual installation timing remains charger-controlled.\n
+Firmware delivery sends the OCPP `retrieveDate` parameter with the current time. The request is immediate; actual installation timing remains charger-controlled.
+
 
 ### Uninstall
 
@@ -866,7 +867,14 @@ sudo systemctl start ocpp-csms
 ocpp-csms status
 ```
 
-For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review\nthe operation, then `ocpp-csms data reset --cp NAME --now` to remove its\nSQLite records and matching JSON archives while preserving other charge points.\nBoth modes back up the original dataset and require the CSMS to be stopped.\nThe charge-point identity is matched exactly, and ambiguous archives abort the\noperation rather than risking an unrelated deletion.\n\nThe default is a non-mutating dry run. The `--all --now` operation moves
+For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review
+the operation, then `ocpp-csms data reset --cp NAME --now` to remove its
+SQLite records and matching JSON archives while preserving other charge points.
+Both modes back up the original dataset and require the CSMS to be stopped.
+The charge-point identity is matched exactly, and ambiguous archives abort the
+operation rather than risking an unrelated deletion.
+
+The default is a non-mutating dry run. The `--all --now` operation moves
 the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
 initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
