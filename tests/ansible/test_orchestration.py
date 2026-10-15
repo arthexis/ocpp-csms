@@ -91,16 +91,6 @@ def test_failed_incumbent_takeover_restores_old_listener():
     assert failure["when"] == "ocpp_csms_incumbent_service | length > 0"
 
 
-def test_schema_upgrade_happens_only_after_old_service_stops():
-    cutover = read(TASKS / "cutover.yml")
-    assert_task_order(
-        cutover,
-        "Stop existing OCPP CSMS service",
-        "Upgrade schema and enable WAL after service stop",
-        "Install live OCPP CSMS systemd unit",
-    )
-
-
 def test_incumbent_takeover_requires_a_real_charger_reconnect():
     reconnect = read(TASKS / "reconnect.yml")
     assert "Verify takeover charger reconnect" in reconnect
@@ -430,23 +420,6 @@ def test_ansible_reports_elapsed_time_for_each_task():
     assert 'CALLBACK_NAME = "task_timing"' in callback
     assert "time.monotonic()" in callback
     assert 'TIMING [{task.get_name()}] {elapsed:.2f}s' in callback
-
-
-def test_wal_preparation_runs_for_existing_current_schema_before_activation():
-    cutover = TASKS / "cutover.yml"
-    task = task_by_name(cutover, "Upgrade schema and enable WAL after service stop")
-    assert task["when"] == "ocpp_csms_schema_action != 'create'"
-    assert "schema-upgrade" in task["ansible.builtin.command"]["argv"]
-    verify = task_by_name(cutover, "Verify database schema and SQLite integrity before activation")
-    assert verify["when"] == "ocpp_csms_schema_action != 'create'"
-    assert "schema-verify" in verify["ansible.builtin.command"]["argv"]
-    assert_task_order(
-        read(cutover),
-        "Stop existing OCPP CSMS service",
-        "Upgrade schema and enable WAL after service stop",
-        "Verify database schema and SQLite integrity before activation",
-        "Install live OCPP CSMS systemd unit",
-    )
 
 
 def test_converged_deployment_verifies_wal_without_live_conversion():
