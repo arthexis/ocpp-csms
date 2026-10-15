@@ -176,7 +176,7 @@ jobs:
 
       - name: Ansible syntax check
         run: |
-          ansible-playbook ansible/playbooks/satellite.yml -i localhost, --syntax-check
+          ansible-playbook ansible/playbooks/install.yml -i localhost, --syntax-check
           ansible-playbook ansible/playbooks/expose.yml -i localhost, --syntax-check
           ansible-playbook ansible/playbooks/uninstall.yml -i localhost, --syntax-check
 
