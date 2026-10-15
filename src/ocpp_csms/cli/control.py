@@ -20,13 +20,11 @@ def add_control_commands(
     add(start, "--cp", dest="charger_option", help="Explicit charge point ID")
     add(start, "--connector", type=int, help="Target connector ID; omit to let the charger choose")
     add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
-    add(start, "--force", action="store_true", help="Override busy connector guard")
 
     reset = subcommands.add_parser("reset", help="Request charger reset")
     add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
     add(reset, "--cp", dest="charger_option", help="Explicit charge point ID")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
-    add(reset, "--force", action="store_true", help="Override active connector safety guard")
 
     return {"start": start, "reset": reset}
 
@@ -53,8 +51,6 @@ def control_request(args: argparse.Namespace) -> dict[str, object]:
         request["transaction"] = args.transaction
     elif args.command == "reset":
         request["type"] = "Hard" if args.hard else "Soft"
-    if getattr(args, "force", False):
-        request["force"] = True
     return request
 
 
