@@ -52,26 +52,6 @@ def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tupl
     return None, normalized, {"error": "charger_required", "chargers": connected}
 
 
-def _config_guard(registry: SessionRegistry, charger: str, force: Any, *, change: bool) -> dict[str, Any] | None:
-    if not isinstance(force, bool):
-        return {"error": "invalid_force"}
-    active_transactions = (_occupancy(registry, charger, None)[0] if hasattr(registry, "connector_occupancy") else registry.active_transaction_ids(charger))
-    if active_transactions and not force:
-        registry.record_control_event(
-            "configuration_change_blocked" if change else "configuration_query_blocked",
-            charger_id=charger,
-            details={"transactions": active_transactions},
-        )
-        return {"error": "active_transaction", "charger": charger, "transactions": active_transactions}
-    if active_transactions and force:
-        registry.record_control_event(
-            "configuration_change_forced" if change else "configuration_query_forced",
-            charger_id=charger,
-            details={"transactions": active_transactions},
-        )
-    return None
-
-
 async def _composite_schedule_response(
     registry: SessionRegistry,
     session: Session,
@@ -245,39 +225,10 @@ def _occupancy(registry: SessionRegistry, charger: str, connector: int | None) -
     return busy, warnings
 
 
-def _blocking_transactions(
-    registry: SessionRegistry,
-    charger: str,
-    *,
-    command: str,
-    connector: int | None,
-) -> list[int]:
-    if command == "reset":
-        if hasattr(registry, "connector_occupancy"):
-            busy, _ = _occupancy(registry, charger, None)
-            return busy
-        return registry.active_transaction_ids(charger)
-    if command != "start":
-        return []
-    if hasattr(registry, "connector_occupancy"):
-        busy, _ = _occupancy(registry, charger, connector)
-        if connector is None or connector == 0:
-            ids = registry.physical_connector_ids(charger)
-            if ids and len(busy) < len(ids):
-                return []
-        return busy
-    active = registry.active_transactions(charger)
-    if connector is None:
-        return [transaction_id for transaction_id, _connector_id in active]
-    return [transaction_id for transaction_id, connector_id in active if connector_id == connector]
-
-
 async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -> dict[str, Any]:
     command = request.get("command")
     if not isinstance(command, str) or not command:
         return {"error": "missing_command"}
-    if "force" in request and not isinstance(request["force"], bool):
-        return {"error": "invalid_force"}
     if command in {"tls_status", "tls_enable", "tls_reload", "tls_disable"}:
         return await registry.tls_control(command.removeprefix("tls_"))
     charger, request, resolution_error = _resolve_charger(registry, request)
@@ -288,19 +239,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
     if session is None:
         return {"error": "charger_not_connected", "charger": charger}
 
-    if command in {"start", "reset"}:
-        force = request.get("force", False)
-        if not isinstance(force, bool):
-            return {"error": "invalid_force"}
-        active = _blocking_transactions(
-            registry, charger, command=command,
-            connector=request.get("connector") if command == "start" else None,
-        )
-        if active and not force:
-            return {"error": "active_transaction", "charger": charger, "transactions": active}
-    if command == "stop" and request.get("force", False) is not False:
-        return {"error": "invalid_force"}
-
     warnings: list[str] = []
     if command in {"start", "reset"} and hasattr(registry, "connector_occupancy"):
         target = request.get("connector") if command == "start" else None
@@ -309,9 +247,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             ids = registry.physical_connector_ids(charger)
             if ids and len(busy) < len(ids):
                 busy = []
-        if request.get("force") and busy:
-            warnings.append(f"Operator override: busy connectors {busy}")
-            registry.record_control_event("control_occupancy_override", charger_id=charger, details={"command": command, "connectors": busy})
     try:
         if command == "data_transfer":
             vendor_id = request.get("vendor_id")
@@ -474,9 +409,6 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_key"}
             if not isinstance(value, str):
                 return {"error": "invalid_value"}
-            guard = _config_guard(registry, charger, request.get("force", False), change=True)
-            if guard is not None:
-                return guard
             changed = await session.change_configuration(key, value)
             readback = await session.get_configuration([key])
             return {
