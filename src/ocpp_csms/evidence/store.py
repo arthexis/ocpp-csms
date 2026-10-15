@@ -177,7 +177,7 @@ class EventStore:
                     ),
                 )
             if action == "MeterValues":
-                connection.execute
+                connection.execute(
                     """UPDATE transactions SET last_activity_at = ?
                     WHERE transaction_id = ? AND charger_id = ?""",
                     (now, transaction_id, charger_id),
