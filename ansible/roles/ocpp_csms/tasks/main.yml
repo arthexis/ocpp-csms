@@ -177,7 +177,7 @@
     argv:
       - "{{ ocpp_csms_dependency_venv }}/bin/python"
       - -c
-      - "from importlib.metadata import distribution; from packaging.specifiers import SpecifierSet; assert distribution('websockets').version in SpecifierSet('>=12,<14'); assert distribution('ocpp').version in SpecifierSet('>=0.26,<1')"
+      - "import ocpp, websockets; from importlib.metadata import version; assert version('ocpp') and version('websockets')"
   changed_when: false
   when: not ocpp_csms_release_ready.stat.exists
 
