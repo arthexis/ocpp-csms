@@ -297,6 +297,12 @@
     # Incumbent takeover is independent of the new CSMS database. If it was the
     # production owner before cutover, restore it first even when this was the
     # first managed ocpp-csms release.
+    - name: Refuse legacy restoration after versioned activation without pointer recovery
+      ansible.builtin.assert:
+        that:
+          - not (ocpp_csms_versioned_activation_started | default(false) | bool)
+        fail_msg: Versioned storage was activated; restore its pointer and verify evidence before restarting any incumbent.
+
     - name: Restore incumbent OCPP service after failed takeover
       ansible.builtin.include_tasks: incumbent_restore.yml
       when: ocpp_csms_incumbent_service | length > 0
