@@ -5,6 +5,7 @@ import re
 import sqlite3
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +309,32 @@ def display_timestamp(value: str | None) -> str:
     return re.sub(r"(\\d{2}:\\d{2}:\\d{2})\\.\\d+", r"\\1", value) if value else "-"
 
 
+def connected_duration(connected: bool, connected_at: str | None, *, now: datetime | None = None) -> str:
+    """Human-readable duration of the current connection, not historical uptime."""
+    if not connected:
+        return "no"
+    if not connected_at:
+        return "unknown"
+    try:
+        started = datetime.fromisoformat(connected_at.replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            return "unknown"
+    except ValueError:
+        return "unknown"
+    current = now or datetime.now(timezone.utc)
+    elapsed = max(0, int((current - started).total_seconds()))
+    if elapsed < 60:
+        return f"{elapsed}s"
+    minutes = elapsed // 60
+    days, remainder = divmod(minutes, 1440)
+    hours, mins = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h" if hours else f"{days}d {mins}m" if mins else f"{days}d"
+    if hours:
+        return f"{hours}h {mins}m" if mins else f"{hours}h"
+    return f"{mins}m"
+
+
 def format_status(data: dict[str, Any], *, charger_id: str | None = None, charging_only: bool = False, appliance: bool = True) -> str:
     chargers: list[ChargerStatus] = data.get("chargers", [])
     active_chargers = set(data.get("active_chargers", []))
@@ -398,6 +425,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
     lines.append(f"{'ID':<{id_width}} {'Connected':<10} " +
                  "  ".join(f"{header:<{width}}" for header, width in zip(status_headers, widths)) +
                  "  Last seen")
+    now = datetime.now(timezone.utc)
     for item in chargers:
         by_connector = {connector.connector_id: connector for connector in item.connectors}
         statuses = [
@@ -406,7 +434,7 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
             for connector_id in physical_ids
         ] if physical_ids else [item.derived_status or item.status or "Unknown"]
         lines.append(
-            f"{item.charger_id:<{id_width}} {'yes' if item.connected else 'no':<10} " +
+            f"{item.charger_id:<{id_width}} {connected_duration(item.connected, item.connected_at, now=now):<10} " +
             "  ".join(f"{value:<{width}}" for value, width in zip(statuses, widths)) +
             f"  {display_timestamp(item.last_seen)}"
         )
