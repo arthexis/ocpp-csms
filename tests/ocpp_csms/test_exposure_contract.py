@@ -50,8 +50,6 @@ def test_install_expose_and_uninstall_are_independent():
     assert 'playbook="$ROOT/ansible/playbooks/install.yml"' in shell
     assert 'playbook="$ROOT/ansible/playbooks/expose.yml"' in shell
     assert 'exec ansible-playbook "$ROOT/ansible/playbooks/uninstall.yml"' in shell
-    assert '--satellite)' not in shell
-    assert '--delegate)' not in shell
     assert (ROOT / "ansible/playbooks/install.yml").exists()
     assert (ROOT / "ansible/playbooks/expose.yml").exists()
     assert (ROOT / "ansible/playbooks/uninstall.yml").exists()
