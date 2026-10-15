@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from datetime import datetime, timezone
 import json
 import os
@@ -256,6 +257,13 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
 def run_data(args: argparse.Namespace) -> int:
     if args.data_command != "reset":
         raise ValueError("unknown data operation")
+    if args.cp is not None and not args.dry_run:
+        from ocpp_csms.control import send_control
+        response = asyncio.run(send_control(args.data_dir, {"command": "data_reset_cp", "charger": args.cp}))
+        if not response.get("ok"):
+            raise ValueError(f"live reset refused: {response.get('error')}: {response.get('detail', '')}")
+        print(json.dumps(response["response"], indent=2, sort_keys=True))
+        return 0
     print(json.dumps(reset_test_data(args.data_dir, all_data=args.all, cp=args.cp, now=args.now),
                      indent=2, sort_keys=True))
     return 0
