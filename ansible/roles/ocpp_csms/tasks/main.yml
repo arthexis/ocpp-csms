@@ -58,10 +58,59 @@
     - "{{ ocpp_csms_dependencies_dir }}"
     - "{{ ocpp_csms_candidate_dir }}"
 
-- name: Check whether immutable release is already complete
+# Existing releases are immutable: validate actual files and imports, never markers.
+- name: Inspect immutable release directory
   ansible.builtin.stat:
-    path: "{{ ocpp_csms_release_dir }}/.ready"
-  register: ocpp_csms_release_ready
+    path: "{{ ocpp_csms_release_dir }}"
+    follow: false
+  register: ocpp_csms_release_directory
+
+- name: Verify existing release distribution and executable
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -c
+      - >-
+        from importlib.metadata import distribution;
+        from pathlib import Path;
+        import ocpp_csms;
+        d = distribution('ocpp-csms');
+        assert d.version;
+        assert Path('{{ ocpp_csms_release_command }}').is_file();
+        assert Path(ocpp_csms.__file__).resolve().is_relative_to(Path('{{ ocpp_csms_release_venv }}').resolve())
+  register: ocpp_csms_release_probe
+  changed_when: false
+  failed_when: false
+  when: ocpp_csms_release_directory.stat.exists | default(false)
+
+- name: Verify existing release command
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_command }}"
+      - --help
+  register: ocpp_csms_release_command_probe
+  changed_when: false
+  failed_when: false
+  when:
+    - ocpp_csms_release_directory.stat.exists | default(false)
+    - ocpp_csms_release_probe.rc | default(1) == 0
+
+- name: Reject incomplete immutable release without modifying it
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_release_directory.stat.isdir | default(false)
+      - ocpp_csms_release_probe.rc | default(1) == 0
+      - ocpp_csms_release_command_probe.rc | default(1) == 0
+    fail_msg: >-
+      Existing immutable release is incomplete or unusable; refusing
+      to modify it in place. Inspect before retrying deployment.
+  when: ocpp_csms_release_directory.stat.exists | default(false)
+
+- name: Capture verified immutable release readiness
+  ansible.builtin.set_fact:
+    ocpp_csms_release_ready:
+      stat:
+        exists: "{{ ocpp_csms_release_directory.stat.exists | default(false) }}"
 
 - name: Create immutable release directory
   ansible.builtin.file:
@@ -276,13 +325,6 @@
   ansible.builtin.command:
     cmd: "{{ ocpp_csms_release_command }} --help"
   changed_when: false
-  when: not ocpp_csms_release_ready.stat.exists
-
-- name: Mark immutable release ready
-  ansible.builtin.copy:
-    dest: "{{ ocpp_csms_release_dir }}/.ready"
-    content: "{{ ocpp_csms_release_id }}\n"
-    mode: "0644"
   when: not ocpp_csms_release_ready.stat.exists
 
 - name: Resolve OCPP CSMS service group
