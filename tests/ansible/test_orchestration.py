@@ -178,7 +178,7 @@ def test_initialized_storage_is_validated_before_service_start():
     cutover = read(TASKS / "cutover.yml")
     assert_task_order(
         cutover,
-        "Initialize OCPP CSMS storage with candidate release",
+        "Verify selected storage before service activation",
         "Inspect initialized OCPP CSMS database",
         "Inspect initialized OCPP CSMS transaction archive",
         "Assert initialized OCPP CSMS storage",
