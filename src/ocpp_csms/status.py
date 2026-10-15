@@ -306,7 +306,7 @@ def _charger_status(
 
 def display_timestamp(value: str | None) -> str:
     """Drop fractional seconds for human-readable timestamps only."""
-    return re.sub(r"(\\d{2}:\\d{2}:\\d{2})\\.\\d+", r"\\1", value) if value else "-"
+    return re.sub(r"(\d{2}:\d{2}:\d{2})\.\d+", r"\1", value) if value else "-"
 
 
 def connected_duration(connected: bool, connected_at: str | None, *, now: datetime | None = None) -> str:
