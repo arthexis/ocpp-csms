@@ -69,7 +69,7 @@ async def test_live_check_only_queries_feature_profile(preflight_evidence):
     report = await preflight("/unused", "CP1")
     request = send.await_args.args[1]
     assert request == {"command": "config", "charger": "CP1",
-                       "keys": ["SupportedFeatureProfiles"], "force": True}
+                       "keys": ["SupportedFeatureProfiles"]}
     assert next(f for f in report["findings"] if f["check"] == "capability")["state"] == "ok"
     send.assert_awaited_once()
 
