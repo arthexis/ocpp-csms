@@ -106,10 +106,22 @@ def adopt_legacy_storage(root: str | Path) -> Path:
     target = schema_directory(root, info.version)
     if target.exists() or target.is_symlink():
         raise RuntimeError(f"legacy schema destination already exists: {target}")
-    # Reject sidecars after checkpoint: they may contain uncheckpointed evidence.
-    if any((root / (DATABASE_FILENAME + suffix)).exists() for suffix in ("-wal", "-shm", "-journal")):
-        raise RuntimeError("legacy SQLite sidecar remains after checkpoint")
+    # TRUNCATE checkpoint can leave a zero-length WAL and its shared-memory
+    # index behind. Neither is evidence of pending frames. Preserve them with
+    # the database; never discard a nonempty WAL or a rollback journal.
+    wal = root / (DATABASE_FILENAME + "-wal")
+    shm = root / (DATABASE_FILENAME + "-shm")
+    journal = root / (DATABASE_FILENAME + "-journal")
+    if journal.exists() or journal.is_symlink():
+        raise RuntimeError("legacy SQLite rollback journal remains")
+    if wal.is_symlink() or shm.is_symlink():
+        raise RuntimeError("legacy SQLite sidecar symlink is unsafe")
+    if wal.exists() and (not wal.is_file() or wal.stat().st_size != 0):
+        raise RuntimeError("legacy SQLite WAL contains data; checkpoint required")
+    if shm.exists() and not shm.is_file():
+        raise RuntimeError("legacy SQLite shared-memory sidecar is unsafe")
     entries = [root / DATABASE_FILENAME, root / "transactions"]
+    entries.extend(path for path in (wal, shm) if path.exists())
     if not entries[1].is_dir() or entries[1].is_symlink():
         raise RuntimeError("legacy transaction archive missing or unsafe")
     if any(entry.is_symlink() for entry in entries):
