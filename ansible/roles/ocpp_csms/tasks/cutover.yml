@@ -121,7 +121,7 @@
           - ocpp_csms.install_cutover
           - schema-upgrade
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
       when: ocpp_csms_schema_action != 'create'
 
     - name: Verify database schema and SQLite integrity before activation
@@ -132,7 +132,7 @@
           - ocpp_csms.install_cutover
           - schema-verify
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
       changed_when: false
       when: ocpp_csms_schema_action != 'create'
 
@@ -153,7 +153,7 @@
         argv:
           - "{{ ocpp_csms_release_command }}"
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
           - init
 
     - name: Verify initialized database WAL and SQLite integrity
@@ -164,7 +164,7 @@
           - ocpp_csms.install_cutover
           - schema-verify
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
       changed_when: false
 
     - name: Inspect initialized OCPP CSMS database
@@ -211,7 +211,7 @@
                 connection.rollback()
             finally:
                 connection.close()
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
           - "{{ ocpp_csms_database_path }}"
           - "{{ ocpp_csms_transactions_dir }}"
       changed_when: false
@@ -235,7 +235,7 @@
         argv:
           - "{{ ocpp_csms_release_command }}"
           - --data-dir
-          - "{{ ocpp_csms_data_dir }}"
+          - "{{ ocpp_csms_service_data_dir }}"
           - status
       changed_when: false
 
@@ -431,7 +431,7 @@
     argv:
       - "{{ ocpp_csms_runtime_command }}"
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_service_data_dir }}"
       - status
   changed_when: false
   when: not (ocpp_csms_activation_required | bool)
@@ -447,6 +447,6 @@
       - ocpp_csms.install_cutover
       - schema-verify
       - --data-dir
-      - "{{ ocpp_csms_data_dir }}"
+      - "{{ ocpp_csms_service_data_dir }}"
   changed_when: false
   when: not (ocpp_csms_activation_required | bool)
