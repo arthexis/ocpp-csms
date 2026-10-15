@@ -7,11 +7,17 @@ from .helpers import ROOT, TASKS, read, task_by_name, assert_task_order, load_ya
 PLAYBOOKS = ROOT / "ansible/playbooks"
 
 
-def test_first_install_needs_storage_init_before_start():
+def test_first_install_uses_prepared_storage_before_start():
+    main = read(TASKS / "main.yml")
+    prepare = read(TASKS / "storage_prepare.yml")
     cutover = read(TASKS / "cutover.yml")
-    assert_task_order(cutover, "Remove stale previous service snapshot on first install",
+    assert_task_order(main, "Inspect versioned storage plan for staged handoff",
+                      "Select candidate service storage directory",
+                      "Prepare versioned candidate before service downtime")
+    assert_task_order(prepare, "Prepare new schema storage without activating it",
+                      "Verify prepared schema storage")
+    assert_task_order(cutover, "Verify selected storage before service activation",
                       "Install live OCPP CSMS systemd unit",
-                      "Initialize OCPP CSMS storage with candidate release",
                       "Assert initialized OCPP CSMS storage",
                       "Enable and start candidate OCPP CSMS service")
     assert "not (ocpp_csms_live_service_state.stat.exists | default(false))" in cutover
