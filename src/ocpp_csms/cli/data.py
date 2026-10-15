@@ -12,7 +12,6 @@ import uuid
 from pathlib import Path
 import subprocess
 
-from ocpp_csms.install_preflight import evaluate_preflight
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.cli.appliance import initialize_storage
 
@@ -97,9 +96,8 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
         unit = None
     if unit is not None and unit.returncode == 0:
         raise ValueError("ocpp-csms.service is active; stop it before reset")
-    preflight = evaluate_preflight(root)
-    if not preflight.allowed or preflight.connected_chargers or preflight.active_chargers:
-        raise ValueError("data reset refused: " + (preflight.reason or "connected/active charger evidence"))
+    from ocpp_csms.schema import inspect_schema, require_supported_schema
+    require_supported_schema(inspect_schema(root))
     if root.resolve() in (Path.home().resolve(), Path("/")):
         raise ValueError("refusing reset of home or filesystem root")
     backup_root = root.parent / (root.name + "-test-backups")
