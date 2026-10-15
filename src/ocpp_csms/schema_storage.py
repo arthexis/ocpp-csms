@@ -76,7 +76,14 @@ def plan_storage(root: str | Path, active: str | Path | None,
     if version == candidate_version:
         return StoragePlan("reuse", active_path, active_path, version)
     if target.exists() or target.is_symlink():
-        raise RuntimeError(f"target schema directory already exists: {target}")
+        if target.is_symlink() or not target.is_dir():
+            raise RuntimeError(f"unsafe prepared schema path: {target}")
+        info = inspect_schema(target)
+        if not info.exists or info.version != candidate_version:
+            raise RuntimeError(f"interrupted or invalid schema preparation: {target}")
+        from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
+        if has_committed_ocpp_evidence(target):
+            raise RuntimeError("unactivated candidate has committed evidence; manual inspection required")
     return StoragePlan("create", active_path, target, version)
 
 
@@ -89,7 +96,13 @@ def prepare_storage(plan: StoragePlan) -> SchemaInfo:
     if plan.action != "create":
         raise ValueError(f"unknown storage action: {plan.action}")
     if plan.target.exists() or plan.target.is_symlink():
-        raise RuntimeError(f"target schema directory already exists: {plan.target}")
+        info = inspect_schema(plan.target)
+        if plan.target.is_symlink() or not info.exists or info.version != CURRENT_SCHEMA_VERSION:
+            raise RuntimeError(f"invalid prepared candidate: {plan.target}")
+        from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
+        if has_committed_ocpp_evidence(plan.target):
+            raise RuntimeError("prepared candidate contains evidence")
+        return info
     # create_current_schema is exclusive about the SQLite file; directory-level
     # exclusivity is enforced above. Deployment must serialize preparation.
     # Reserve the directory exclusively so concurrent preparations cannot reuse it.
