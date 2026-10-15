@@ -140,6 +140,11 @@ def restore_schema(root: str | Path, previous: str | Path) -> None:
     schemas = root / "schemas"
     if active.parent != schemas or not active.name.isdecimal():
         raise RuntimeError("current pointer is not versioned storage")
+    # Recheck evidence inside the restore operation, not only in Ansible:
+    # an interrupted handoff must not restore a pointer after new writes.
+    from ocpp_csms.cutover_evidence import has_committed_ocpp_evidence
+    if has_committed_ocpp_evidence(active):
+        raise RuntimeError("active schema has committed evidence; forward repair required")
     if previous == root:
         if not (root / "ocpp-csms.sqlite3").is_file():
             raise RuntimeError("previous legacy database missing")
