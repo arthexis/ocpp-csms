@@ -643,6 +643,12 @@
   ansible.builtin.set_fact:
     ocpp_csms_schema_action: "{{ ocpp_csms_schema_check.stdout }}"
 
+# B3.2: compute the versioned storage plan during staging, without
+# preparing or activating a database. The live cutover remains disabled until
+# the evidence-aware B3.3 rescue gate is implemented.
+- name: Inspect versioned storage plan for staged handoff
+  ansible.builtin.include_tasks: storage_plan.yml
+
 - name: Report staged OCPP CSMS handoff plan
   ansible.builtin.debug:
     msg:
