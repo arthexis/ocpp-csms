@@ -84,13 +84,48 @@ def test_incumbent_takeover_requires_a_real_charger_reconnect():
 
 
 
-def test_same_commit_convergence_does_not_force_service_restart_or_rebuild():
+def test_active_healthy_target_commit_exits_before_mutating_installation():
+    """Only an active healthy target release may bypass installation."""
+    main = load_yaml(TASKS / "main.yml")
+    names = [task.get("name") for task in main]
+    release = names.index("Capture immutable release identifier")
+    early_exit = names.index("End CSMS role when requested release is already healthy")
+    install = names.index("Install Python prerequisites")
+    assert release < early_exit < install
+    task = main[early_exit]
+    assert task["ansible.builtin.meta"] == "end_role"
+    condition = str(task["when"])
+    assert "ocpp_csms_active_release_matches" in condition
+    assert "ocpp_csms_active_service_healthy" in condition
+
+
+def test_existing_inactive_release_cannot_skip_installation():
+    """The presence of a release directory is not proof it is deployed."""
     main = read(TASKS / "main.yml")
-    cutover = read(TASKS / "cutover.yml")
-    assert "ocpp_csms_release_ready" not in main
-    assert "state: restarted" not in cutover
-    assert "ocpp_csms_activation_required" in cutover
-    assert "state: started" in cutover
+    assert "ocpp_csms_current_link" in main
+    assert "ocpp_csms_active_release_matches" in main
+    assert "ocpp_csms_active_service_healthy" in main
+    assert "ocpp_csms_release_ready.stat.exists" not in main
+
+
+def test_environment_is_inspected_once_then_repaired_if_incomplete():
+    """Use actual installed artifacts, not readiness markers or repeated probes."""
+    main = load_yaml(TASKS / "main.yml")
+    names = [task.get("name") for task in main]
+    assert names.count("Inspect target release environment") == 1
+    inspect = main[names.index("Inspect target release environment")]
+    assert inspect.get("changed_when") is False
+    assert names.index("Inspect target release environment") < names.index("Install Python prerequisites")
+    assert "ocpp_csms_environment_valid" in str(main)
+    assert ".ready" not in str(main)
+
+
+def test_unhealthy_active_commit_does_not_report_success():
+    """A matching commit alone must not short-circuit service recovery."""
+    main = load_yaml(TASKS / "main.yml")
+    exit_task = next(t for t in main if t.get("name") == "End CSMS role when requested release is already healthy")
+    assert "ocpp_csms_active_service_healthy" in str(exit_task["when"])
+    assert "ocpp_csms_active_release_matches" in str(exit_task["when"])
 
 def test_candidate_unit_is_staged_and_verified_before_handoff():
     main = read(TASKS / "main.yml")
