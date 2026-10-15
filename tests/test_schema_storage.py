@@ -121,7 +121,9 @@ def test_new_schema_creates_empty_database_without_copying_old_evidence(tmp_path
     old_source = source_id(old)
 
     # A future release compiles the next schema; model its planner decision.
+    original_schema_directory = storage.schema_directory
     monkeypatch.setattr(storage, "CURRENT_SCHEMA_VERSION", CURRENT_SCHEMA_VERSION + 1)
+    monkeypatch.setattr(storage, "schema_directory", lambda root: original_schema_directory(root, CURRENT_SCHEMA_VERSION + 1))
     plan = storage.plan_storage(tmp_path)
     assert plan.action == "create"
     assert plan.active_schema == CURRENT_SCHEMA_VERSION
@@ -141,7 +143,9 @@ def test_storage_preparation_failure_preserves_existing_database(tmp_path, monke
     old = schema_directory(tmp_path)
     create_current_schema(old)
     identity = source_id(old)
+    original_schema_directory = storage.schema_directory
     monkeypatch.setattr(storage, "CURRENT_SCHEMA_VERSION", CURRENT_SCHEMA_VERSION + 1)
+    monkeypatch.setattr(storage, "schema_directory", lambda root: original_schema_directory(root, CURRENT_SCHEMA_VERSION + 1))
     plan = storage.plan_storage(tmp_path)
 
     def fail_before_create(_plan):
