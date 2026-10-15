@@ -110,6 +110,10 @@ def test_status_table_has_independent_connector_columns(tmp_path: Path):
     text = format_status(data)
     assert "State C1" in text and "State C2" in text
     assert "Charging" in text and "Available" in text
+    header = next(line for line in text.splitlines() if line.startswith("ID "))
+    assert "Charging" not in header
+    assert "Last seen" in header
+    assert "charger-a" in data["active_chargers"]
 
 
 def test_unreported_connector_defaults_independently(tmp_path: Path):
