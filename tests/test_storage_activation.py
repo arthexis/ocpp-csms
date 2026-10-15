@@ -1,5 +1,5 @@
+import sqlite3
 import pytest
-from ocpp_csms.install_cutover import checkpoint_stopped_storage
 from ocpp_csms.schema import create_current_schema
 from ocpp_csms.schema_storage import adopt_legacy_storage, activate_schema
 
@@ -8,12 +8,14 @@ def test_adopt_legacy_and_activate(tmp_path):
     create_current_schema(tmp_path)
     (tmp_path / "transactions").mkdir(exist_ok=True)
     (tmp_path / "transactions" / "historical.json").write_text("{}")
-    # Model the real cutover: stop the writer and checkpoint before moving files.
-    checkpoint_stopped_storage(tmp_path)
+    with sqlite3.connect(tmp_path / "ocpp-csms.sqlite3") as db:
+        db.execute("INSERT INTO runtime_events (occurred_at, event) VALUES ('now', 'test')")
     adopted = adopt_legacy_storage(tmp_path)
     assert adopted == tmp_path / "schemas" / "8"
     assert (adopted / "transactions" / "historical.json").read_text() == "{}"
     assert not (tmp_path / "ocpp-csms.sqlite3").exists()
+    with sqlite3.connect(adopted / "ocpp-csms.sqlite3") as db:
+        assert db.execute("SELECT event FROM runtime_events").fetchone() == ("test",)
     assert activate_schema(tmp_path, adopted).resolve() == adopted.resolve()
     assert activate_schema(tmp_path, adopted).resolve() == adopted.resolve()
 
@@ -27,12 +29,15 @@ def test_adoption_rejects_collision_without_moving_legacy(tmp_path):
     assert (tmp_path / "ocpp-csms.sqlite3").exists()
 
 
-def test_adoption_rejects_sqlite_sidecars(tmp_path):
+def test_adoption_rejects_live_writer(tmp_path):
     create_current_schema(tmp_path)
     (tmp_path / "transactions").mkdir(exist_ok=True)
-    (tmp_path / "ocpp-csms.sqlite3-wal").write_bytes(b"pending")
-    with pytest.raises(RuntimeError, match="WAL contains data"):
-        adopt_legacy_storage(tmp_path)
+    with sqlite3.connect(tmp_path / "ocpp-csms.sqlite3", timeout=0.2) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        with pytest.raises(RuntimeError, match="checkpoint"):
+            adopt_legacy_storage(tmp_path)
+        writer.rollback()
+    assert (tmp_path / "ocpp-csms.sqlite3").exists()
 
 
 def test_activation_rejects_external_target(tmp_path):
@@ -51,25 +56,18 @@ def test_activation_does_not_replace_regular_current(tmp_path):
     assert (tmp_path / "current").read_text() == "occupied"
 
 
-def test_adoption_preserves_empty_checkpointed_sidecars(tmp_path):
+def test_adoption_handles_sqlite_sidecars_without_byte_assumptions(tmp_path):
     create_current_schema(tmp_path)
     (tmp_path / "transactions").mkdir(exist_ok=True)
-    checkpoint_stopped_storage(tmp_path)
-    wal = tmp_path / "ocpp-csms.sqlite3-wal"
-    shm = tmp_path / "ocpp-csms.sqlite3-shm"
-    wal.write_bytes(b"")
-    shm.write_bytes(b"checkpointed index")
     adopted = adopt_legacy_storage(tmp_path)
-    assert (adopted / wal.name).read_bytes() == b""
-    assert (adopted / shm.name).read_bytes() == b"checkpointed index"
-    assert not wal.exists()
-    assert not shm.exists()
+    assert (adopted / "ocpp-csms.sqlite3").exists()
+    assert not (tmp_path / "ocpp-csms.sqlite3-wal").exists()
+    assert not (tmp_path / "ocpp-csms.sqlite3-shm").exists()
 
 
-def test_adoption_rejects_rollback_journal(tmp_path):
+def test_adoption_rejects_unsafe_sidecar(tmp_path):
     create_current_schema(tmp_path)
     (tmp_path / "transactions").mkdir(exist_ok=True)
-    checkpoint_stopped_storage(tmp_path)
-    (tmp_path / "ocpp-csms.sqlite3-journal").write_bytes(b"pending")
-    with pytest.raises(RuntimeError, match="rollback journal"):
+    (tmp_path / "ocpp-csms.sqlite3-journal").symlink_to("other")
+    with pytest.raises(RuntimeError, match="unsafe SQLite sidecar"):
         adopt_legacy_storage(tmp_path)
