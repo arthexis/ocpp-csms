@@ -239,7 +239,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_data"}
             response = await session.data_transfer(vendor_id, message_id, data)
         elif command == "reserve":
-            from datetime import datetime
+            from datetime import datetime, timezone
             connector = request.get("connector")
             reservation_id = request.get("reservation_id")
             id_tag = request.get("id_tag")
