@@ -1,5 +1,6 @@
 import sqlite3
 import pytest
+from ocpp_csms.install_cutover import main as cutover_main
 from ocpp_csms.schema import create_current_schema
 from ocpp_csms.schema_storage import adopt_legacy_storage, activate_schema
 
@@ -71,3 +72,20 @@ def test_adoption_rejects_unsafe_sidecar(tmp_path):
     (tmp_path / "ocpp-csms.sqlite3-journal").symlink_to("other")
     with pytest.raises(RuntimeError, match="unsafe SQLite sidecar"):
         adopt_legacy_storage(tmp_path)
+
+
+def test_storage_adopt_and_activate_cli(tmp_path, capsys):
+    create_current_schema(tmp_path)
+    (tmp_path / "transactions").mkdir(exist_ok=True)
+    assert cutover_main(["storage-adopt", "--storage-root", str(tmp_path)]) == 0
+    target = tmp_path / "schemas" / "8"
+    assert target.is_dir()
+    assert cutover_main(["storage-activate", "--storage-root", str(tmp_path), "--target", str(target)]) == 0
+    assert (tmp_path / "current").resolve() == target.resolve()
+
+
+def test_storage_activate_cli_rejects_external_target(tmp_path, capsys):
+    external = tmp_path.parent / (tmp_path.name + "-external-cli")
+    create_current_schema(external)
+    assert cutover_main(["storage-activate", "--storage-root", str(tmp_path), "--target", str(external)]) == 1
+    assert not (tmp_path / "current").exists()
