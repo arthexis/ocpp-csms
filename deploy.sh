@@ -15,9 +15,7 @@ if ! command -v ansible-playbook >/dev/null 2>&1; then
     exit 1
 fi
 
-observe_seconds=""
 interface=""
-reconnect_seconds=""
 stage_only=0
 dev=0
 expose=""
@@ -27,19 +25,9 @@ certbot_email=""
 no_certbot=0
 adopt=0
 uninstall=0
-force_handoff=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --observe)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --observe.\n' >&2; exit 2; }
-            observe_seconds=$2
-            shift 2
-            ;;
-        --observe=*)
-            observe_seconds=${1#--observe=}
-            shift
-            ;;
         --interface)
             [ "$#" -ge 2 ] || { printf 'Missing value for --interface.\n' >&2; exit 2; }
             interface=$2
@@ -47,19 +35,6 @@ while [ "$#" -gt 0 ]; do
             ;;
         --interface=*)
             interface=${1#--interface=}
-            shift
-            ;;
-        --reconnect)
-            [ "$#" -ge 2 ] || { printf 'Missing value for --reconnect.\n' >&2; exit 2; }
-            reconnect_seconds=$2
-            shift 2
-            ;;
-        --reconnect=*)
-            reconnect_seconds=${1#--reconnect=}
-            shift
-            ;;
-        --force)
-            force_handoff=1
             shift
             ;;
         --stage-only)
@@ -118,21 +93,6 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-validate_positive_seconds() {
-    option=$1
-    value=$2
-    case "$value" in
-        *[!0-9]*|'')
-            printf '%s must be a positive integer number of seconds.\n' "$option" >&2
-            exit 2
-            ;;
-        0)
-            printf '%s must be greater than zero.\n' "$option" >&2
-            exit 2
-            ;;
-    esac
-}
-
 # Deployment identity is immutable until a successful uninstall.
 # Resolve it before choosing playbooks so even a flagless invocation is safe.
 profile_path="${OCPP_CSMS_DEPLOY_PROFILE_PATH:-$HOME/.local/state/ocpp-csms/deployment.json}"
@@ -142,7 +102,7 @@ if [ "$uninstall" -eq 1 ]; then
         printf 'No recorded installation to uninstall: %s\\n' "$profile_path" >&2
         exit 2
     fi
-    if [ "$force_handoff" -eq 1 ] || [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$stage_only" -eq 1 ]; then
+    if [ "$satellite" -eq 1 ] || [ "$delegate" -eq 1 ] || [ -n "$expose" ] || [ "$stage_only" -eq 1 ]; then
         printf '%s\\n' '--uninstall must be used alone (no deployment or maintenance flags).' >&2
         exit 2
     fi
@@ -213,11 +173,6 @@ if [ -z "$expose" ] && { [ -n "$certbot_email" ] || [ "$no_certbot" -eq 1 ]; }; 
     exit 2
 fi
 
-if [ -n "$observe_seconds" ]; then
-    validate_positive_seconds --observe "$observe_seconds"
-    set -- -e "ocpp_csms_incumbent_observe_seconds=$observe_seconds" "$@"
-fi
-
 if [ -n "$interface" ]; then
     case "$interface" in
         *[!A-Za-z0-9_.:-]*|'')
@@ -226,15 +181,6 @@ if [ -n "$interface" ]; then
             ;;
     esac
     set -- -e "ocpp_discover_interface=$interface" "$@"
-fi
-
-if [ -n "$reconnect_seconds" ]; then
-    validate_positive_seconds --reconnect "$reconnect_seconds"
-    set -- -e "ocpp_csms_reconnect_timeout=$reconnect_seconds" "$@"
-fi
-
-if [ "$force_handoff" -eq 1 ]; then
-    set -- -e ocpp_csms_force_handoff=true "$@"
 fi
 
 if [ "$dev" -eq 1 ]; then
