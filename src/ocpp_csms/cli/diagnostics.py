@@ -29,7 +29,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 3d)")
     add(events, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 12h)")
     limit_group = events.add_mutually_exclusive_group()
-    limit_group.add_argument("-n", "--limit", default="100", help="Event count or duration (default: 100; e.g. 1d, 72h, 1w)")
+    limit_group.add_argument("-n", "--limit", help="Event count or duration (default: 100 without --since; e.g. 1d, 72h, 1w)")
     limit_group.add_argument("-N", "--no-limit", action="store_true", help="Return all matching events, without the default 100-event cap")
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
@@ -83,7 +83,7 @@ def _parse_event_limit(value: str | int) -> tuple[int | None, str | None]:
 
 
 def run_events(args: argparse.Namespace) -> int:
-    count, duration = (None, None) if getattr(args, 'no_limit', False) else _parse_event_limit(args.limit)
+    count, duration = (None, None) if getattr(args, 'no_limit', False) or (args.since is not None and args.limit is None) else _parse_event_limit(args.limit if args.limit is not None else '100')
     if args.transaction is not None and args.transaction < 0:
         raise ValueError("--transaction/--txn must be zero or greater")
     if args.raw and not args.json:
