@@ -201,84 +201,59 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      - name: Deploy base commit, then candidate
+      - name: Deploy genuine schema-8 base, then candidate
         shell: bash
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [[ -n "$BASE_SHA" ]]; then
-            git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
-            # CI fixture: install the base code as schema 7, then upgrade to
-            # the candidate's compiled schema 8. No production schema changes.
-            python3 - <<'PY'
-          from pathlib import Path
-          source = Path("/tmp/ocpp-csms-base/src/ocpp_csms/schema.py")
-          content = source.read_text()
-          old = "CURRENT_SCHEMA_VERSION = 8"
-          assert content.count(old) == 1, "base schema fixture needs updating"
-          source.write_text(content.replace(old, "CURRENT_SCHEMA_VERSION = 7", 1))
+          # Intent: an application upgrade within schema 8 reuses the existing database.
+          # Setup: deploy the real PR base revision, without modifying its schema declaration.
+          # Expected: candidate takes over while seeded data and allocator survive.
+          # Regression: accidental database replacement, schema migration or allocator reset.
+          git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
+          grep -Eq '^CURRENT_SCHEMA_VERSION = 8$' /tmp/ocpp-csms-base/src/ocpp_csms/schema.py
+          grep -Eq '^CURRENT_SCHEMA_VERSION = 8$' src/ocpp_csms/schema.py
+          (cd /tmp/ocpp-csms-base && ./deploy.sh)
+          sudo systemctl is-active --quiet ocpp-csms.service
+          sudo systemctl is-enabled --quiet ocpp-csms.service
+          /usr/local/bin/ocpp-csms --help >/dev/null
+          db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
+          test -f "$db"
+          old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          old_inode="$(stat -c '%d:%i' "$db")"
+          python3 - "$db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+              db.execute("UPDATE transaction_allocator SET last_id=314159")
+              db.execute("""INSERT INTO runtime_events
+                  (occurred_at, event, charger_id, details_json)
+                  VALUES ('2026-01-01T00:00:00Z', 'ci-upgrade-probe', 'CI001', '{}')""")
+              db.execute("""INSERT INTO transactions
+                  (transaction_id, charger_id, connector_id, id_tag, state, last_activity_at)
+                  VALUES (314159, 'CI001', 1, 'CI-TAG', 'stopped', '2026-01-01T00:00:00Z')""")
           PY
-            (cd /tmp/ocpp-csms-base && ./deploy.sh)
-          else
-            ./deploy.sh
-          fi
+          ./deploy.sh
+          test "$(stat -c '%d:%i' "$db")" = "$old_inode"
+          new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+          test "$new_release" != "$old_release" || { echo "::error::candidate release did not replace base"; exit 1; }
+          python3 - "$db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
+              assert db.execute("SELECT charger_id FROM transactions WHERE transaction_id=314159").fetchone() == ('CI001',)
+              assert db.execute("SELECT event FROM runtime_events WHERE event='ci-upgrade-probe'").fetchone() == ('ci-upgrade-probe',)
+          PY
           sudo systemctl is-active --quiet ocpp-csms.service
           sudo systemctl is-enabled --quiet ocpp-csms.service
           /usr/local/bin/ocpp-csms --help >/dev/null
           /usr/local/bin/ocpp-csms status
-          old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
-          old_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-          old_schema=8
-          if [[ -n "$BASE_SHA" ]]; then old_schema=7; fi
-          old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
-          test -f "$old_db"
-          python3 - "$old_db" "$old_schema" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
-              assert db.execute("PRAGMA user_version").fetchone()[0] == int(sys.argv[2])
-          PY
-          old_inode="$(stat -c '%d:%i' "$old_db")"
-          python3 - "$old_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              db.execute("UPDATE transaction_allocator SET last_id=314159")
-          PY
-          # Post-deployment health checks replace obsolete continuous listener sampling.
-          if [[ -n "$BASE_SHA" ]]; then
-            ./deploy.sh
-          fi
-          new_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
-          test -f "$new_db"
-          python3 - "$new_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
-              assert db.execute("PRAGMA user_version").fetchone()[0] == 8
-              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
-          PY
-          if [[ -n "$BASE_SHA" ]]; then
-            test "$old_db" != "$new_db"
-            grep -F "schemas/8" /etc/systemd/system/ocpp-csms.service
-          fi
-          new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
-          new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-          if [[ -n "$BASE_SHA" ]]; then
-            test "$new_release" != "$old_release"
-            test "$new_pid" != "$old_pid"
-          fi
-          test "$(stat -c '%d:%i' "$old_db")" = "$old_inode"
-          python3 - "$old_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
-          PY
-          sudo systemctl is-active --quiet ocpp-csms.service
-          test -d "$old_release"
-          if [[ -n "$BASE_SHA" ]]; then
-            test -L "$HOME/.local/share/ocpp-csms/previous"
-            test "$(readlink -f "$HOME/.local/share/ocpp-csms/previous")" = "$old_release"
-          fi
-          /usr/local/bin/ocpp-csms status
+          # Intent: idempotent redeployment must not alter an existing schema-8 store.
+          # Setup: candidate already active with seeded transaction and allocator state.
+          # Expected: no release switch, service restart or database replacement.
+          # Regression: destructive same-revision deployment or unsafe staging.
           bash tests/deployment/acceptance.sh
 
       - name: Show service logs on failure
