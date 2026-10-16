@@ -220,6 +220,22 @@ jobs:
           /usr/local/bin/ocpp-csms --help >/dev/null
           db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
           test -f "$db"
+          # Fresh-install contract: the base deploy must initialize schema 8.
+          # This is checked before seeding upgrade fixtures to distinguish installation
+          # failures from upgrade persistence regressions.
+          python3 - "$db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as conn:
+              assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+              assert conn.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
+          PY
+          # Post-deployment socket check; not continuous listener sampling.
+          python3 - <<'PY'
+          import socket
+          with socket.create_connection(("127.0.0.1", 9000), timeout=5):
+              pass
+          PY
+          /usr/local/bin/ocpp-csms status
           old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
           old_inode="$(stat -c '%d:%i' "$db")"
           python3 - "$db" <<'PY'
