@@ -22,7 +22,7 @@ def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
 
 def args(**overrides):
     defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
-                    until=None, limit=100, json=False, raw=False, verbose=False, detail=False)
+                    until=None, limit=None, json=False, raw=False, verbose=False, detail=False)
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
 
@@ -154,7 +154,7 @@ def test_relative_since_uses_current_utc(captured_queries, duration, seconds):
     after = datetime.now(timezone.utc)
     actual = datetime.fromisoformat(query["since"])
     assert before - timedelta(seconds=seconds) <= actual <= after - timedelta(seconds=seconds)
-    assert query["limit"] == 100
+    assert query["limit"] is None
 
 
 def test_relative_bounds_keep_common_reference_time(captured_queries):
@@ -227,11 +227,38 @@ def test_short_limit_alias_matches_long_flag(monkeypatch):
             assert abs((datetime.fromisoformat(short["since"]) - datetime.fromisoformat(long["since"])).total_seconds()) < 1
 
 
-def test_parser_default_limit_is_100():
+def test_parser_default_limit_is_implicit():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
     cli.add_diagnostic_commands(sub)
-    assert parser.parse_args(["events"]).limit == "100"
+    assert parser.parse_args(["events"]).limit is None
+
+
+
+def test_since_without_explicit_limit_is_unbounded(captured_queries):
+    for since in ("1d", "7d", "2026-10-09T00:00:00Z"):
+        assert query_events(captured_queries, since=since)["limit"] is None
+
+
+def test_default_and_explicit_count_limit(captured_queries):
+    assert query_events(captured_queries)["limit"] == 100
+    assert query_events(captured_queries, until="1d")["limit"] == 100
+    assert query_events(captured_queries, since="7d", limit="50")["limit"] == 50
+
+
+def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    for flags, expected in (
+        (["events"], 100),
+        (["events", "--since", "7d"], None),
+        (["events", "--since", "7d", "-n", "50"], 50),
+    ):
+        parsed = parser.parse_args(flags)
+        parsed.data_dir = "unused"
+        cli.run_events(parsed)
+        assert captured_queries[-1]["limit"] == expected
 
 
 def test_no_limit_aliases_disable_count_cap(captured_queries):
