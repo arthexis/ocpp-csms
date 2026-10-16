@@ -29,14 +29,35 @@ if (( TEST_SCHEMA < BASE_SCHEMA )); then
   echo "::error::Candidate schema is older than base; no automatic downgrade is supported"
   exit 1
 fi
-if (( TEST_SCHEMA != BASE_SCHEMA )); then
-  echo "::error::Application upgrade fixture requires matching schemas ($BASE_SCHEMA vs $TEST_SCHEMA); schema advancement needs a separate new-database scenario"
-  exit 1
-fi
 (cd /tmp/ocpp-csms-base && ./deploy.sh)
 sudo systemctl is-active --quiet ocpp-csms.service
 sudo systemctl is-enabled --quiet ocpp-csms.service
 /usr/local/bin/ocpp-csms --help >/dev/null
+# Schema advancement is not a migration: the old DB remains unchanged and
+# the candidate initializes a separate empty DB at its own schema path.
+if (( TEST_SCHEMA > BASE_SCHEMA )); then
+  old_db="$HOME/ocpp-csms-data/schemas/$BASE_SCHEMA/ocpp-csms.sqlite3"
+  new_db="$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA/ocpp-csms.sqlite3"
+  test -f "$old_db"
+  test ! -e "$new_db"
+  old_identity="$(stat -c '%d:%i:%s' "$old_db")"
+  old_hash="$(sha256sum "$old_db" | cut -d' ' -f1)"
+  ./deploy.sh
+  test -f "$new_db"
+  test "$(stat -c '%d:%i:%s' "$old_db")" = "$old_identity"
+  test "$(sha256sum "$old_db" | cut -d' ' -f1)" = "$old_hash"
+  python3 - "$new_db" <<'PY'
+import os, sqlite3, sys
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
+    assert db.execute("PRAGMA user_version").fetchone()[0] == int(os.environ["TEST_SCHEMA"])
+    assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
+    assert db.execute("SELECT COUNT(*) FROM transactions").fetchone() == (0,)
+PY
+  sudo systemctl is-active --quiet ocpp-csms.service
+  /usr/local/bin/ocpp-csms status
+  bash tests/deployment/acceptance.sh
+  exit 0
+fi
 db="$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA/ocpp-csms.sqlite3"
 test -f "$db"
 # Fresh-install contract: the base deploy must initialize current schema.
