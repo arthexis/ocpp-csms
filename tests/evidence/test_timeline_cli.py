@@ -241,8 +241,8 @@ def test_since_without_explicit_limit_is_unbounded(captured_queries):
 
 
 def test_default_and_explicit_count_limit(captured_queries):
-    assert query_events(captured_queries)["limit"] == 100
-    assert query_events(captured_queries, until="1d")["limit"] == 100
+    assert query_events(captured_queries)["limit"] == 200
+    assert query_events(captured_queries, until="1d")["limit"] == 200
     assert query_events(captured_queries, since="7d", limit="50")["limit"] == 50
 
 
@@ -251,7 +251,7 @@ def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries):
     sub = parser.add_subparsers(dest="command")
     cli.add_diagnostic_commands(sub)
     for flags, expected in (
-        (["events"], 100),
+        (["events"], 200),
         (["events", "--since", "7d"], None),
         (["events", "--since", "7d", "-n", "50"], 50),
     ):
