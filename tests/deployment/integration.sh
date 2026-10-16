@@ -40,6 +40,19 @@ if (( TEST_SCHEMA > BASE_SCHEMA )); then
   new_db="$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA/ocpp-csms.sqlite3"
   test -f "$old_db"
   test ! -e "$new_db"
+  # Seed the old schema with meaningful records. They must remain in the old
+  # database, and must NOT appear in the new schema's fresh database.
+  python3 - "$old_db" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.execute("UPDATE transaction_allocator SET last_id=314159")
+    db.execute("""INSERT INTO runtime_events
+        (occurred_at, event, charger_id, details_json)
+        VALUES ('2026-01-01T00:00:00Z', 'ci-schema-advance-probe', 'CI001', '{}')""")
+    db.execute("""INSERT INTO transactions
+        (transaction_id, charger_id, connector_id, id_tag, state, last_activity_at)
+        VALUES (314159, 'CI001', 1, 'CI-TAG', 'stopped', '2026-01-01T00:00:00Z')""")
+PY
   old_identity="$(stat -c '%d:%i:%s' "$old_db")"
   old_hash="$(sha256sum "$old_db" | cut -d' ' -f1)"
   ./deploy.sh
@@ -53,6 +66,18 @@ with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
     assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
     assert db.execute("SELECT COUNT(*) FROM transactions").fetchone() == (0,)
 PY
+  # Verify no copying/migration: only the old DB has the probe records.
+  python3 - "$old_db" "$new_db" <<'PY'
+import sqlite3, sys
+with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as old:
+    assert old.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
+    assert old.execute("SELECT COUNT(*) FROM transactions WHERE transaction_id=314159").fetchone() == (1,)
+    assert old.execute("SELECT COUNT(*) FROM runtime_events WHERE event='ci-schema-advance-probe'").fetchone() == (1,)
+with sqlite3.connect(f"file:{sys.argv[2]}?mode=ro", uri=True) as new:
+    assert new.execute("SELECT COUNT(*) FROM runtime_events WHERE event='ci-schema-advance-probe'").fetchone() == (0,)
+PY
+  # The active service must use the new schema directory, not the retained DB.
+  sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F -- "/schemas/$TEST_SCHEMA"
   sudo systemctl is-active --quiet ocpp-csms.service
   /usr/local/bin/ocpp-csms status
   bash tests/deployment/acceptance.sh
