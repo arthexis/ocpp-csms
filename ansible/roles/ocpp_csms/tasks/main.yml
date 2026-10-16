@@ -49,7 +49,7 @@
                 ["systemctl", "show", "ocpp-csms.service", "-p", "ExecStart", "--value"],
                 check=True, capture_output=True, text=True,
             ).stdout
-            versions = re.findall(r"/schemas/([0-9]+)(?:/|\\|[\\s;}]|$)", unit)
+            versions = re.findall(r"/schemas/([0-9]+)(?=[/\s;}]|$)", unit)
             if len(versions) != 1:
                 raise SystemExit("cannot determine active CSMS schema; refusing deployment")
             running = int(versions[0])
