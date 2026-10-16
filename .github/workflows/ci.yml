@@ -3,9 +3,6 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
-  push:
-    branches:
-      - main
 
 jobs:
   changes:
@@ -189,7 +186,7 @@ jobs:
     name: Ansible integration
     timeout-minutes: 25
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-24.04
 
     steps:
@@ -326,7 +323,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "${{ github.event_name }}" == "pull_request" && "$ANSIBLE_INTEGRATION_RESULT" != "success" ]]; then
+          if [[ "$ANSIBLE_INTEGRATION_RESULT" != "success" ]]; then
             echo "Ansible integration did not succeed: $ANSIBLE_INTEGRATION_RESULT"
             exit 1
           fi
