@@ -3,9 +3,6 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
-  push:
-    branches:
-      - main
 
 jobs:
   changes:
@@ -201,120 +198,70 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      - name: Deploy base commit, then candidate
+      - name: Run schema-aware deployment integration
         shell: bash
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash tests/deployment/integration.sh
+
+      - name: Show service logs on failure
+        if: failure()
+        run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
+
+
+  ansible_schema_advance:
+    name: Ansible schema advancement
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
+
+      - name: Exercise schema advancement with disposable candidate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [[ -n "$BASE_SHA" ]]; then
-            git worktree add --detach /tmp/ocpp-csms-base "$BASE_SHA"
-            # CI fixture: install the base code as schema 7, then upgrade to
-            # the candidate's compiled schema 8. No production schema changes.
-            python3 - <<'PY'
+          # The actual production schema is never changed. Create a disposable
+          # candidate commit with only the schema constant incremented, so the
+          # integration exercises a genuine base -> newer-schema deployment.
+          git worktree add --detach /tmp/ocpp-csms-schema-advance HEAD
+          python3 - /tmp/ocpp-csms-schema-advance/src/ocpp_csms/schema.py <<'PY'
+          import ast
+          import sys
           from pathlib import Path
-          source = Path("/tmp/ocpp-csms-base/src/ocpp_csms/schema.py")
-          content = source.read_text()
-          old = "CURRENT_SCHEMA_VERSION = 8"
-          assert content.count(old) == 1, "base schema fixture needs updating"
-          source.write_text(content.replace(old, "CURRENT_SCHEMA_VERSION = 7", 1))
+
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          assignments = [
+              node for node in ast.parse(source).body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "CURRENT_SCHEMA_VERSION" for target in node.targets)
+          ]
+          assert len(assignments) == 1
+          node = assignments[0]
+          current = ast.literal_eval(node.value)
+          assert isinstance(current, int) and current > 0
+          lines = source.splitlines(keepends=True)
+          lines[node.lineno - 1] = lines[node.lineno - 1].replace(
+              f"CURRENT_SCHEMA_VERSION = {current}",
+              f"CURRENT_SCHEMA_VERSION = {current + 1}",
+              1,
+          )
+          path.write_text("".join(lines))
           PY
-            (cd /tmp/ocpp-csms-base && ./deploy.sh)
-          else
-            ./deploy.sh
-          fi
-          sudo systemctl is-active --quiet ocpp-csms.service
-          sudo systemctl is-enabled --quiet ocpp-csms.service
-          /usr/local/bin/ocpp-csms --help >/dev/null
-          /usr/local/bin/ocpp-csms status
-          old_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
-          old_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-          old_schema=8
-          if [[ -n "$BASE_SHA" ]]; then old_schema=7; fi
-          old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
-          test -f "$old_db"
-          python3 - "$old_db" "$old_schema" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
-              assert db.execute("PRAGMA user_version").fetchone()[0] == int(sys.argv[2])
-          PY
-          old_inode="$(stat -c '%d:%i' "$old_db")"
-          python3 - "$old_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              db.execute("UPDATE transaction_allocator SET last_id=314159")
-          PY
-          # Sample the TCP listener throughout the real handoff. This is a
-          # bounded approximation, not a charger reconnect measurement.
-          python3 - <<'PY' > /tmp/csms-listener-samples.csv &
-          import socket, time
-          deadline = time.monotonic() + 180
-          while time.monotonic() < deadline:
-              with socket.socket() as sock:
-                  sock.settimeout(0.08)
-                  try:
-                      sock.connect(("127.0.0.1", 9000))
-                      ready = 1
-                  except OSError:
-                      ready = 0
-              print(f"{time.monotonic():.6f},{ready}", flush=True)
-              time.sleep(0.05)
-          PY
-          sampler=$!
-          if [[ -n "$BASE_SHA" ]]; then
-            ./deploy.sh
-          fi
-          kill "$sampler" 2>/dev/null || true
-          wait "$sampler" 2>/dev/null || true
-          python3 - <<'PY'
-          from pathlib import Path
-          samples = [line.split(",") for line in Path("/tmp/csms-listener-samples.csv").read_text().splitlines()]
-          samples = [(float(t), int(ok)) for t, ok in samples]
-          assert samples and any(ok for _, ok in samples), "listener sampling did not observe service"
-          outage_start = None
-          longest = 0.0
-          for timestamp, ready in samples:
-              if not ready and outage_start is None:
-                  outage_start = timestamp
-              elif ready and outage_start is not None:
-                  longest = max(longest, timestamp - outage_start)
-                  outage_start = None
-          if outage_start is not None:
-              raise AssertionError("listener remained unavailable at end of sampling")
-          print(f"Longest sampled TCP listener outage: {longest:.3f}s ({len(samples)} samples)")
-          PY
-          new_db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
-          test -f "$new_db"
-          python3 - "$new_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
-              assert db.execute("PRAGMA user_version").fetchone()[0] == 8
-              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (0,)
-          PY
-          if [[ -n "$BASE_SHA" ]]; then
-            test "$old_db" != "$new_db"
-            grep -F "schemas/8" /etc/systemd/system/ocpp-csms.service
-          fi
-          new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
-          new_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-          if [[ -n "$BASE_SHA" ]]; then
-            test "$new_release" != "$old_release"
-            test "$new_pid" != "$old_pid"
-          fi
-          test "$(stat -c '%d:%i' "$old_db")" = "$old_inode"
-          python3 - "$old_db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
-          PY
-          sudo systemctl is-active --quiet ocpp-csms.service
-          test -d "$old_release"
-          if [[ -n "$BASE_SHA" ]]; then
-            test -L "$HOME/.local/share/ocpp-csms/previous"
-            test "$(readlink -f "$HOME/.local/share/ocpp-csms/previous")" = "$old_release"
-          fi
-          /usr/local/bin/ocpp-csms status
-          bash tests/deployment/acceptance.sh
+          git -C /tmp/ocpp-csms-schema-advance add src/ocpp_csms/schema.py
+          git -C /tmp/ocpp-csms-schema-advance -c user.name='CI Schema Fixture' -c user.email='ci@example.invalid' commit -m 'test fixture: advance schema'
+          (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/integration.sh)
 
       - name: Show service logs on failure
         if: failure()
@@ -330,6 +277,7 @@ jobs:
       - ubuntu
       - ansible
       - ansible_integration
+      - ansible_schema_advance
     if: always()
     runs-on: ubuntu-latest
 
@@ -344,6 +292,7 @@ jobs:
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
           ANSIBLE_INTEGRATION_RESULT: ${{ needs.ansible_integration.result }}
+          ANSIBLE_SCHEMA_ADVANCE_RESULT: ${{ needs.ansible_schema_advance.result }}
         run: |
           set -euo pipefail
 
@@ -372,6 +321,11 @@ jobs:
 
           if [[ "$ANSIBLE_INTEGRATION_RESULT" != "success" ]]; then
             echo "Ansible integration did not succeed: $ANSIBLE_INTEGRATION_RESULT"
+            exit 1
+          fi
+
+          if [[ "$ANSIBLE_SCHEMA_ADVANCE_RESULT" != "success" ]]; then
+            echo "Schema advancement integration did not succeed: $ANSIBLE_SCHEMA_ADVANCE_RESULT"
             exit 1
           fi
 

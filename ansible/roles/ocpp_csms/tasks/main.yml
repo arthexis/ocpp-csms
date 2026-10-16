@@ -15,6 +15,52 @@
       Use Ansible become for privileged host changes instead of running the
       playbook itself as root.
 
+# Downgrade protection must run before package installation, directory creation,
+# candidate preparation, or service handoff. The live unit's --data-dir is the
+# authority; historical schemas on disk are not evidence of an active version.
+- name: Reject schema downgrade before any deployment mutation
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import ast
+        import re
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        source = ast.parse(Path(sys.argv[1]).read_text())
+        values = [
+            ast.literal_eval(node.value)
+            for node in source.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "CURRENT_SCHEMA_VERSION" for target in node.targets)
+        ]
+        if len(values) != 1 or type(values[0]) is not int or values[0] < 1:
+            raise SystemExit("invalid candidate schema declaration")
+        candidate = values[0]
+        active = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "ocpp-csms.service"],
+            check=False,
+        ).returncode == 0
+        if active:
+            unit = subprocess.run(
+                ["systemctl", "show", "ocpp-csms.service", "-p", "ExecStart", "--value"],
+                check=True, capture_output=True, text=True,
+            ).stdout
+            versions = re.findall(r"/schemas/([0-9]+)(?=[/\s;}]|$)", unit)
+            if len(versions) != 1:
+                raise SystemExit("cannot determine active CSMS schema; refusing deployment")
+            running = int(versions[0])
+            if candidate < running:
+                raise SystemExit(
+                    f"schema downgrade rejected: running {running}, candidate {candidate}"
+                )
+        print(f"schema downgrade preflight accepted: candidate {candidate}")
+      - "{{ ocpp_csms_controller_source_dir }}/src/ocpp_csms/schema.py"
+  changed_when: false
+
 - name: Resolve release revision from controller checkout
   ansible.builtin.command:
     argv:
