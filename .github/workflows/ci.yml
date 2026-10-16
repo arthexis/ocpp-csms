@@ -209,6 +209,65 @@ jobs:
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
 
 
+  ansible_schema_advance:
+    name: Ansible schema advancement
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
+
+      - name: Exercise schema advancement with disposable candidate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The actual production schema is never changed. Create a disposable
+          # candidate commit with only the schema constant incremented, so the
+          # integration exercises a genuine base -> newer-schema deployment.
+          git worktree add --detach /tmp/ocpp-csms-schema-advance HEAD
+          python3 - /tmp/ocpp-csms-schema-advance/src/ocpp_csms/schema.py <<'PY'
+          import ast
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          assignments = [
+              node for node in ast.parse(source).body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "CURRENT_SCHEMA_VERSION" for target in node.targets)
+          ]
+          assert len(assignments) == 1
+          node = assignments[0]
+          current = ast.literal_eval(node.value)
+          assert isinstance(current, int) and current > 0
+          lines = source.splitlines(keepends=True)
+          lines[node.lineno - 1] = lines[node.lineno - 1].replace(
+              f"CURRENT_SCHEMA_VERSION = {current}",
+              f"CURRENT_SCHEMA_VERSION = {current + 1}",
+              1,
+          )
+          path.write_text("".join(lines))
+          PY
+          git -C /tmp/ocpp-csms-schema-advance add src/ocpp_csms/schema.py
+          git -C /tmp/ocpp-csms-schema-advance -c user.name='CI Schema Fixture' -c user.email='ci@example.invalid' commit -m 'test fixture: advance schema'
+          (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/integration.sh)
+
+      - name: Show service logs on failure
+        if: failure()
+        run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
+
+
   ci:
     name: CI
     needs:
@@ -218,6 +277,7 @@ jobs:
       - ubuntu
       - ansible
       - ansible_integration
+      - ansible_schema_advance
     if: always()
     runs-on: ubuntu-latest
 
@@ -232,6 +292,7 @@ jobs:
           UBUNTU_RESULT: ${{ needs.ubuntu.result }}
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
           ANSIBLE_INTEGRATION_RESULT: ${{ needs.ansible_integration.result }}
+          ANSIBLE_SCHEMA_ADVANCE_RESULT: ${{ needs.ansible_schema_advance.result }}
         run: |
           set -euo pipefail
 
@@ -260,6 +321,11 @@ jobs:
 
           if [[ "$ANSIBLE_INTEGRATION_RESULT" != "success" ]]; then
             echo "Ansible integration did not succeed: $ANSIBLE_INTEGRATION_RESULT"
+            exit 1
+          fi
+
+          if [[ "$ANSIBLE_SCHEMA_ADVANCE_RESULT" != "success" ]]; then
+            echo "Schema advancement integration did not succeed: $ANSIBLE_SCHEMA_ADVANCE_RESULT"
             exit 1
           fi
 
