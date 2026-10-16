@@ -81,6 +81,25 @@ PY
   sudo systemctl is-active --quiet ocpp-csms.service
   /usr/local/bin/ocpp-csms status
   bash tests/deployment/acceptance.sh
+
+  # Intent: an older application must not reactivate retained historical
+  # storage after a newer schema has entered service.
+  # Expected: rejection before any service/release/database change.
+  before_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+  before_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
+  before_unit="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
+  before_new_identity="$(stat -c '%d:%i:%s' "$new_db")"
+  before_old_identity="$(stat -c '%d:%i:%s' "$old_db")"
+  if (cd /tmp/ocpp-csms-base && ./deploy.sh); then
+    echo "::error::older application unexpectedly deployed over newer schema"
+    exit 1
+  fi
+  test "$(readlink -f "$HOME/.local/share/ocpp-csms/current")" = "$before_release"
+  test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$before_pid"
+  test "$(sudo systemctl show ocpp-csms.service -p ExecStart --value)" = "$before_unit"
+  test "$(stat -c '%d:%i:%s' "$new_db")" = "$before_new_identity"
+  test "$(stat -c '%d:%i:%s' "$old_db")" = "$before_old_identity"
+  sudo systemctl is-active --quiet ocpp-csms.service
   exit 0
 fi
 db="$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA/ocpp-csms.sqlite3"
