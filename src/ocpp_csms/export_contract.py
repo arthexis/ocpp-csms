@@ -123,6 +123,18 @@ def export_contract(
     return json_command_result(data, schema=SCHEMA)
 
 
+def _utc_or_none(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connection: sqlite3.Connection) -> list[dict[str, Any]]:
     transaction_ids = sorted(
         {
@@ -136,6 +148,9 @@ def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connec
     for transaction_id in transaction_ids:
         view = query.get(transaction_id)
         if view is not None:
-            transactions.append({**transaction_item(view, local_time=True), **transaction_export_metadata(view.record)})
+            item = transaction_item(view, local_time=True)
+            for field in ("started_at", "stopped_at", "last_activity_at"):
+                item[field] = _utc_or_none(item.get(field))
+            transactions.append({**item, **transaction_export_metadata(view.record)})
 
     return transactions
