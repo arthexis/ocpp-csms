@@ -79,17 +79,36 @@
     ocpp_csms_release_id: "{{ ocpp_csms_release_revision.stdout ~ ('-dev' if ocpp_csms_dev | bool else '') }}"
 
 - name: Install Python prerequisites
-  become: true
-  ansible.builtin.apt:
-    name:
-      - python3
-      - python3-venv
-      - python3-pip
-      - iproute2
-      - tcpdump
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+  block:
+    - name: Install required system packages
+      become: true
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+          - iproute2
+          - tcpdump
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+  rescue:
+    - name: Explain administrator authentication failure
+      ansible.builtin.fail:
+        msg: >-
+          Ansible could not obtain sudo privileges. Run 'sudo -v' and retry
+          './deploy.sh', or invoke './deploy.sh -K' to enter the sudo password
+          through Ansible. Do not run deploy.sh as root.
+          Original error: {{ ansible_failed_result.msg | default('unknown error') }}
+      when: >-
+        'sudo: a password is required' in (ansible_failed_result.msg | default('')) or
+        'Missing sudo password' in (ansible_failed_result.msg | default(''))
+    - name: Preserve other package-installation errors
+      ansible.builtin.fail:
+        msg: "{{ ansible_failed_result.msg | default('System package installation failed') }}"
+      when: >-
+        'sudo: a password is required' not in (ansible_failed_result.msg | default('')) and
+        'Missing sudo password' not in (ansible_failed_result.msg | default(''))
 
 - name: Create OCPP CSMS base directories
   ansible.builtin.file:
