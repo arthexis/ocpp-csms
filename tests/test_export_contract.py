@@ -462,3 +462,22 @@ def test_failed_export_releases_snapshot_and_preserves_following_evidence(tmp_pa
     assert len({event["id"] for event in next_page["events"]}) == 2
     with sqlite3.connect(database_path(tmp_path)) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def test_export_transaction_timestamps_are_utc_or_null(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "TEST", "meter_start": 100,
+        "timestamp": "2026-01-01T00:00:00Z",
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 200,
+        "timestamp": "2026-01-01T00:10:00Z",
+    })
+    from datetime import datetime, timezone
+    transaction = export_contract(tmp_path)["data"]["transactions"][0]
+    for field in ("started_at", "stopped_at", "last_activity_at"):
+        value = transaction[field]
+        assert value is None or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is not None
+        if value is not None:
+            assert datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() == timezone.utc.utcoffset(None)
