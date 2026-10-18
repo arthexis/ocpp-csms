@@ -203,7 +203,7 @@ jobs:
       - name: Run schema-aware deployment integration
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash tests/deployment/integration.sh
 
       - name: Show service logs on failure
@@ -230,7 +230,7 @@ jobs:
       - name: Exercise schema advancement with disposable candidate
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.head.sha || github.event.before }}
         run: |
           set -euo pipefail
           # The actual production schema is never changed. Create a disposable
