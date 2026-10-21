@@ -59,13 +59,13 @@ async def test_claim_and_full_transaction_over_wss(tmp_path):
         return {"Authorization": "Basic " + encoded}
 
     try:
-        url = f"wss://localhost:{port}/ABB-SERIAL-001"
+        url = f"wss://localhost:{port}/Vendor-SERIAL-001"
         async with websockets.connect(
             url, ssl=client_tls, subprotocols=["ocpp1.6"],
-            extra_headers=credentials("ABB-SERIAL-001"),
+            extra_headers=credentials("Vendor-SERIAL-001"),
         ) as ws:
             await ws.send(call("boot", "BootNotification",
-                               {"chargePointVendor": "ABB", "chargePointModel": "Simulator"}))
+                               {"chargePointVendor": "Vendor", "chargePointModel": "Simulator"}))
             assert (await response(ws, "boot"))["status"] == "Accepted"
             await ws.send(call("heartbeat", "Heartbeat", {}))
             assert "currentTime" in await response(ws, "heartbeat")
@@ -85,7 +85,7 @@ async def test_claim_and_full_transaction_over_wss(tmp_path):
                                {"transactionId": txn_id, "meterStop": 130,
                                 "timestamp": "2026-10-12T12:02:00Z"}))
             assert await response(ws, "stop") == {}
-        assert load_auth(auth_file)["username"] == "ABB-SERIAL-001"
+        assert load_auth(auth_file)["username"] == "Vendor-SERIAL-001"
         with pytest.raises(websockets.exceptions.InvalidStatusCode) as err:
             async with websockets.connect(
                 f"wss://localhost:{port}/OTHER-CHARGER", ssl=client_tls,
@@ -95,11 +95,11 @@ async def test_claim_and_full_transaction_over_wss(tmp_path):
                 pass
         assert err.value.status_code == 401
         async with websockets.connect(
-            url, ssl=client_tls, extra_headers=credentials("ABB-SERIAL-001"),
+            url, ssl=client_tls, extra_headers=credentials("Vendor-SERIAL-001"),
             subprotocols=["ocpp1.6"],
         ) as ws:
             await ws.send(call("boot2", "BootNotification",
-                               {"chargePointVendor": "ABB", "chargePointModel": "Simulator"}))
+                               {"chargePointVendor": "Vendor", "chargePointModel": "Simulator"}))
             assert (await response(ws, "boot2"))["status"] == "Accepted"
     finally:
         await listener.stop()
@@ -113,5 +113,5 @@ async def test_claim_and_full_transaction_over_wss(tmp_path):
             "SELECT action FROM events WHERE transaction_id = ? AND direction = 'in' ORDER BY id",
             (txn_id,),
         ).fetchall()
-    assert saved == ("ABB-SERIAL-001", txn_id, "stopped", 130)
+    assert saved == ("Vendor-SERIAL-001", txn_id, "stopped", 130)
     assert [action for (action,) in actions] == ["StartTransaction", "MeterValues", "StopTransaction"]

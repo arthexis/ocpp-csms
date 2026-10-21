@@ -748,19 +748,19 @@ confirming no real Vendor charger or active transaction is present:
 ```bash
 sudo systemctl stop ocpp-csms
 ocpp-csms data reset --all --dry-run
-ocpp-csms data reset --all --now
+ocpp-csms data reset --all
 sudo systemctl start ocpp-csms
 ocpp-csms status
 ```
 
-For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review
-the operation, then `ocpp-csms data reset --cp NAME --now` to remove its
+For a *single* charge point, use `ocpp-csms data reset --cp NAME --dry-run` to review
+the operation, then `ocpp-csms data reset --cp NAME` to remove its
 SQLite records and matching JSON archives while preserving other charge points.
 Both modes back up the original dataset and require the CSMS to be stopped.
 The charge-point identity is matched exactly, and ambiguous archives abort the
 operation rather than risking an unrelated deletion.
 
-The default is a non-mutating dry run. The `--all --now` operation moves
+An explicit `--dry-run` is non-mutating. The `--all` operation moves
 the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
 initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
@@ -768,3 +768,21 @@ change deployment identity, nginx, certificates, firewall or Basic-auth
 credentials stored outside the data directory. Rotate/re-enroll test
 credentials separately before real Vendor commissioning. Do not run this command
 on a production data directory or use it to conceal genuine charge history.
+
+
+### Mandatory pre-reset archive
+
+All executing `data reset` modes now create and verify a portable `.tar.gz` archive outside the active data directory before modifying evidence. The archive includes a manifest with SHA-256 checksums, scope, schema version, and a consistent SQLite backup captured with the SQLite backup API. The command reports `archive` in its structured result. Preserve the archive separately before restoring or retiring the host. Archive creation or verification failure aborts the reset. `--dry-run` does not create an archive or modify evidence.
+
+### Undoing a data reset
+
+Use the exact archive path returned by the reset command. Undo restores the **entire pre-reset snapshot**, even if the reset targeted one charge point. It is not a selective merge. Stop the CSMS first; undo refuses to run on an active service and rejects any changed or newly recorded evidence since the reset.
+
+```bash
+sudo systemctl stop ocpp-csms
+ocpp-csms data reset --undo /path/to/backup.tar.gz --dry-run
+ocpp-csms data reset --undo /path/to/backup.tar.gz
+sudo systemctl start ocpp-csms
+```
+
+Undo requires the matching post-reset verification record beside the archive, checks every archived file against its SHA-256 manifest, and verifies SQLite integrity and the expected schema. It preserves the displaced post-reset data directory as a separate sibling `-undo-displaced` directory instead of deleting it. If any evidence has changed since reset, **undo fails rather than overwriting it**; recover manually using a separate copy and compare the evidence. Never restore a snapshot into another host or schema without an independent recovery plan.
