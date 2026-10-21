@@ -52,7 +52,7 @@ socket directly to `127.0.0.1`. The certificate (or its issuing CA) must be
 provided explicitly as a trusted PEM; insecure TLS verification is not supported.
 
 Use an **existing dedicated test CP identity already provisioned in Basic auth**.
-Do not use pending first-claim credentials or overwrite a real ABB charger's
+Do not use pending first-claim credentials or overwrite a real Vendor charger's
 identity. A single-instance Basic-auth configuration binds one identity, so
 this smoke test is not suitable for an instance already provisioned for a
 different production charger without an approved separate test identity or
@@ -84,7 +84,7 @@ opening TCP/443**:
 
 ```bash
 ocpp-csms auth basic --limit 3d    # pending first-claim enrollment
-# OR: ocpp-csms auth basic --cp ABB-001  # pre-register a known identity
+# OR: ocpp-csms auth basic --cp Vendor-001  # pre-register a known identity
 ocpp-csms auth status
 sudo systemctl restart ocpp-csms.service
 ```
@@ -94,7 +94,7 @@ next 72 hours claims the supplied URL's final charge-point ID and permanently
 binds the stored credential to that identity. An unclaimed credential expires
 after 72 hours and is rejected; once claimed, normal authenticated reconnections
 do not expire. In pending mode the Basic username must equal the identity in the
-URL. The first-claim risk is intentional: keep the credential private until ABB
+URL. The first-claim risk is intentional: keep the credential private until Vendor
 commissions the charger. The known-ID `--cp` alternative needs no enrollment
 window.
 
@@ -114,7 +114,7 @@ If the auth file is absent the original anonymous-local behavior remains;
 therefore **never expose a cloud CSMS publicly before setting Basic auth**.
 
 This is Basic authentication, **not** mutual TLS/client certificates. mTLS
-remains a separate feature tracked in the Lightsail epic. An ABB charger
+remains a separate feature tracked in the Lightsail epic. An Vendor charger
 must be configured to send Basic credentials during the WebSocket handshake.
 
 ### Canonical charger URL
@@ -125,9 +125,9 @@ Give the charger operator the **full canonical** WSS URL:
 wss://<hostname>/<charge-point-id>
 ```
 
-For example, if ABB identifies its charge point as `ABB-001`, the configured
-URL should be `wss://ocpp.example.com/ABB-001` (replace the example hostname
-with the actual DNS record). **Confirm whether the ABB charger appends its
+For example, if Vendor identifies its charge point as `Vendor-001`, the configured
+URL should be `wss://ocpp.example.com/Vendor-001` (replace the example hostname
+with the actual DNS record). **Confirm whether the Vendor charger appends its
 identity automatically**: if it does, enter only the documented base URL to
 avoid doubling the ID.
 
@@ -142,7 +142,7 @@ canonical URL for every reconnection and rollback procedure.
 This convention is **not access control**. The CSMS currently allows unknown
 charge-point identities by default, so arbitrary paths do not establish
 authorization. Before exposing a public endpoint, establish a suitable
-identity/authentication policy and verify the actual ABB firmware requirements.
+identity/authentication policy and verify the actual Vendor firmware requirements.
 
 The native WSS listener requires a readable certificate/key matching the DNS
 hostname. Verify certificate chain trust externally and test a full OCPP 1.6J
@@ -739,11 +739,11 @@ operator-authorized tasks for the local agent (see #204). They must not run
 on ordinary PR CI or update production CSMS inadvertently.
 
 
-### Resetting a dedicated test delegate before ABB commissioning
+### Resetting a dedicated test delegate before Vendor commissioning
 
 After the remote simulator acceptance tests, reset **only a confirmed
 test-only data directory**, and only after stopping the CSMS service and
-confirming no real ABB charger or active transaction is present:
+confirming no real Vendor charger or active transaction is present:
 
 ```bash
 sudo systemctl stop ocpp-csms
@@ -766,5 +766,5 @@ initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
 change deployment identity, nginx, certificates, firewall or Basic-auth
 credentials stored outside the data directory. Rotate/re-enroll test
-credentials separately before real ABB commissioning. Do not run this command
+credentials separately before real Vendor commissioning. Do not run this command
 on a production data directory or use it to conceal genuine charge history.
