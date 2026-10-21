@@ -151,3 +151,15 @@ def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
         assert Path(result["backup"]).exists()
     finally:
         writer.close()
+
+
+def test_archive_failure_aborts_reset_without_mutating(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "marker").write_text("preserve")
+    with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
+         patch("ocpp_csms.cli.data.archive_before_reset", side_effect=OSError("no disk space")):
+        with pytest.raises(OSError, match="no disk space"):
+            reset_test_data(data, all_data=True)
+    assert (data / "marker").read_text() == "preserve"
