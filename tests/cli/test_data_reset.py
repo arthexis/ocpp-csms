@@ -167,8 +167,9 @@ def test_archive_failure_aborts_reset_without_mutating(tmp_path):
 
 
 def test_undo_restores_archive_only_when_post_reset_state_unchanged(tmp_path):
+    from ocpp_csms.cli.appliance import initialize_storage
     data = tmp_path / "data"
-    data.mkdir()
+    initialize_storage(str(data))
     (data / "original").write_text("before")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
