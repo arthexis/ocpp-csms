@@ -9,13 +9,13 @@ from ocpp_csms.cli.data import reset_test_data
 
 
 
-def test_default_dry_run_is_read_only(tmp_path):
+def test_explicit_dry_run_is_read_only(tmp_path):
     data = tmp_path / "ocpp-csms-data"
     data.mkdir()
     (data / "marker").write_text("test")
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
-        result = reset_test_data(data, all_data=True)
+        result = reset_test_data(data, all_data=True, dry_run=True)
     assert result["decision"] == "dry-run"
     assert (data / "marker").read_text() == "test"
     assert not (tmp_path / "ocpp-csms-data-test-backups").exists()
@@ -28,7 +28,7 @@ def test_reset_moves_data_and_reinitializes(tmp_path):
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
          patch("ocpp_csms.cli.data.initialize_storage") as init:
-        result = reset_test_data(data, all_data=True, now=True)
+        result = reset_test_data(data, all_data=True)
     assert result["decision"] == "reset"
     assert (Path(result["backup"]) / "marker").read_text() == "secret"
     init.assert_called_once_with(str(data))
@@ -43,13 +43,13 @@ def test_refuses_live_service(tmp_path, reason, running, active):
     with patch("ocpp_csms.cli.data.process_is_running", return_value=running), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=0 if active else 3)):
         with pytest.raises(ValueError):
-            reset_test_data(data, all_data=True, now=True)
+            reset_test_data(data, all_data=True)
     assert data.exists()
 
 
 def test_refuses_without_scope(tmp_path):
     with pytest.raises(ValueError, match="exactly one"):
-        reset_test_data(tmp_path, all_data=False, now=True)
+        reset_test_data(tmp_path, all_data=False)
 
 
 def test_refuses_symlinked_data(tmp_path):
@@ -58,7 +58,7 @@ def test_refuses_symlinked_data(tmp_path):
     link = tmp_path / "link"
     link.symlink_to(data)
     with pytest.raises(ValueError, match="symlinked"):
-        reset_test_data(link, all_data=True, now=True)
+        reset_test_data(link, all_data=True)
 
 def test_cp_scope_keeps_other_charge_point_data(tmp_path):
     from ocpp_csms.cli.appliance import initialize_storage
@@ -80,7 +80,7 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
         (folder / f"record-{i}.json").write_text(json.dumps({"charge_point_id":cp,"transaction_id":i}))
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
-        out = reset_test_data(data, cp="Vendor-A", now=True)
+        out = reset_test_data(data, cp="Vendor-A")
     assert out["scope"] == "cp"
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT charger_id FROM transactions").fetchall() == [("Vendor-B",)]
@@ -103,7 +103,7 @@ def test_refuses_ambiguous_cp_archive_without_swapping(tmp_path):
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         with pytest.raises(ValueError,match="ambiguous"):
-            reset_test_data(data, cp="Vendor-A", now=True)
+            reset_test_data(data, cp="Vendor-A")
     assert (folder / "unknown.json").exists()
 
 
@@ -131,7 +131,7 @@ def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
         writer.commit()
         with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
              patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
-            result = reset_test_data(data, cp="REMOVE", now=True)
+            result = reset_test_data(data, cp="REMOVE")
         with sqlite3.connect(data / "ocpp-csms.sqlite3") as check:
             assert check.execute(
                 "SELECT charger_id FROM transactions WHERE transaction_id=701"
