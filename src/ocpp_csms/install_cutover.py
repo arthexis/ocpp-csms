@@ -154,8 +154,6 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--storage-root", required=True)
     prepare.add_argument("--active-data-dir")
 
-    checkpoint.add_argument("--data-dir", required=True)
-
     evidence = subcommands.add_parser("storage-evidence")
     evidence.add_argument("--data-dir", required=True)
 
@@ -175,10 +173,6 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"action": plan.action, "target": str(plan.target),
                               "active_schema": plan.active_schema,
                               "active": str(plan.active) if plan.active else None}, sort_keys=True))
-            return 0
-        if args.command == "storage-checkpoint":
-            checkpoint_stopped_storage(args.data_dir)
-            print("ok")
             return 0
         if args.command == "storage-evidence":
             committed = has_committed_ocpp_evidence(args.data_dir)
