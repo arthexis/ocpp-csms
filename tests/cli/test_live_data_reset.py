@@ -84,3 +84,27 @@ def test_live_reset_only_deletes_selected_charger_across_all_tables(tmp_path):
     assert (folder / "203.json").exists()
     reset_live_cp(root, "SIM001")
     assert (folder / "202.json").exists() and (folder / "203.json").exists()
+
+
+def test_live_reset_refuses_sqlite_evidence_written_after_backup(tmp_path, monkeypatch):
+    import ocpp_csms.cli.data as data_module
+    from ocpp_csms.backup_archive import archive_before_reset
+
+    root = tmp_path / "data"
+    initialize_storage(str(root))
+    db_path = root / "ocpp-csms.sqlite3"
+
+    def archive_then_write(*args, **kwargs):
+        archive = archive_before_reset(*args, **kwargs)
+        with sqlite3.connect(db_path) as db:
+            db.execute(
+                "INSERT INTO events (received_at,charger_id,action,direction,payload_json) "
+                "VALUES ('2026-10-21','Vendor001','Heartbeat','in','{}')"
+            )
+        return archive
+
+    monkeypatch.setattr(data_module, "archive_before_reset", archive_then_write)
+    with pytest.raises(RuntimeError, match="SQLite evidence changed after backup"):
+        reset_live_cp(root, "SIM001")
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE charger_id='Vendor001'").fetchone()[0] == 1
