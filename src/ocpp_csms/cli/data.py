@@ -16,6 +16,7 @@ import subprocess
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.cli.appliance import initialize_storage
 from ocpp_csms.backup_archive import archive_before_reset
+from ocpp_csms.reset_undo import record_reset_state, undo_reset
 
 
 def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -23,6 +24,7 @@ def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.Argume
     operations = data.add_subparsers(dest="data_command", required=True)
     reset = operations.add_parser("reset", help="Archive all test data and initialize clean storage")
     target = reset.add_mutually_exclusive_group(required=True)
+    target.add_argument("--undo", metavar="ARCHIVE", help="Restore verified reset archive, offline only")
     target.add_argument("--all", action="store_true", help="Archive and reset the entire application data directory")
     target.add_argument("--cp", metavar="NAME", help="Delete records for only this charge-point identity")
     reset.add_argument("--dry-run", action="store_true", help="Check safety without modifying files")
@@ -134,6 +136,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
     # A crash here leaves some JSON behind; the next invocation removes it.
     for path in selected:
         path.unlink(missing_ok=True)
+    record_reset_state(root, archive_path)
     return {"decision": "reset", "scope": "cp", "cp": cp,
             "deleted_json": len(selected), "data_dir": str(root), "archive": str(archive_path),
             "preserve": "other charge points, allocator and authentication"}
@@ -216,6 +219,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
+        record_reset_state(root, archive_path)
         return {"decision": "reset", "scope": "cp", "cp": cp,
                 "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
                 "preserve": "other charge points, deployment and authentication configuration"}
@@ -230,6 +234,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
             root.rmdir()
         backup.rename(root)
         raise
+    record_reset_state(root, archive_path)
     return {"decision": "reset", "scope": "all", "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
             "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
 
@@ -237,6 +242,9 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
 def run_data(args: argparse.Namespace) -> int:
     if args.data_command != "reset":
         raise ValueError("unknown data operation")
+    if args.undo is not None:
+        print(json.dumps(undo_reset(Path(args.data_dir), Path(args.undo), dry_run=args.dry_run), indent=2, sort_keys=True))
+        return 0
     if args.cp is not None and args.dry_run:
         print(json.dumps({"decision": "dry-run", "scope": "cp", "cp": args.cp,
                           "data_dir": str(args.data_dir)}, indent=2, sort_keys=True))
