@@ -39,6 +39,7 @@ def test_reset_moves_data_and_reinitializes(tmp_path):
          patch("ocpp_csms.cli.data.initialize_storage") as init:
         result = reset_test_data(data, all_data=True)
     assert result["decision"] == "reset"
+    assert Path(result["archive"]).is_file()
     assert (Path(result["backup"]) / "marker").read_text() == "secret"
     init.assert_called_once_with(str(data))
 
@@ -91,6 +92,7 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         out = reset_test_data(data, cp="Vendor-A")
     assert out["scope"] == "cp"
+    assert Path(out["archive"]).is_file()
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT charger_id FROM transactions").fetchall() == [("Vendor-B",)]
         assert db.execute("SELECT charger_id FROM events").fetchall() == [("Vendor-B",)]
