@@ -8,6 +8,15 @@ import pytest
 from ocpp_csms.cli.data import reset_test_data
 
 
+def test_reset_command_requires_scope_but_not_now(parse_cli):
+    for scope in (("--all",), ("--cp", "CP001")):
+        args = parse_cli("data", "reset", *scope)
+        assert not args.dry_run
+        assert parse_cli("data", "reset", *scope, "--dry-run").dry_run
+    with pytest.raises(SystemExit):
+        parse_cli("data", "reset", "--all", "--now")
+
+
 
 def test_explicit_dry_run_is_read_only(tmp_path):
     data = tmp_path / "ocpp-csms-data"
