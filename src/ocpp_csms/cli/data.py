@@ -24,9 +24,7 @@ def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.Argume
     target = reset.add_mutually_exclusive_group(required=True)
     target.add_argument("--all", action="store_true", help="Archive and reset the entire application data directory")
     target.add_argument("--cp", metavar="NAME", help="Delete records for only this charge-point identity")
-    mode = reset.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="Check safety without modifying files (default)")
-    mode.add_argument("--now", action="store_true", help="Required for offline --all reset; optional compatibility flag for --cp")
+    reset.add_argument("--dry-run", action="store_true", help="Check safety without modifying files")
     return data
 
 
@@ -61,9 +59,6 @@ def _remove_cp_from_copy(root: Path, cp: str) -> None:
         # Clear references by transaction identity; do not reuse IDs.
         if ids:
             placeholders = ",".join("?" for _ in ids)
-            # Historical upgraded databases may retain the obsolete audit table.
-            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
-                db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({placeholders})", ids)
             db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({placeholders})", ids)
         db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
                    "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
@@ -118,8 +113,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
                 "SELECT transaction_id FROM transactions WHERE charger_id=?", (cp,))]
             if ids:
                 marks = ",".join("?" for _ in ids)
-                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transaction_recoveries'").fetchone():
-                    db.execute(f"DELETE FROM transaction_recoveries WHERE transaction_id IN ({marks})", ids)
+
                 db.execute(f"DELETE FROM start_identities WHERE transaction_id IN ({marks})", ids)
             db.execute("DELETE FROM rfid_list_entries WHERE list_id IN "
                        "(SELECT id FROM rfid_lists WHERE charger_id=?)", (cp,))
@@ -138,7 +132,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
             "deleted_json": len(selected), "data_dir": str(root),
             "preserve": "other charge points, allocator and authentication"}
 
-def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | None = None, now: bool = False) -> dict:
+def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | None = None, dry_run: bool = False) -> dict:
     if all_data == (cp is not None):
         raise ValueError("specify exactly one of --all or --cp NAME")
     if cp is not None and (not cp.strip() or cp != cp.strip() or "/" in cp or "\\x00" in cp):
@@ -169,7 +163,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
     backup_root = root.parent / (root.name + "-test-backups")
     if backup_root.is_symlink():
         raise ValueError("refusing symlinked backup directory")
-    if not now:
+    if dry_run:
         return {"decision": "dry-run", "scope": "all" if all_data else "cp",
                 "cp": cp, "data_dir": str(root), "backup_parent": str(backup_root),
                 "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
@@ -247,6 +241,6 @@ def run_data(args: argparse.Namespace) -> int:
             raise ValueError(f"live reset refused: {response.get('error')}: {response.get('detail', '')}")
         print(json.dumps(response["response"], indent=2, sort_keys=True))
         return 0
-    print(json.dumps(reset_test_data(args.data_dir, all_data=args.all, cp=args.cp, now=args.now),
+    print(json.dumps(reset_test_data(args.data_dir, all_data=args.all, cp=args.cp, dry_run=args.dry_run),
                      indent=2, sort_keys=True))
     return 0
