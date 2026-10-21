@@ -196,3 +196,16 @@ def test_undo_refuses_new_evidence(tmp_path):
         with pytest.raises(ValueError, match="new or changed evidence"):
             undo_reset(data, Path(result["archive"]))
     assert (data / "new-evidence").read_text() == "after"
+
+
+def test_checkpoint_failure_reports_completed_reset_and_archive(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "marker").write_text("before")
+    with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)), \
+         patch("ocpp_csms.cli.data.record_reset_state", side_effect=OSError("full disk")):
+        with pytest.raises(RuntimeError, match="reset completed but undo checkpoint failed; archive preserved"):
+            reset_test_data(data, all_data=True)
+    assert not (data / "marker").exists()
+    assert list((tmp_path / "data-test-backups").glob("*.tar.gz"))
