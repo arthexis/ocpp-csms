@@ -20,7 +20,7 @@ def test_config_request_preserves_selector_keys(parse_cli, argv, expected_charge
     assert request.get("keys") == expected_keys
 
 
-def test_legacy_config_positional_charger_remains_a_key(parse_cli):
+def test_config_positional_charger_name_is_only_a_key(parse_cli):
     request = configuration_request(parse_cli("config", "charger-a", "HeartbeatInterval"))
     assert "charger" not in request
     assert request["keys"] == ["charger-a", "HeartbeatInterval"]
@@ -91,3 +91,10 @@ def test_config_set_prints_readback_and_accepts_reboot_required(monkeypatch, par
     assert "RebootRequired" in output
     assert "HeartbeatInterval" in output
     assert "60" in output
+
+
+def test_config_download_requires_explicit_cp(parse_cli):
+    from ocpp_csms.cli.config import _download_charger
+    assert _download_charger(parse_cli("config", "download", "--cp", "charger-a")) == "charger-a"
+    with pytest.raises(ValueError, match="no positional charger"):
+        _download_charger(parse_cli("config", "download", "charger-a"))
