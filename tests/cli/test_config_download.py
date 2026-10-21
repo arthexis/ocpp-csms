@@ -82,13 +82,13 @@ def test_download_show_sensitive_is_explicit(monkeypatch, parse_cli, tmp_path):
     assert json.loads(output.read_text())["configuration"][0]["value"] == "secret"
 
 
-def test_download_rejects_duplicate_charger_selectors(parse_cli):
-    assert cli.run_config_download(parse_cli("config", "download", "--cp", "charger-a", "--cp", "charger-b")) == 2
+def test_download_rejects_positional_charger_even_with_explicit_selector(parse_cli):
+    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--cp", "charger-b")) == 2
 
 
 def test_download_is_recognized_by_unified_cli_parser(parse_cli):
     args = parse_cli("config", "download", "--cp", "charger-a", "--json")
     assert args.command == "config"
     assert config_cli.is_config_download(args)
-    assert args.items == ["download", "charger-a"]
+    assert args.items == ["download"]
     assert args.json is True
