@@ -33,14 +33,14 @@ def test_download_uses_full_guarded_configuration_query(monkeypatch, parse_cli):
 def test_download_forwards_explicit_charger(monkeypatch, parse_cli):
     install_control_response(monkeypatch, {"ok": True, "response": {"configuration_key": [], "unknown_key": []}})
 
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a")) == 0
+    assert cli.run_config_download(parse_cli("config", "download", "--cp", "charger-a")) == 0
     assert install_control_response.request == {"command": "config", "charger": "charger-a"}
 
 
 def test_download_reports_active_transaction_guard(monkeypatch, parse_cli, capsys):
     install_control_response(monkeypatch, {"error": "active_transaction", "charger": "charger-a", "transactions": [17]})
 
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a")) == 1
+    assert cli.run_config_download(parse_cli("config", "download", "--cp", "charger-a")) == 1
     assert "active_transaction" in capsys.readouterr().out
 
 
@@ -57,7 +57,7 @@ def test_download_writes_masked_json_snapshot(monkeypatch, parse_cli, tmp_path):
     )
     output = tmp_path / "configuration.json"
 
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--output", str(output))) == 0
+    assert cli.run_config_download(parse_cli("config", "download", "--cp", "charger-a", "--output", str(output))) == 0
     snapshot = json.loads(output.read_text())
     assert snapshot["charger"] == "charger-a"
     assert snapshot["configuration"][0] == {"key": "AuthorizationKey", "readonly": True, "value": "[REDACTED]"}
@@ -77,17 +77,17 @@ def test_download_show_sensitive_is_explicit(monkeypatch, parse_cli, tmp_path):
     output = tmp_path / "configuration.json"
 
     assert cli.run_config_download(
-        parse_cli("config", "download", "charger-a", "--show-sensitive", "--output", str(output))
+        parse_cli("config", "download", "--cp", "charger-a", "--show-sensitive", "--output", str(output))
     ) == 0
     assert json.loads(output.read_text())["configuration"][0]["value"] == "secret"
 
 
 def test_download_rejects_duplicate_charger_selectors(parse_cli):
-    assert cli.run_config_download(parse_cli("config", "download", "charger-a", "--cp", "charger-b")) == 2
+    assert cli.run_config_download(parse_cli("config", "download", "--cp", "charger-a", "--cp", "charger-b")) == 2
 
 
 def test_download_is_recognized_by_unified_cli_parser(parse_cli):
-    args = parse_cli("config", "download", "charger-a", "--json")
+    args = parse_cli("config", "download", "--cp", "charger-a", "--json")
     assert args.command == "config"
     assert config_cli.is_config_download(args)
     assert args.items == ["download", "charger-a"]
