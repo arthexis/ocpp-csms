@@ -748,19 +748,19 @@ confirming no real Vendor charger or active transaction is present:
 ```bash
 sudo systemctl stop ocpp-csms
 ocpp-csms data reset --all --dry-run
-ocpp-csms data reset --all --now
+ocpp-csms data reset --all
 sudo systemctl start ocpp-csms
 ocpp-csms status
 ```
 
-For a *single* charge point, use `ocpp-csms data reset --cp NAME` to review
-the operation, then `ocpp-csms data reset --cp NAME --now` to remove its
+For a *single* charge point, use `ocpp-csms data reset --cp NAME --dry-run` to review
+the operation, then `ocpp-csms data reset --cp NAME` to remove its
 SQLite records and matching JSON archives while preserving other charge points.
 Both modes back up the original dataset and require the CSMS to be stopped.
 The charge-point identity is matched exactly, and ambiguous archives abort the
 operation rather than risking an unrelated deletion.
 
-The default is a non-mutating dry run. The `--all --now` operation moves
+An explicit `--dry-run` is non-mutating. The `--all` operation moves
 the data directory into its sibling `ocpp-csms-data-test-backups/` folder and
 initializes fresh SQLite/transaction storage. It rejects active services,
 recorded active charges, or inconsistent persistence state. **It does not**
