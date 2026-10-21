@@ -15,6 +15,7 @@ import subprocess
 
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.cli.appliance import initialize_storage
+from ocpp_csms.backup_archive import archive_before_reset
 
 
 def add_data_command(subcommands: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -102,6 +103,11 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
                 raise ValueError("ambiguous transaction evidence: reset refused")
             if record["charge_point_id"] == cp:
                 selected.append(path)
+    # Refuse unsafe requests before snapshotting.
+    with closing(sqlite3.connect(info.path, timeout=5)) as preflight:
+        if preflight.execute("SELECT 1 FROM transactions WHERE charger_id=? AND state NOT IN ('stopped', 'complete', 'completed') LIMIT 1", (cp,)).fetchone():
+            raise ValueError("charge point has an open transaction; reset refused")
+    archive_path = archive_before_reset(root, scope="cp", cp=cp)
     with closing(sqlite3.connect(info.path, timeout=5)) as db:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("BEGIN IMMEDIATE")
@@ -129,7 +135,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
     for path in selected:
         path.unlink(missing_ok=True)
     return {"decision": "reset", "scope": "cp", "cp": cp,
-            "deleted_json": len(selected), "data_dir": str(root),
+            "deleted_json": len(selected), "data_dir": str(root), "archive": str(archive_path),
             "preserve": "other charge points, allocator and authentication"}
 
 def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | None = None, dry_run: bool = False) -> dict:
@@ -167,6 +173,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
         return {"decision": "dry-run", "scope": "all" if all_data else "cp",
                 "cp": cp, "data_dir": str(root), "backup_parent": str(backup_root),
                 "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
+    archive_path = archive_before_reset(root, scope="all" if all_data else "cp", cp=cp)
     backup_root.mkdir(mode=0o700, exist_ok=True)
     os.chmod(backup_root, 0o700)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -210,7 +217,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
             if staging.exists():
                 shutil.rmtree(staging)
         return {"decision": "reset", "scope": "cp", "cp": cp,
-                "backup": str(backup), "data_dir": str(root),
+                "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
                 "preserve": "other charge points, deployment and authentication configuration"}
     root.rename(backup)  # same parent filesystem; no destructive deletion
     try:
@@ -223,7 +230,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
             root.rmdir()
         backup.rename(root)
         raise
-    return {"decision": "reset", "scope": "all", "backup": str(backup), "data_dir": str(root),
+    return {"decision": "reset", "scope": "all", "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
             "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
 
 
