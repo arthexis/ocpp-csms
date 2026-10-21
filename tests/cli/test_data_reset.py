@@ -68,7 +68,7 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
     initialize_storage(str(data))
     db_path = data / "ocpp-csms.sqlite3"
     with sqlite3.connect(db_path) as db:
-        for i, cp in enumerate(("ABB-A", "ABB-B"), 1):
+        for i, cp in enumerate(("Vendor-A", "Vendor-B"), 1):
             db.execute("INSERT INTO transactions (transaction_id,charger_id,state,last_activity_at) VALUES (?,?,'stopped','2026-01-01')",(i,cp))
             db.execute("INSERT INTO events (received_at,charger_id,action,direction,payload_json,transaction_id) VALUES ('2026-01-01',?,'BootNotification','in','{}',?)",(cp,i))
             db.execute("INSERT INTO runtime_events (occurred_at,event,charger_id) VALUES ('2026-01-01','charger_disconnected',?)",(cp,))
@@ -76,17 +76,17 @@ def test_cp_scope_keeps_other_charge_point_data(tmp_path):
         source_id = db.execute("SELECT value FROM appliance_metadata WHERE key='source_id'").fetchone()[0]
     folder = data / "transactions" / "2026-01-01"
     folder.mkdir(parents=True,exist_ok=True)
-    for i, cp in enumerate(("ABB-A", "ABB-B"), 1):
+    for i, cp in enumerate(("Vendor-A", "Vendor-B"), 1):
         (folder / f"record-{i}.json").write_text(json.dumps({"charge_point_id":cp,"transaction_id":i}))
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
-        out = reset_test_data(data, cp="ABB-A", now=True)
+        out = reset_test_data(data, cp="Vendor-A", now=True)
     assert out["scope"] == "cp"
     with sqlite3.connect(db_path) as db:
-        assert db.execute("SELECT charger_id FROM transactions").fetchall() == [("ABB-B",)]
-        assert db.execute("SELECT charger_id FROM events").fetchall() == [("ABB-B",)]
-        assert db.execute("SELECT charger_id FROM runtime_events").fetchall() == [("ABB-B",)]
-        assert db.execute("SELECT charger_id FROM connector_status").fetchall() == [("ABB-B",)]
+        assert db.execute("SELECT charger_id FROM transactions").fetchall() == [("Vendor-B",)]
+        assert db.execute("SELECT charger_id FROM events").fetchall() == [("Vendor-B",)]
+        assert db.execute("SELECT charger_id FROM runtime_events").fetchall() == [("Vendor-B",)]
+        assert db.execute("SELECT charger_id FROM connector_status").fetchall() == [("Vendor-B",)]
         assert db.execute("SELECT value FROM appliance_metadata WHERE key='source_id'").fetchone()[0] == source_id
     assert not (folder / "record-1.json").exists()
     assert (folder / "record-2.json").exists()
@@ -103,13 +103,13 @@ def test_refuses_ambiguous_cp_archive_without_swapping(tmp_path):
     with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
          patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
         with pytest.raises(ValueError,match="ambiguous"):
-            reset_test_data(data, cp="ABB-A", now=True)
+            reset_test_data(data, cp="Vendor-A", now=True)
     assert (folder / "unknown.json").exists()
 
 
 def test_requires_exclusive_scope(tmp_path):
     with pytest.raises(ValueError, match="exactly one"):
-        reset_test_data(tmp_path, all_data=True, cp="ABB-A")
+        reset_test_data(tmp_path, all_data=True, cp="Vendor-A")
 
 
 def test_cp_reset_uses_consistent_wal_snapshot(tmp_path):
