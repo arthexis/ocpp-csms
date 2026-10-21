@@ -25,6 +25,9 @@ def add_profile_command(
     profile.set_defaults(profile_parser=profile)
     profile_subcommands = profile.add_subparsers(dest="profile_command")
     profile_subcommands.add_parser("templates", help="List built-in profile templates")
+    profile_supported = profile_subcommands.add_parser("supported", help="Show charger-advertised Smart Charging capabilities")
+    add(profile_supported, "--cp", dest="charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_supported, "-j", "--json", action="store_true", help="Print the normalized capability report as JSON")
     profile_help = profile_subcommands.add_parser("help", help="Explain a built-in profile template")
     add(profile_help, "template", help="Built-in profile template name")
     profile_send = profile_subcommands.add_parser("send", help="Send a built-in profile template to the charger")
@@ -168,10 +171,71 @@ def _send_profile_request(args: argparse.Namespace, request: dict[str, object]) 
     return 0, payload
 
 
+SMART_CHARGING_KEYS = (
+    "SupportedFeatureProfiles",
+    "ChargingScheduleAllowedChargingRateUnit",
+    "ChargeProfileMaxStackLevel",
+    "ChargingScheduleMaxPeriods",
+    "MaxChargingProfilesInstalled",
+)
+
+
+def _supported_profile_request(args: argparse.Namespace) -> dict[str, object]:
+    request: dict[str, object] = {"command": "config", "keys": list(SMART_CHARGING_KEYS)}
+    if args.charger is not None:
+        request["charger"] = args.charger
+    return request
+
+
+def _supported_profile_report(payload: dict[str, object]) -> dict[str, object]:
+    rows = payload.get("configuration_key", payload.get("configurationKey", [])) or []
+    unknown = payload.get("unknown_key", payload.get("unknownKey", [])) or []
+    if not isinstance(rows, list) or not isinstance(unknown, list):
+        raise ValueError("invalid configuration response")
+    values: dict[str, str | None] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("key"), str):
+            raise ValueError("invalid configuration response")
+        if row["key"] in SMART_CHARGING_KEYS:
+            value = row.get("value")
+            if value is not None and not isinstance(value, str):
+                raise ValueError("invalid configuration response")
+            values[row["key"]] = value
+    for key in unknown:
+        if not isinstance(key, str):
+            raise ValueError("invalid configuration response")
+    advertised = values.get("SupportedFeatureProfiles")
+    features = [item.strip() for item in advertised.split(",")] if advertised is not None else None
+    return {
+        "smart_charging": ("advertised" if "SmartCharging" in features else "not_advertised") if features is not None else "unknown",
+        "configuration": {key: {"status": "reported", "value": values[key]} if key in values else {"status": "unknown", "value": None} for key in SMART_CHARGING_KEYS},
+    }
+
+
+def _run_profile_supported(args: argparse.Namespace) -> int:
+    from ocpp_csms.cli.maintenance_transport import maintenance_control, MaintenanceControlError
+
+    try:
+        payload = maintenance_control(args.data_dir, _supported_profile_request(args), malformed="invalid configuration response")
+        report = _supported_profile_report(payload)
+    except (MaintenanceControlError, ValueError) as exc:
+        print(f"error: {exc}")
+        return 1
+    if args.json:
+        emit_json(report)
+    else:
+        print(f"Smart Charging: {report['smart_charging']} (charger-reported, not verified)")
+        for key, item in report["configuration"].items():
+            print(f"{key}: {item['value'] if item['status'] == 'reported' and item['value'] is not None else 'unknown'}")
+    return 0
+
+
 def run_profile(args: argparse.Namespace) -> int:
     if args.profile_command is None:
         args.profile_parser.print_help()
         return 0
+    if args.profile_command == "supported":
+        return _run_profile_supported(args)
     if args.profile_command == "templates":
         print(format_profile_template_list())
         return 0
