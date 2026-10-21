@@ -773,3 +773,16 @@ on a production data directory or use it to conceal genuine charge history.
 ### Mandatory pre-reset archive
 
 All executing `data reset` modes now create and verify a portable `.tar.gz` archive outside the active data directory before modifying evidence. The archive includes a manifest with SHA-256 checksums, scope, schema version, and a consistent SQLite backup captured with the SQLite backup API. The command reports `archive` in its structured result. Preserve the archive separately before restoring or retiring the host. Archive creation or verification failure aborts the reset. `--dry-run` does not create an archive or modify evidence.
+
+### Undoing a data reset
+
+Use the exact archive path returned by the reset command. Undo restores the **entire pre-reset snapshot**, even if the reset targeted one charge point. It is not a selective merge. Stop the CSMS first; undo refuses to run on an active service and rejects any changed or newly recorded evidence since the reset.
+
+```bash
+sudo systemctl stop ocpp-csms
+ocpp-csms data reset --undo /path/to/backup.tar.gz --dry-run
+ocpp-csms data reset --undo /path/to/backup.tar.gz
+sudo systemctl start ocpp-csms
+```
+
+Undo requires the matching post-reset verification record beside the archive, checks every archived file against its SHA-256 manifest, and verifies SQLite integrity and the expected schema. It preserves the displaced post-reset data directory as a separate sibling `-undo-displaced` directory instead of deleting it. If any evidence has changed since reset, **undo fails rather than overwriting it**; recover manually using a separate copy and compare the evidence. Never restore a snapshot into another host or schema without an independent recovery plan.
