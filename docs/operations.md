@@ -768,3 +768,8 @@ change deployment identity, nginx, certificates, firewall or Basic-auth
 credentials stored outside the data directory. Rotate/re-enroll test
 credentials separately before real Vendor commissioning. Do not run this command
 on a production data directory or use it to conceal genuine charge history.
+
+
+### Mandatory pre-reset archive
+
+All executing `data reset` modes now create and verify a portable `.tar.gz` archive outside the active data directory before modifying evidence. The archive includes a manifest with SHA-256 checksums, scope, schema version, and a consistent SQLite backup captured with the SQLite backup API. The command reports `archive` in its structured result. Preserve the archive separately before restoring or retiring the host. Archive creation or verification failure aborts the reset. `--dry-run` does not create an archive or modify evidence.
