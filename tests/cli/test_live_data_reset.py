@@ -1,6 +1,8 @@
 """Live per-charge-point reset safety and preservation tests."""
 import json
 import sqlite3
+import tarfile
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -34,6 +36,13 @@ def test_live_reset_preserves_other_charger_and_allocator(tmp_path):
     assert (folder / "102.json").exists()
     assert result["deleted_json"] == 1
     assert Path(result["archive"]).is_file()
+    with tarfile.open(result["archive"], "r:gz") as archive:
+        manifest = json.load(archive.extractfile("manifest.json"))
+        assert manifest["scope"] == "cp"
+        assert manifest["cp"] == "SIM001"
+        for name, expected in manifest["files"].items():
+            assert hashlib.sha256(archive.extractfile("data/" + name).read()).hexdigest() == expected
+        assert "ocpp-csms.sqlite3" in manifest["files"]
     assert reset_live_cp(root, "SIM001")["deleted_json"] == 0
     assert Path(result["archive"]).is_file()
 
