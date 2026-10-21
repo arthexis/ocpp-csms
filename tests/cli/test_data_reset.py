@@ -209,3 +209,25 @@ def test_checkpoint_failure_reports_completed_reset_and_archive(tmp_path):
             reset_test_data(data, all_data=True)
     assert not (data / "marker").exists()
     assert list((tmp_path / "data-test-backups").glob("*.tar.gz"))
+
+
+def test_backup_rejects_evidence_changed_during_snapshot(tmp_path):
+    from ocpp_csms.backup_archive import archive_before_reset
+    import shutil
+
+    data = tmp_path / "data"
+    data.mkdir()
+    evidence = data / "event.json"
+    evidence.write_text('{"event":1}')
+    real_copy = shutil.copy2
+
+    def changing_copy(source, destination, *args, **kwargs):
+        result = real_copy(source, destination, *args, **kwargs)
+        if Path(source) == evidence:
+            evidence.write_text('{"event":2}')
+        return result
+
+    with patch("ocpp_csms.backup_archive.shutil.copy2", side_effect=changing_copy):
+        with pytest.raises(RuntimeError, match="evidence changed during backup"):
+            archive_before_reset(data, scope="all")
+    assert not list((tmp_path / "data-test-backups").glob("*.tar.gz"))
