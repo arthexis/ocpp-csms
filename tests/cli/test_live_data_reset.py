@@ -33,8 +33,9 @@ def test_live_reset_preserves_other_charger_and_allocator(tmp_path):
     assert not (folder / "101.json").exists()
     assert (folder / "102.json").exists()
     assert result["deleted_json"] == 1
+    assert Path(result["archive"]).is_file()
     assert reset_live_cp(root, "SIM001")["deleted_json"] == 0
-    assert not (tmp_path / "data-test-backups").exists()
+    assert Path(result["archive"]).is_file()
 
 
 def test_live_reset_refuses_open_transaction(tmp_path):
