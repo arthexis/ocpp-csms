@@ -103,14 +103,9 @@ def run_configuration(args: argparse.Namespace) -> int:
 
 
 def _download_charger(args: argparse.Namespace) -> str | None:
-    items = list(args.items)
-    positional = items[1] if len(items) > 1 else None
-    if len(items) > 2:
-        raise ValueError("config download accepts at most one charger")
-    option = args.charger
-    if positional and option:
-        raise ValueError("charger may be provided either positionally or with --cp, not both")
-    return option or positional
+    if len(args.items) != 1:
+        raise ValueError("config download accepts no positional charger; use --cp ID")
+    return args.charger
 
 
 def _connected_charger(data_dir: str) -> str | None:
