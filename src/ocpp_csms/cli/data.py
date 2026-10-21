@@ -136,7 +136,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
     # A crash here leaves some JSON behind; the next invocation removes it.
     for path in selected:
         path.unlink(missing_ok=True)
-    record_reset_state(root, archive_path)
+    _record_reset_checkpoint(root, archive_path)
     return {"decision": "reset", "scope": "cp", "cp": cp,
             "deleted_json": len(selected), "data_dir": str(root), "archive": str(archive_path),
             "preserve": "other charge points, allocator and authentication"}
@@ -219,7 +219,7 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
-        record_reset_state(root, archive_path)
+        _record_reset_checkpoint(root, archive_path)
         return {"decision": "reset", "scope": "cp", "cp": cp,
                 "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
                 "preserve": "other charge points, deployment and authentication configuration"}
@@ -234,9 +234,20 @@ def reset_test_data(data_dir: str | Path, *, all_data: bool = False, cp: str | N
             root.rmdir()
         backup.rename(root)
         raise
-    record_reset_state(root, archive_path)
+    _record_reset_checkpoint(root, archive_path)
     return {"decision": "reset", "scope": "all", "backup": str(backup), "archive": str(archive_path), "data_dir": str(root),
             "preserve": "deployment profile, nginx/TLS and Basic authentication configuration"}
+
+
+def _record_reset_checkpoint(root: Path, archive: Path) -> None:
+    """Preserve a precise recovery instruction if checkpoint creation fails."""
+    try:
+        record_reset_state(root, archive)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise RuntimeError(
+            f"reset completed but undo checkpoint failed; archive preserved at {archive}; "
+            "do not resume charging or modify evidence until manually reconciled"
+        ) from exc
 
 
 def run_data(args: argparse.Namespace) -> int:

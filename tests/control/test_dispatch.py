@@ -130,11 +130,11 @@ async def test_missing_charger_requires_selector_when_multiple_are_connected():
 
 
 @pytest.mark.asyncio
-async def test_legacy_config_positional_charger_is_recognized():
+async def test_config_positional_keys_are_never_charger_selectors():
     session = Session()
     response = await dispatch_control(Registry(session), {"command": "config", "keys": ["charger-a", "HeartbeatInterval"]})
     assert response["ok"] is True
-    assert session.calls == [("config", ["HeartbeatInterval"])]
+    assert session.calls == [("config", ["charger-a", "HeartbeatInterval"])]
 
 
 @pytest.mark.asyncio

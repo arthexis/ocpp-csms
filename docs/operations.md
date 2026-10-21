@@ -178,7 +178,7 @@ ocpp-csms rfid export [CHARGER]
 ocpp-csms rfid version [CHARGER]
 ocpp-csms rfid clear [CHARGER]
 ocpp-csms config [KEY ...] [--cp CHARGE_POINT]
-ocpp-csms config download [CHARGER] [--show-sensitive] [--json] [--output FILE]
+ocpp-csms config download [--cp CHARGER] [--show-sensitive] [--json] [--output FILE]
 ocpp-csms profile templates
 ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
@@ -346,11 +346,11 @@ Examples:
 
 ```bash
 ocpp-csms config download
-ocpp-csms config download CHARGER
-ocpp-csms config download CHARGER --json
-ocpp-csms config download CHARGER --output charger-config.json
-ocpp-csms config download CHARGER --show-sensitive --output charger-config-private.json
-ocpp-csms config download CHARGER
+ocpp-csms config download --cp CHARGER
+ocpp-csms config download --cp CHARGER --json
+ocpp-csms config download --cp CHARGER --output charger-config.json
+ocpp-csms config download --cp CHARGER --show-sensitive --output charger-config-private.json
+ocpp-csms config download --cp CHARGER
 ```
 
 `--output` writes a structured JSON snapshot. Human-readable terminal output remains available unless `--json` is requested.

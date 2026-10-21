@@ -36,6 +36,24 @@ def archive_before_reset(root: Path, *, scope: str, cp: str | None = None) -> Pa
         snapshot = Path(scratch)
         info = inspect_schema(root)
         db_rel = info.path.relative_to(root) if info.exists else None
+        def evidence_fingerprint() -> dict[str, tuple[int, int, int]]:
+            """Detect changed or newly created non-SQLite evidence while copying."""
+            result = {}
+            for item in root.rglob("*"):
+                if item.is_symlink():
+                    raise ValueError("symlinked evidence: backup refused")
+                if not item.is_file():
+                    continue
+                rel = item.relative_to(root).as_posix()
+                if db_rel is not None and rel in {
+                    db_rel.as_posix(), db_rel.as_posix() + "-wal", db_rel.as_posix() + "-shm"
+                }:
+                    continue
+                stat = item.stat()
+                result[rel] = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
+            return result
+
+        before_files = evidence_fingerprint()
         for path in root.rglob("*"):
             if path.is_symlink():
                 raise ValueError("symlinked evidence: backup refused")
@@ -55,6 +73,8 @@ def archive_before_reset(root: Path, *, scope: str, cp: str | None = None) -> Pa
                     src.backup(dst)
                     if dst.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                         raise ValueError("database backup integrity check failed")
+        if evidence_fingerprint() != before_files:
+            raise RuntimeError("evidence changed during backup; reset refused")
         checksums = {}
         for path in sorted(snapshot.rglob("*")):
             if path.is_file():

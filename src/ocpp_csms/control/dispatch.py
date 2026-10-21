@@ -38,12 +38,6 @@ def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tupl
         if not isinstance(charger, str) or not charger:
             return None, normalized, {"error": "invalid_charger"}
         return charger, normalized, None
-    if normalized.get("command") == "config":
-        keys = normalized.get("keys")
-        if isinstance(keys, list) and keys and isinstance(keys[0], str) and keys[0] in connected:
-            charger = keys[0]
-            normalized["keys"] = keys[1:]
-            return charger, normalized, None
     if len(connected) == 1:
         return connected[0], normalized, None
     if not connected:

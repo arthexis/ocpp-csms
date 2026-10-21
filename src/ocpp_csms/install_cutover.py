@@ -55,21 +55,6 @@ def verify_schema_integrity(data_dir: str | Path) -> None:
             raise RuntimeError(f"database integrity check failed: {integrity}")
 
 
-def checkpoint_stopped_storage(data_dir: str | Path) -> None:
-    """Checkpoint a stopped legacy database before moving its directory.
-
-    Caller must have stopped the service; a busy checkpoint is a hard failure.
-    No schema upgrade or migration is performed here.
-    """
-    info = inspect_schema(data_dir)
-    if not info.exists:
-        raise RuntimeError(f"database missing for checkpoint: {info.path}")
-    with closing(sqlite3.connect(f"{info.path.resolve().as_uri()}?mode=rw", uri=True, timeout=0.2)) as db:
-        result = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-        if result is None or result[0] != 0:
-            raise RuntimeError(f"database WAL checkpoint incomplete: {result}")
-
-
 def connection_markers(data_dir: str | Path, expected: tuple[str, ...]) -> dict[str, int]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
@@ -169,9 +154,6 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--storage-root", required=True)
     prepare.add_argument("--active-data-dir")
 
-    checkpoint = subcommands.add_parser("storage-checkpoint")
-    checkpoint.add_argument("--data-dir", required=True)
-
     evidence = subcommands.add_parser("storage-evidence")
     evidence.add_argument("--data-dir", required=True)
 
@@ -191,10 +173,6 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"action": plan.action, "target": str(plan.target),
                               "active_schema": plan.active_schema,
                               "active": str(plan.active) if plan.active else None}, sort_keys=True))
-            return 0
-        if args.command == "storage-checkpoint":
-            checkpoint_stopped_storage(args.data_dir)
-            print("ok")
             return 0
         if args.command == "storage-evidence":
             committed = has_committed_ocpp_evidence(args.data_dir)

@@ -68,7 +68,7 @@ def test_config_download_json_uses_deterministic_emitter(monkeypatch, tmp_path, 
 
     monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", fake_send_control)
     parser, _ = build_parser()
-    args = parser.parse_args(["--data-dir", str(tmp_path), "config", "download", "charger-a", "--json"])
+    args = parser.parse_args(["--data-dir", str(tmp_path), "config", "download", "--cp", "charger-a", "--json"])
     assert run_config_download(args) == 0
     output = capsys.readouterr().out
     assert json.loads(output)["charger"] == "charger-a"
