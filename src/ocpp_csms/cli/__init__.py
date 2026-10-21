@@ -91,10 +91,6 @@ def print_help(parser, commands, topic=None) -> None:
     if topic:
         commands[topic].print_help(); return
     parser.print_help()
-    printed: set[int] = set()
-    for command in commands.values():
-        if id(command) in printed: continue
-        printed.add(id(command)); print(); command.print_help()
 
 
 def main() -> int:
