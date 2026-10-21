@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from ocpp_csms.cli.data import reset_test_data
+from ocpp_csms.reset_undo import undo_reset
 
 
 def test_reset_command_requires_scope_but_not_now(parse_cli):
@@ -163,3 +164,34 @@ def test_archive_failure_aborts_reset_without_mutating(tmp_path):
         with pytest.raises(OSError, match="no disk space"):
             reset_test_data(data, all_data=True)
     assert (data / "marker").read_text() == "preserve"
+
+
+def test_undo_restores_archive_only_when_post_reset_state_unchanged(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "original").write_text("before")
+    with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
+        result = reset_test_data(data, all_data=True)
+    archive = Path(result["archive"])
+    with patch("ocpp_csms.reset_undo.process_is_running", return_value=False), \
+         patch("ocpp_csms.reset_undo.subprocess.run", return_value=SimpleNamespace(returncode=3)):
+        assert undo_reset(data, archive, dry_run=True)["decision"] == "dry-run"
+        assert undo_reset(data, archive)["decision"] == "undo"
+    assert (data / "original").read_text() == "before"
+    assert archive.exists()
+
+
+def test_undo_refuses_new_evidence(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "original").write_text("before")
+    with patch("ocpp_csms.cli.data.process_is_running", return_value=False), \
+         patch("ocpp_csms.cli.data.subprocess.run", return_value=SimpleNamespace(returncode=3)):
+        result = reset_test_data(data, all_data=True)
+    (data / "new-evidence").write_text("after")
+    with patch("ocpp_csms.reset_undo.process_is_running", return_value=False), \
+         patch("ocpp_csms.reset_undo.subprocess.run", return_value=SimpleNamespace(returncode=3)):
+        with pytest.raises(ValueError, match="new or changed evidence"):
+            undo_reset(data, Path(result["archive"]))
+    assert (data / "new-evidence").read_text() == "after"
