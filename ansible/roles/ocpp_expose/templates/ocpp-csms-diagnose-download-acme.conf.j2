@@ -1,0 +1,7 @@
+# Temporary HTTP-only site for the first certificate issuance.
+server {
+    listen 80;
+    server_name {{ ocpp_csms_diagnose_download_host }};
+    location ^~ /.well-known/acme-challenge/ { root /var/www/ocpp-csms-acme; }
+    location / { return 404; }
+}
