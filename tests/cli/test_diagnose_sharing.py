@@ -68,3 +68,31 @@ def test_diagnose_serve_rejects_invalid_cp():
     for value in ("../etc", "CP/other", "x y", ""):
         with pytest.raises(ValueError, match="invalid charge point"):
             sharing._cp(value)
+
+
+def test_legacy_upload_without_cp_requires_exact_getdiagnostics_evidence(monkeypatch, tmp_path):
+    token = "c" * 40
+    data_dir = tmp_path / "state"
+    records = data_dir / "diagnostics-requests"
+    records.mkdir(parents=True)
+    (records / f"{token}.json").write_text(json.dumps({"charger": None}))
+    uploads = tmp_path / "uploads"
+    (uploads / token).mkdir(parents=True)
+    file = uploads / token / "upload.bin"
+    file.write_bytes(b"diagnostics")
+    monkeypatch.setattr(sharing, "ROOT", uploads)
+    from ocpp_csms.evidence import diagnostics
+
+    def evidence(_, *, charger_id, limit):
+        assert limit is None
+        return [{
+            "action": "GetDiagnostics",
+            "direction": "out",
+            "payload": json.dumps({
+                "location": f"https://upload.example.org/ocpp-diagnose/{token}/upload.bin"
+            }) if charger_id == "CP1" else "{}",
+        }]
+
+    monkeypatch.setattr(diagnostics, "events_between", evidence)
+    assert sharing._archive_files(data_dir, "CP1") == [file]
+    assert sharing._archive_files(data_dir, "CP2") == []
