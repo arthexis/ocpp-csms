@@ -223,7 +223,7 @@ class SessionCommands:
         # The ocpp library serializes outgoing CALLs per session. Its default
         # response timeout is 30s; extend only for this call and restore it.
         # 10**9 seconds represents an effectively unbounded wait until disconnect.
-        previous_timeout = self._response_timeout
+        previous_timeout = getattr(self, "_response_timeout", 30)
         self._response_timeout = response_timeout if response_timeout is not None else 10**9
         try:
             response = await self.call(call.GetDiagnosticsPayload(
