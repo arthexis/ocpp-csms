@@ -56,12 +56,23 @@ def test_events_tx_alias_uses_transaction_query(captured_queries):
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
     cli.add_diagnostic_commands(sub)
-    for option in ("--transaction", "--txn", "--tx"):
-        parsed = parser.parse_args(["events", option, "240"])
-        assert parsed.transaction == 240
-        parsed.data_dir = "unused"
-        assert cli.run_events(parsed) == 0
-        assert captured_queries[-1]["transaction_id"] == 240
+    single = parser.parse_args(["events", "--tx", "240"])
+    single.data_dir = "unused"
+    assert cli.run_events(single) == 0
+    assert captured_queries[-1]["transaction_id"] == 240
+    multiple = parser.parse_args(["events", "--txn", "240,241,240"])
+    multiple.data_dir = "unused"
+    assert cli.run_events(multiple) == 0
+    assert captured_queries[-1]["transaction_id"] == (240, 241)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["events", "--tx", "240,241"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["events", "--transaction", "240"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["events", "--txn", "240,"])
+    both = parser.parse_args(["events", "--txn", "240,241", "--tx", "240"])
+    with pytest.raises(ValueError, match="cannot be combined"):
+        cli.run_events(both)
 
 
 def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
