@@ -25,7 +25,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     # ABB firmware posts to a path ending in a slash; nginx forwards POST
     # to the on-demand local receiver. No bearer-capability URL logging.
-    location ~ "^/ocpp-diagnostics/([a-f0-9]{40})/upload\\.bin/$" {
+    location ~ "^/ocpp-diagnose/([a-f0-9]{40})/upload\\.bin/$" {
         access_log off;
         client_max_body_size 100m;
         client_body_timeout 120s;
@@ -38,7 +38,7 @@ server {
         proxy_read_timeout 180s;
         add_header Cache-Control "no-store" always;
     }
-    location ~ "^/ocpp-diagnostics/([a-f0-9]{40})/upload\\.bin$" {
+    location ~ "^/ocpp-diagnose/([a-f0-9]{40})/upload\\.bin$" {
         access_log off;
         client_max_body_size 100m;
         client_body_timeout 120s;
@@ -64,7 +64,7 @@ server {
     # Native nginx WebDAV PUT receiver, isolated from the WebSocket upstream.
     # The unguessable request directory must already exist. No GET/DELETE.
     # Deny replacements, do not log bearer-token URLs.
-    location ~ "^/ocpp-diagnostics/([a-f0-9]{40})/(upload\\.bin|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$" {
+    location ~ "^/ocpp-diagnose/([a-f0-9]{40})/(upload\\.bin|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$" {
         alias /var/lib/ocpp-csms/diagnostics/$1/$2;
         dav_methods PUT;
         create_full_put_path off;
@@ -76,7 +76,7 @@ server {
         if (-e $request_filename) { return 409; }
         add_header Cache-Control "no-store" always;
     }
-    location /ocpp-diagnostics/ { return 404; }
+    location /ocpp-diagnose/ { return 404; }
     location / {
         limit_req zone=ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }} burst=20 nodelay;
         limit_req_status 429;
