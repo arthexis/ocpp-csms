@@ -18,3 +18,10 @@ def record_runtime_event(tmp_path):
             return int(cursor.lastrowid)
 
     return record
+
+
+@pytest.fixture
+def cli_parser():
+    """Real production CLI parser, shared by command-level tests."""
+    from ocpp_csms.cli import build_parser
+    return build_parser()[0]
