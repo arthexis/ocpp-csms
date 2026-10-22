@@ -115,6 +115,7 @@ def serve(data_dir: str | Path, cp: str) -> dict:
     auth = AUTH_DIR / f"{cp}.htpasswd"
     previous_conf = conf.read_text(encoding="utf-8") if conf.exists() else None
     previous_auth = auth.read_text(encoding="utf-8") if auth.exists() else None
+    swapped = False
     try:
         os.chmod(pending, 0o750)
         os.chown(pending, 0, grp.getgrnam("www-data").gr_gid)
@@ -144,6 +145,7 @@ def serve(data_dir: str | Path, cp: str) -> dict:
         if destination.exists():
             destination.rename(backup)
         pending.rename(destination)
+        swapped = True
         _reload()
     except Exception:
         if previous_conf is None:
@@ -154,7 +156,7 @@ def serve(data_dir: str | Path, cp: str) -> dict:
             auth.unlink(missing_ok=True)
         else:
             _replace_file(auth, previous_auth)
-        if destination.exists():
+        if swapped and destination.exists():
             shutil.rmtree(destination)
         if backup.exists():
             backup.rename(destination)
