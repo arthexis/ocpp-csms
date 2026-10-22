@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ocpp_csms.cli import build_parser, diagnostics as cli
+from ocpp_csms.cli import diagnostics as cli
 from ocpp_csms.evidence import diagnostics
 
 from ocpp_csms.evidence.diagnostics import format_events
@@ -293,7 +293,7 @@ def test_meter_transaction_lifecycle_breaks_grouping():
     assert "StopTransaction" in output
 
 
-def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch, capsys):
+def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch, capsys, cli_parser):
     source = [meter(1), meter(2, response=True), meter(3), meter(4, response=True)]
     observed_limits = []
 
@@ -305,8 +305,7 @@ def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch,
     emitted = []
     monkeypatch.setattr(cli, "emit_json", emitted.append)
 
-    parser, _ = build_parser()
-    args = parser.parse_args(["--data-dir", "/unused", "events", "--cp", "CP1", "--limit", "4"])
+    args = cli_parser.parse_args(["--data-dir", "/unused", "events", "--cp", "CP1", "--limit", "4"])
     assert cli.run_events(args) == 0
     assert "MeterValues C1 tx=42 ↔ ×2" in capsys.readouterr().out
     args.verbose = True
@@ -364,7 +363,7 @@ def test_meter_leading_missing_response_not_counted_as_exchange():
     assert "↔ ×3" not in output
 
 
-def test_transaction_cli_events_uses_request_only_compaction(monkeypatch):
+def test_transaction_cli_events_uses_request_only_compaction(monkeypatch, cli_parser):
     from ocpp_csms.cli import transactions
     class FakeQuery:
         def __init__(self, data_dir):
@@ -374,7 +373,7 @@ def test_transaction_cli_events_uses_request_only_compaction(monkeypatch):
     monkeypatch.setattr(transactions, "TransactionQuery", FakeQuery)
     monkeypatch.setattr(transactions, "format_transaction", lambda view, **kw: "Transaction detail")
     monkeypatch.setattr(transactions, "transaction_events", lambda *a: [meter(1), meter(2), meter(3)])
-    args = build_parser()[0].parse_args(["--data-dir", "/unused", "txn", "42", "--events"])
+    args = cli_parser.parse_args(["--data-dir", "/unused", "txn", "42", "--events"])
     result = transactions.run_transactions(args)
     assert "Transaction detail" in result
     assert "requests (responses not established) ×3" in result
