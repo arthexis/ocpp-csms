@@ -83,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
                 raw = temporary.read_bytes()
                 message = BytesParser(policy=email.policy.default).parsebytes(
                     b"Content-Type: " + content_type.encode("ascii", errors="ignore") +
-                    b"\\r\\nMIME-Version: 1.0\\r\\n\\r\\n" + raw
+                    b"\r\nMIME-Version: 1.0\r\n\r\n" + raw
                 )
                 parts = [part for part in message.iter_parts() if part.get_filename()]
                 if not message.is_multipart() or len(parts) != 1:
