@@ -339,9 +339,9 @@
       become: true
       ansible.builtin.command:
         argv: [systemctl, is-active, ocpp-csms-diagnose.socket]
-      register: ocpp_diagnose_socket_state
+      register: ocpp_expose_diagnose_socket_state
       changed_when: false
-      failed_when: ocpp_diagnose_socket_state.stdout | trim != 'active'
+      failed_when: ocpp_expose_diagnose_socket_state.stdout | trim != 'active'
 
     - name: Confirm socket activation serves the receiver HTTP protocol
       become: true
