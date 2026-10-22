@@ -47,6 +47,21 @@ if [ "$uninstall" -eq 1 ]; then
     exec ansible-playbook "$ROOT/ansible/playbooks/uninstall.yml" -i localhost, -c local
 fi
 
+# Persisted configuration is authoritative; older installations fall back to
+# inspecting the currently enabled managed nginx configuration.
+configured_exposure() {
+    config=/etc/ocpp-csms/exposure.toml
+    if [ -f "$config" ]; then
+        value=$(sed -n 's/^hostname[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "$config")
+        case "$value" in
+            *[!a-z0-9.-]*|.*|*..*|'' ) printf 'Invalid managed exposure configuration: %s\\n' "$config" >&2; return 2 ;;
+            *.*) printf '%s' "$value"; return 0 ;;
+            *) printf 'Invalid managed exposure hostname in %s\\n' "$config" >&2; return 2 ;;
+        esac
+    fi
+    recover_exposure
+}
+
 # Recover an existing CSMS public hostname only from managed nginx sites.
 # Refuse ambiguous installations; never guess from generic system hostnames.
 recover_exposure() {
@@ -86,7 +101,7 @@ fi
 # site after the application install; do not create exposure on private hosts.
 recovered_expose=""
 if [ -z "$expose" ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ]; then
-    recovered_expose=$(recover_exposure) || exit $?
+    recovered_expose=$(configured_exposure) || exit $?
 fi
 
 if [ -n "$expose" ]; then
