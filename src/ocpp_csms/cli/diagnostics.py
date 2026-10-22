@@ -117,7 +117,7 @@ def run_events(args: argparse.Namespace) -> int:
         args.data_dir, charger_id=args.charger, transaction_id=args.transaction,
         since=since.isoformat() if since else None,
         until=until.isoformat() if until else None, limit=count,
-        no_status=args.no_status,
+        no_status=getattr(args, 'no_status', False),
     )
     if getattr(args, "follow", False):
         from ocpp_csms.cli.event_follow import follow_events
