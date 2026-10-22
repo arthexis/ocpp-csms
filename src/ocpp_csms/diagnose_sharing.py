@@ -6,6 +6,7 @@ Mutations require root; there is no permanently running application process.
 from __future__ import annotations
 
 import json
+import grp
 import os
 import re
 import secrets
@@ -79,7 +80,7 @@ def _replace_file(path: Path, content: str, mode: int = 0o640) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as output:
             output.write(content)
         os.chmod(name, mode)
-        os.chown(name, 0, shutil._get_gid("www-data") if hasattr(shutil, "_get_gid") else __import__("grp").getgrnam("www-data").gr_gid)
+        os.chown(name, 0, grp.getgrnam("www-data").gr_gid)
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
@@ -116,11 +117,12 @@ def serve(data_dir: str | Path, cp: str) -> dict:
     previous_auth = auth.read_text(encoding="utf-8") if auth.exists() else None
     try:
         os.chmod(pending, 0o750)
-        os.chown(pending, 0, __import__("grp").getgrnam("www-data").gr_gid)
+        os.chown(pending, 0, grp.getgrnam("www-data").gr_gid)
         for index, source in enumerate(sources, 1):
-            ext = ".zip" if source.open("rb").read(4).startswith(b"PK\\x03\\x04") else ".bin"
+            with source.open("rb") as stream:
+                ext = ".zip" if stream.read(4) == b"PK\\x03\\x04" else ".bin"
             target = pending / f"diagnostic-{index:03d}{ext}"
-            shutil.copyfile(source, target, follow_symlinks=False)
+            shutil.copyfile(source, target)
             os.chmod(target, 0o640)
             os.chown(target, 0, __import__("grp").getgrnam("www-data").gr_gid)
         AUTH_DIR.mkdir(parents=True, exist_ok=True, mode=0o750)
