@@ -27,6 +27,7 @@ def events_between(
     since: str | None = None,
     until: str | None = None,
     limit: int | None = 200,
+    no_status: bool = False,
 ) -> list[sqlite3.Row]:
     since = _time(since) if since else None
     until = _time(until) if until else None
@@ -54,6 +55,7 @@ def events_between(
               AND (? IS NULL OR transaction_id = ?)
               AND (? IS NULL OR occurred_at >= ?)
               AND (? IS NULL OR occurred_at <= ?)
+              AND (NOT ? OR kind != 'ocpp' OR action NOT IN ('Heartbeat', 'MeterValues'))
             ORDER BY occurred_at DESC, id DESC
             LIMIT ?
             """,
@@ -66,6 +68,7 @@ def events_between(
                 since,
                 until,
                 until,
+                int(no_status),
                 limit if limit is not None else -1,
             ),
         ).fetchall()
