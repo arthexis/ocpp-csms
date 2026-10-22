@@ -57,7 +57,7 @@ def prepare(data_dir: str | Path, charger: str | None) -> tuple[dict, str]:
     }
     _save(_records(data_dir) / (token + ".json"), record)
     # nginx only permits a PUT to an existing request directory; unknown IDs fail.
-    url = f"https://{settings['hostname']}/ocpp-diagnostics/{token}/upload.bin"
+    url = f"https://{settings['hostname']}/ocpp-diagnose/{token}/upload.bin"
     return record, url
 
 
