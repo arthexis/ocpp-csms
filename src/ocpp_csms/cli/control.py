@@ -22,7 +22,7 @@ def add_control_commands(
     add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
 
     reset = subcommands.add_parser("reset", help="Request charger reset")
-    add_cp(reset, help="Charge point ID (optional when exactly one charger is connected)")
+    add(reset, "--cp", dest="charger_option", help="Charge point ID (optional with one connection)")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
     return {"start": start, "reset": reset}
