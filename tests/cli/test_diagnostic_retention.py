@@ -17,7 +17,6 @@ def test_received_archive_and_request_metadata_are_preserved(monkeypatch, tmp_pa
     record = records / f"{token}.json"
     record.write_text(json.dumps({
         "id": token, "charger": "CP1", "created_at": created.isoformat(),
-        "expires_at": (created + timedelta(hours=2)).isoformat(),
         "result": "requested",
     }))
     monkeypatch.setattr(diagnostic_upload, "ROOT", root)
