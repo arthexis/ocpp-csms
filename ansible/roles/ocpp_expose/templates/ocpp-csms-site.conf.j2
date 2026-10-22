@@ -26,7 +26,7 @@ server {
     # Native nginx WebDAV PUT receiver, isolated from the WebSocket upstream.
     # The unguessable request directory must already exist. No GET/DELETE.
     # Deny replacements, do not log bearer-token URLs.
-    location ~ ^/ocpp-diagnostics/([a-f0-9]{40})/(upload\\.bin|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$ {
+    location ~ "^/ocpp-diagnostics/([a-f0-9]{40})/(upload\\.bin|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$" {
         alias /var/lib/ocpp-csms/diagnostics/$1/$2;
         dav_methods PUT;
         create_full_put_path off;
