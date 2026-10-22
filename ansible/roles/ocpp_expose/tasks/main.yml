@@ -335,6 +335,31 @@
         name: nginx
         state: reloaded
         enabled: true
+    - name: Verify diagnostic receiver socket is enabled and listening
+      become: true
+      ansible.builtin.command:
+        argv: [systemctl, is-active, ocpp-csms-diagnose.socket]
+      register: ocpp_diagnose_socket_state
+      changed_when: false
+      failed_when: ocpp_diagnose_socket_state.stdout | trim != 'active'
+
+    - name: Confirm socket activation serves the receiver HTTP protocol
+      become: true
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            import socket
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.settimeout(10)
+                sock.connect("/run/ocpp-csms-diagnose.sock")
+                sock.sendall(b"GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n")
+                response = sock.recv(256)
+            if not response.startswith(b"HTTP/1.1 405 "):
+                raise SystemExit("diagnose receiver did not respond with HTTP 405")
+      changed_when: false
+
   rescue:
     - name: Restore previous nginx site
       become: true
