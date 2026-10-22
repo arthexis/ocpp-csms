@@ -122,7 +122,7 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
         try:
             entry = json.loads(file.read_text(encoding="utf-8"))
             directory = archive_directory(file.stem)
-            uploads = [p for p in directory.iterdir() if p.is_file() and not p.is_symlink()] if directory.is_dir() else []
+            uploads = [p for p in directory.iterdir() if p.name == "upload.bin" and p.is_file() and not p.is_symlink()] if directory.is_dir() else []
             entry["files"] = [{"name": p.name, "bytes": p.stat().st_size} for p in uploads]
             entry["notifications"] = _notifications(data_dir, entry.get("charger"), entry["created_at"])
             if uploads:
