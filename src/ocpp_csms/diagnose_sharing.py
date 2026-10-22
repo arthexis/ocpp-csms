@@ -120,23 +120,23 @@ def serve(data_dir: str | Path, cp: str) -> dict:
         os.chown(pending, 0, grp.getgrnam("www-data").gr_gid)
         for index, source in enumerate(sources, 1):
             with source.open("rb") as stream:
-                ext = ".zip" if stream.read(4) == b"PK\\x03\\x04" else ".bin"
+                ext = ".zip" if stream.read(4) == bytes((80, 75, 3, 4)) else ".bin"
             target = pending / f"diagnostic-{index:03d}{ext}"
             shutil.copyfile(source, target)
             os.chmod(target, 0o640)
-            os.chown(target, 0, __import__("grp").getgrnam("www-data").gr_gid)
+            os.chown(target, 0, grp.getgrnam("www-data").gr_gid)
         AUTH_DIR.mkdir(parents=True, exist_ok=True, mode=0o750)
         _replace_file(auth, f"{cp}:{hashed}\n")
         # Separate exact location and credentials prevent one CP from browsing another.
         snippet = (
-            f"location ^~ /{cp}/ {{\n"
-            f"    alias {PUBLIC_ROOT}/{cp}/;\n"
-            f"    autoindex on;\n"
-            f"    auth_basic \\"OCPP diagnostics\\";\n"
-            f"    auth_basic_user_file {auth};\n"
-            f"    limit_except GET {{ deny all; }}\n"
-            f"    add_header Cache-Control \\"private, no-store\\" always;\n"
-            f"}}\n"
+            f"location ^~ /{cp}/ {{\\n"
+            f"    alias {PUBLIC_ROOT}/{cp}/;\\n"
+            "    autoindex on;\\n"
+            '    auth_basic "OCPP diagnostics";\\n'
+            f"    auth_basic_user_file {auth};\\n"
+            "    limit_except GET { deny all; }\\n"
+            '    add_header Cache-Control "private, no-store" always;\\n'
+            "}\\n"
         )
         _replace_file(conf, snippet, 0o644)
         if backup.exists():
