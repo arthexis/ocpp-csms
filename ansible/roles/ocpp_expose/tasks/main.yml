@@ -210,40 +210,28 @@
     group: root
     mode: "0644"
 
-- name: Install HTTPS diagnostic cleanup service
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/ocpp-csms-diagnostics-prune.service
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Prune expired OCPP diagnostic uploads
-      [Service]
-      Type=oneshot
-      User={{ ansible_user_id }}
-      ExecStart={{ ocpp_expose_runtime_command }} diagnose prune
-
-- name: Install HTTPS diagnostic cleanup timer
-  become: true
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/ocpp-csms-diagnostics-prune.timer
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Prune expired OCPP diagnostic uploads periodically
-      [Timer]
-      OnCalendar=hourly
-      Persistent=true
-      [Install]
-      WantedBy=timers.target
-
-- name: Enable HTTPS diagnostic cleanup timer
+- name: Stop and disable legacy diagnostic cleanup timer
   become: true
   ansible.builtin.systemd_service:
     name: ocpp-csms-diagnostics-prune.timer
-    state: started
-    enabled: true
+    state: stopped
+    enabled: false
+  when: ansible_facts.services is not defined or 'ocpp-csms-diagnostics-prune.timer' in ansible_facts.services
+  failed_when: false
+
+- name: Remove obsolete diagnostic cleanup units
+  become: true
+  ansible.builtin.file:
+    path: "/etc/systemd/system/ocpp-csms-diagnostics-prune.{{ item }}"
+    state: absent
+  loop: [timer, service]
+
+- name: Reload systemd after removing obsolete cleanup units
+  become: true
+  ansible.builtin.systemd_service:
     daemon_reload: true
+    name: ocpp-csms.service
+  changed_when: false
 
 - name: Install socket-activated POST receiver service
   become: true
