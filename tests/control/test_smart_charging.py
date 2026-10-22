@@ -236,3 +236,18 @@ async def test_get_composite_schedule_preserves_semantic_response_and_evidence(c
     assert [row[0] for row in rows] == ["out", "in"]
     assert "3600" in rows[0][1]
     assert "60000" in rows[1][1]
+
+
+@pytest.mark.asyncio
+async def test_get_composite_schedule_reports_missing_response(charge_point_session):
+    session = charge_point_session
+
+    async def no_response(payload):
+        return None
+
+    session.call = no_response
+    with pytest.raises(ValueError, match="charger returned no GetCompositeSchedule response"):
+        await session.get_composite_schedule(0, 3600, "W")
+    rows = evidence(session, "GetCompositeSchedule")
+    assert [row[0] for row in rows] == ["out", "in"]
+    assert "missing_response" in rows[1][1]
