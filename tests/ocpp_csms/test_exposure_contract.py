@@ -53,3 +53,14 @@ def test_install_expose_and_uninstall_are_independent():
     assert (ROOT / "ansible/playbooks/install.yml").exists()
     assert (ROOT / "ansible/playbooks/expose.yml").exists()
     assert (ROOT / "ansible/playbooks/uninstall.yml").exists()
+
+
+def test_nginx_dav_regex_quantifiers_are_quoted():
+    """Unquoted {40} is interpreted as nginx syntax, truncating the PCRE2 regex."""
+    content = SITE.read_text()
+    locations = [line.strip() for line in content.splitlines() if "location ~ " in line and "/ocpp-diagnostics/" in line]
+    assert len(locations) == 1
+    assert locations[0].startswith('location ~ "^/ocpp-diagnostics/')
+    assert '{40}' in locations[0]
+    assert '{0,99}' in locations[0]
+    assert locations[0].endswith('$" {')

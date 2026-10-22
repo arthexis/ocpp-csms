@@ -319,6 +319,24 @@
       ansible.builtin.fail:
         msg: WSS promotion failed; previous nginx site restored where available.
 
+- name: Persist successfully activated exposure hostname
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Save authoritative exposure selection
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/ocpp-csms/exposure.toml
+    content: "hostname = {{ ocpp_csms_expose | to_json }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Configure certificate renewal nginx reload hook
   become: true
   ansible.builtin.template:
