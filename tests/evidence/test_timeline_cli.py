@@ -52,6 +52,18 @@ def test_parser_accepts_verbose():
     assert parser.parse_args(["events", "--detail"]).detail is True
 
 
+def test_events_tx_alias_uses_transaction_query(captured_queries):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    cli.add_diagnostic_commands(sub)
+    for option in ("--transaction", "--txn", "--tx"):
+        parsed = parser.parse_args(["events", option, "240"])
+        assert parsed.transaction == 240
+        parsed.data_dir = "unused"
+        assert cli.run_events(parsed) == 0
+        assert captured_queries[-1]["transaction_id"] == 240
+
+
 def test_cli_modes_use_identical_retrieval_and_limit(monkeypatch, capsys):
     observed = []
     stored = [event(1), event(2), event(3)]
