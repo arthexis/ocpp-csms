@@ -71,6 +71,8 @@ def run_https_diagnostics(args):
                 outcome["payload"] = maintenance_control(
                     args.data_dir, request_payload, malformed="invalid GetDiagnostics response"
                 )
+                if not isinstance(outcome["payload"], dict):
+                    raise ValueError("invalid diagnostics response")
                 diagnostic_upload.record_response(args.data_dir, record["id"], outcome["payload"])
             except (MaintenanceControlError, ValueError, OSError):
                 # Never print original exception; it can contain the bearer URL.
