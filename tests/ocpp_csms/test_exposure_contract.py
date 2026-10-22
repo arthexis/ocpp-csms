@@ -70,13 +70,20 @@ def test_nginx_dav_regex_quantifiers_are_quoted():
 def test_expose_checks_socket_activation_before_success():
     """The nginx expose role must reject a missing or broken diagnose process."""
     tasks = TASKS.read_text()
-    socket_check = tasks.index("Verify diagnostic receiver socket is enabled and listening")
-    smoke = tasks.index("Confirm socket activation serves the receiver HTTP protocol")
-    rollback = tasks.index("  rescue:\n    - name: Restore previous nginx site")
-    assert socket_check < smoke < rollback
-    assert "ocpp-csms-diagnose.socket" in tasks[socket_check:smoke]
-    assert "/run/ocpp-csms-diagnose.sock" in tasks[smoke:rollback]
-    assert "HTTP/1.1 405 " in tasks[smoke:rollback]
+    before_socket, socket_and_later = tasks.split(
+        "Verify diagnostic receiver socket is enabled and listening", 1
+    )
+    socket_config, smoke_and_later = socket_and_later.split(
+        "Confirm socket activation serves the receiver HTTP protocol", 1
+    )
+    smoke_check, rollback = smoke_and_later.split(
+        "  rescue:\n    - name: Restore previous nginx site", 1
+    )
+    assert "Promote validated public WSS site with rollback" in before_socket
+    assert "ocpp-csms-diagnose.socket" in socket_config
+    assert "/run/ocpp-csms-diagnose.sock" in smoke_check
+    assert "HTTP/1.1 405 " in smoke_check
+    assert "Reload restored nginx configuration" in rollback
 
 
 def test_normal_deployment_refreshes_existing_exposure():
