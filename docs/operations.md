@@ -881,7 +881,6 @@ that nginx stored a file.
 Provision the separate read-only nginx host with DNS pointing at this server:
 
 ```bash
-./deploy.sh --expose YOUR_EXISTING_CSMS_HOST --diagnose-download-host diagnose.gelectriic.com --email YOUR_CERTBOT_EMAIL
 ```
 
 This passes the optional Ansible setting `ocpp_expose_diagnose_download_host`. The download site requires its own TLS certificate.
@@ -892,9 +891,6 @@ configuration and HTTP Basic credentials. The same `--data-dir` as the running C
 must be selected (normally discovered from its systemd unit):
 
 ```bash
-sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --cp T175-IT1-0620-055
-sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --status --cp T175-IT1-0620-055
-sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --revoke --cp T175-IT1-0620-055
 ```
 
 `serve` prints the HTTPS URL, CP ID username, and a fresh random password exactly
