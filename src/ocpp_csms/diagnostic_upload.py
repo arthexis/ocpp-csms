@@ -108,3 +108,47 @@ def remove_expired(data_dir: str | Path) -> int:
         (_records(data_dir) / (token + ".json")).unlink(missing_ok=True)
         count += 1
     return count
+
+
+def inspect_file(path: Path, *, max_members: int = 32, max_read: int = 262144) -> list[str]:
+    """Bounded, non-executing log inspection of a received archive or plain text."""
+    import io
+    import tarfile
+    import zipfile
+
+    terms = ("fault", "error", "alarm", "emergency", "failure")
+    output: list[str] = []
+
+    def scan(name: str, data: bytes) -> None:
+        if len(output) >= 20:
+            return
+        if b"\\x00" in data[:256]:
+            return
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            if any(term in line.lower() for term in terms):
+                output.append(f"{name}: {line[:240]}")
+                if len(output) >= 20:
+                    break
+
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for member in archive.infolist()[:max_members]:
+                    if member.is_dir() or member.file_size > max_read:
+                        continue
+                    with archive.open(member) as stream:
+                        scan(member.filename, stream.read(max_read))
+        elif tarfile.is_tarfile(path):
+            with tarfile.open(path, "r:*") as archive:
+                for member in archive.getmembers()[:max_members]:
+                    if not member.isfile() or member.size > max_read:
+                        continue
+                    stream = archive.extractfile(member)
+                    if stream is not None:
+                        with stream:
+                            scan(member.name, stream.read(max_read))
+        elif path.stat().st_size <= max_read:
+            scan(path.name, path.read_bytes())
+    except (OSError, ValueError, tarfile.TarError, zipfile.BadZipFile):
+        return ["Unable to inspect archive; original file preserved."]
+    return output
