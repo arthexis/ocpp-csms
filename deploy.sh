@@ -16,6 +16,7 @@ fi
 playbook="$ROOT/ansible/playbooks/install.yml"
 expose=""
 email=""
+diagnose_download_host=""
 no_certbot=0
 uninstall=0
 dev=0
@@ -23,12 +24,13 @@ stage_only=0
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --expose|--email)
+        --expose|--email|--diagnose-download-host)
             [ "$#" -ge 2 ] || { printf 'Missing value for %s.\n' "$1" >&2; exit 2; }
-            if [ "$1" = --expose ]; then expose=$2; else email=$2; fi
+            if [ "$1" = --expose ]; then expose=$2; elif [ "$1" = --email ]; then email=$2; else diagnose_download_host=$2; fi
             shift 2 ;;
         --expose=*) expose=${1#--expose=}; shift ;;
         --email=*) email=${1#--email=}; shift ;;
+        --diagnose-download-host=*) diagnose_download_host=${1#--diagnose-download-host=}; shift ;;
         --no-certbot) no_certbot=1; shift ;;
         --uninstall) uninstall=1; shift ;;
         --dev) dev=1; shift ;;
@@ -93,7 +95,7 @@ recover_exposure() {
     return 0
 }
 
-if [ -n "$email" ] || [ "$no_certbot" -eq 1 ]; then
+if [ -n "$email" ] || [ -n "$diagnose_download_host" ] || [ "$no_certbot" -eq 1 ]; then
     [ -n "$expose" ] || { printf '%s\n' '--email and --no-certbot require --expose.' >&2; exit 2; }
 fi
 
@@ -113,6 +115,7 @@ if [ -n "$expose" ]; then
     playbook="$ROOT/ansible/playbooks/expose.yml"
     set -- -e "ocpp_csms_expose=$expose" "$@"
     if [ -n "$email" ]; then set -- -e "ocpp_csms_certbot_email=$email" "$@"; fi
+    if [ -n "$diagnose_download_host" ]; then set -- -e "ocpp_expose_diagnose_download_host=$diagnose_download_host" "$@"; fi
     if [ "$no_certbot" -eq 1 ]; then set -- -e ocpp_csms_no_certbot=true "$@"; fi
 fi
 
