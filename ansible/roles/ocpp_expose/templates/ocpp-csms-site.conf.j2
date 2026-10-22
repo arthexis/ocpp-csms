@@ -42,6 +42,7 @@ server {
         access_log off;
         client_max_body_size 100m;
         client_body_timeout 120s;
+        error_page 418 = @ocpp_diagnose_post;
         if ($request_method = POST) { return 418; }
         alias /var/lib/ocpp-csms/diagnostics/$1/upload.bin;
         dav_methods PUT;
@@ -50,6 +51,15 @@ server {
         if ($request_method != PUT) { return 405; }
         if (-e $request_filename) { return 409; }
         add_header Cache-Control "no-store" always;
+    }
+    location @ocpp_diagnose_post {
+        access_log off;
+        client_max_body_size 100m;
+        proxy_pass http://unix:/run/ocpp-csms-diagnose.sock:;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_request_buffering on;
+        proxy_read_timeout 180s;
     }
     # Native nginx WebDAV PUT receiver, isolated from the WebSocket upstream.
     # The unguessable request directory must already exist. No GET/DELETE.
