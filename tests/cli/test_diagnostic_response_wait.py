@@ -59,3 +59,32 @@ def test_timeout_record_preserved(tmp_path, monkeypatch):
     diagnostic_upload.mark_timeout(tmp_path, record["id"])
     results = diagnostic_upload.list_requests(tmp_path, charger="charger-1")
     assert results[0]["result"] == "response_unconfirmed"
+
+def test_request_parser_follow_limit():
+    from ocpp_csms.cli import build_parser
+    parser, _ = build_parser()
+    args = parser.parse_args(["diagnose", "request", "--follow", "--limit", "90"])
+    assert args.follow is True
+    assert args.limit == 90
+    assert parser.parse_args(["diagnose", "request"]).limit is None
+
+
+def test_independent_upload_notification_without_callresult(tmp_path, monkeypatch, capsys):
+    from ocpp_csms.cli import charger_diagnostics
+    from types import SimpleNamespace
+    root = tmp_path / "uploads"
+    root.mkdir()
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"hostname":"example.com"}')
+    monkeypatch.setattr(diagnostic_upload, "ROOT", root)
+    monkeypatch.setattr(diagnostic_upload, "CONFIG", cfg)
+    monkeypatch.setattr(diagnostic_upload, "_notifications", lambda *args: [{"at":"2026-10-22T03:41:47Z","status":"Uploading"}])
+    def missing_result(*args, **kwargs):
+        raise AssertionError("CALLRESULT should not be necessary")
+    # The dispatch worker may continue independently; this assertion only
+    # needs the Uploading evidence, not a synchronous control response.
+    monkeypatch.setattr(charger_diagnostics, "maintenance_control", lambda *args, **kwargs: __import__("time").sleep(1))
+    args = SimpleNamespace(diagnostic_operation="request", limit=3, follow=False, charger="charger-1",
+        data_dir=tmp_path, since=None, until=None, retries=None, retry_interval=None, json=False)
+    assert charger_diagnostics.run_https_diagnostics(args) == 0
+    assert "Uploading" in capsys.readouterr().out
