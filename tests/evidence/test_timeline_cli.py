@@ -46,8 +46,8 @@ def query_events(captured_queries, **options):
     cli.run_events(args(**options))
     return captured_queries[-1]
 
-def test_parser_accepts_verbose():
-    parser, _ = build_parser()
+def test_parser_accepts_verbose(cli_parser):
+    parser = cli_parser
     parsed = parser.parse_args(["events", "--cp", "CP1", "--verbose", "--limit", "2"])
     assert parsed.command == "events"
     assert parsed.charger == "CP1"
@@ -212,8 +212,8 @@ def test_invalid_event_limits(monkeypatch, limit):
         cli.run_events(args(limit=limit))
 
 
-def test_short_limit_alias_matches_long_flag(monkeypatch):
-    parser, _ = build_parser()
+def test_short_limit_alias_matches_long_flag(monkeypatch, cli_parser):
+    parser = cli_parser
     recorded = []
     monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: recorded.append(kw) or [])
     for value in ("50", "1d", "1.5h"):
@@ -228,8 +228,8 @@ def test_short_limit_alias_matches_long_flag(monkeypatch):
             assert abs((datetime.fromisoformat(short["since"]) - datetime.fromisoformat(long["since"])).total_seconds()) < 1
 
 
-def test_parser_default_limit_is_implicit():
-    parser, _ = build_parser()
+def test_parser_default_limit_is_implicit(cli_parser):
+    parser = cli_parser
     assert parser.parse_args(["events"]).limit is None
 
 
@@ -245,8 +245,8 @@ def test_default_and_explicit_count_limit(captured_queries):
     assert query_events(captured_queries, since="7d", limit="50")["limit"] == 50
 
 
-def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries):
-    parser, _ = build_parser()
+def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries, cli_parser):
+    parser = cli_parser
     for flags, expected in (
         (["events"], 200),
         (["events", "--since", "7d"], None),
@@ -257,8 +257,8 @@ def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries):
         assert captured_queries[-1]["limit"] == expected
 
 
-def test_no_limit_aliases_disable_count_cap(captured_queries):
-    parser, _ = build_parser()
+def test_no_limit_aliases_disable_count_cap(captured_queries, cli_parser):
+    parser = cli_parser
     for flag in ("--no-limit", "-N"):
         parsed = parser.parse_args(["events", "--since", "3d", flag])
         cli.run_events(parsed)
@@ -266,8 +266,8 @@ def test_no_limit_aliases_disable_count_cap(captured_queries):
         assert captured_queries[-1]["since"] is not None
 
 
-def test_no_limit_conflicts_with_explicit_limit():
-    parser, _ = build_parser()
+def test_no_limit_conflicts_with_explicit_limit(cli_parser):
+    parser = cli_parser
     for explicit in ("--limit", "-n"):
         with pytest.raises(SystemExit):
             parser.parse_args(["events", explicit, "10", "--no-limit"])
