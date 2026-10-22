@@ -99,3 +99,17 @@ def test_events_tx_aliases(cli_parser):
         args = cli_parser.parse_args(["events", name, "42", "--exclude", "He"])
         assert args.transaction == 42
         assert args.exclude == "He"
+
+
+def test_events_filters_with_follow_poll_and_cursor(tmp_path):
+    from ocpp_csms.cli.event_follow import _new_events
+    store = EventStore(tmp_path)
+    cursor = {"ocpp": 0, "runtime": 0}
+    store.record_ocpp("A", "Heartbeat", {})
+    store.record_ocpp("A", "MeterValues", {"transaction_id": 8})
+    store.record_ocpp("A", "StopTransaction", {"transaction_id": 8})
+    rows = _new_events(tmp_path, cursor, charger_id="A", transaction_id=8,
+                       only=("values", "transaction"), exclude=("values",))
+    assert [row["action"] for row in rows] == ["StopTransaction"]
+    assert cursor["ocpp"] == 3
+    assert _new_events(tmp_path, cursor, only=("stop",)) == []
