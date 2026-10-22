@@ -28,6 +28,18 @@ def test_events_filter_by_charger(tmp_path):
     assert rows[0]["charger_id"] == "charger-b"
 
 
+def test_events_filter_multiple_transactions_before_limit(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "MeterValues", {}, transaction_id=240)
+    store.record_ocpp("charger-a", "MeterValues", {}, transaction_id=241)
+    store.record_ocpp("charger-a", "MeterValues", {}, transaction_id=242)
+    store.record_ocpp("charger-a", "Heartbeat", {})
+    rows = events_between(tmp_path, transaction_id=(240, 241), limit=2)
+    assert {row["transaction_id"] for row in rows} == {240, 241}
+    assert len(rows) == 2
+    assert len(events_between(tmp_path, transaction_id=240)) == 1
+
+
 def test_explain_supports_at_and_explicit_range(tmp_path):
     store = EventStore(tmp_path)
     store.record_ocpp("charger-a", "Authorize", {"id_tag": "card-a"})
