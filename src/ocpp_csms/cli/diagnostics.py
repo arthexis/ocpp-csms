@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 
 from ocpp_csms.cli.transactions import resolve_time
+from ocpp_csms.cli.options import add_cp, add_json
 
 from ocpp_csms.evidence.diagnostics import events_between, explain, format_events, fault_events, format_faults
 from ocpp_csms.evidence.contracts import events_contract, raw_events_contract
