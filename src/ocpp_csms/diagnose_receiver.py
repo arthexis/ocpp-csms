@@ -1,7 +1,7 @@
 """Socket-activated, loopback-only HTTP POST upload receiver for charger diagnostics.
 
 nginx validates the public URL, terminates TLS and enforces the body limit.
-This receiver independently validates paths, expiry, type, size and storage.
+This receiver independently validates paths, type, size and storage.
 """
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import os
 import re
 import socket
 import tempfile
-from datetime import datetime, timezone
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
