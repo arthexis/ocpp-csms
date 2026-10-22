@@ -38,7 +38,7 @@ def submit(server, method, path, body=b"", content_type="application/octet-strea
 
 def test_abb_post_with_trailing_slash_stores_raw_file(receiver):
     server, root = receiver
-    path = f"/ocpp-diagnostics/{TOKEN}/upload.bin/"
+    path = f"/ocpp-diagnose/{TOKEN}/upload.bin/"
     assert submit(server, "POST", path, b"ABB logs") == 201
     assert (root / TOKEN / "upload.bin").read_bytes() == b"ABB logs"
     assert submit(server, "POST", path, b"retry") == 409
@@ -50,17 +50,17 @@ def test_post_without_trailing_slash_and_multipart(receiver):
     boundary = "test-boundary"
     body = (b"--test-boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"logs.zip\"\r\n"
             b"Content-Type: application/zip\r\n\r\narchive bytes\r\n--test-boundary--\r\n")
-    assert submit(server, "POST", f"/ocpp-diagnostics/{TOKEN}/upload.bin", body,
+    assert submit(server, "POST", f"/ocpp-diagnose/{TOKEN}/upload.bin", body,
                   f"multipart/form-data; boundary={boundary}") == 201
     assert (root / TOKEN / "upload.bin").read_bytes() == b"archive bytes"
 
 
 def test_reject_unknown_tokens_get_and_oversized_request(receiver, monkeypatch):
     server, root = receiver
-    assert submit(server, "POST", f"/ocpp-diagnostics/{'b'*40}/upload.bin/", b"bad") == 404
-    assert submit(server, "GET", f"/ocpp-diagnostics/{TOKEN}/upload.bin") == 405
+    assert submit(server, "POST", f"/ocpp-diagnose/{'b'*40}/upload.bin/", b"bad") == 404
+    assert submit(server, "GET", f"/ocpp-diagnose/{TOKEN}/upload.bin") == 405
     monkeypatch.setattr(diagnose_receiver, "MAX_BODY", 2)
-    assert submit(server, "POST", f"/ocpp-diagnostics/{TOKEN}/upload.bin/", b"123") == 413
+    assert submit(server, "POST", f"/ocpp-diagnose/{TOKEN}/upload.bin/", b"123") == 413
     assert not (root / TOKEN / "upload.bin").exists()
 
 
