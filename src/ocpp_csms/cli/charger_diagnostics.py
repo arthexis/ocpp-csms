@@ -82,6 +82,8 @@ def run_https_diagnostics(args):
         if op == "show":
             for f in entry["files"]:
                 print(f"  {f['name']} ({f['bytes']} bytes) — {diagnostic_upload.ROOT / entry['id'] / f['name']}")
+                for line in diagnostic_upload.inspect_file(diagnostic_upload.ROOT / entry["id"] / f["name"]):
+                    print(f"    {line}")
     return 0
 
 
