@@ -122,6 +122,9 @@ class SessionCommands:
                 cs_charging_profiles=profile,
             )
         )
+        if response is None:
+            self._record("SetChargingProfile", {"error": "missing_response"}, direction="in")
+            raise ValueError("charger returned no SetChargingProfile response")
         self._record("SetChargingProfile", dict(response.__dict__), direction="in")
         return response
 
