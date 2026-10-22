@@ -38,7 +38,7 @@ server {
         if (-e $request_filename) { return 409; }
         add_header Cache-Control "no-store" always;
     }
-    location ^~ /ocpp-diagnostics/ { return 404; }
+    location /ocpp-diagnostics/ { return 404; }
     location / {
         limit_req zone=ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }} burst=20 nodelay;
         limit_req_status 429;
