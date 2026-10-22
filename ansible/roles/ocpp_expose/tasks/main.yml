@@ -214,7 +214,7 @@
   become: true
   ansible.builtin.stat:
     path: /etc/systemd/system/ocpp-csms-diagnostics-prune.timer
-  register: ocpp_diagnostics_legacy_timer
+  register: ocpp_expose_diagnostics_legacy_timer
 
 - name: Stop and disable legacy diagnostics cleanup timer
   become: true
@@ -222,7 +222,7 @@
     name: ocpp-csms-diagnostics-prune.timer
     state: stopped
     enabled: false
-  when: ocpp_diagnostics_legacy_timer.stat.exists
+  when: ocpp_expose_diagnostics_legacy_timer.stat.exists
 
 - name: Remove obsolete diagnostic cleanup units
   become: true
