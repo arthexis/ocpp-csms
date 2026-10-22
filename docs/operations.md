@@ -184,10 +184,10 @@ ocpp-csms profile help TEMPLATE
 ocpp-csms profile send max-power --watts WATTS [--start ISO-8601] [--cp CHARGE_POINT]
 ocpp-csms profile composite [--cp CHARGE_POINT] [-c N|--connector N] [--duration SECONDS] [-T|--local-time] [--json]
 ocpp-csms profile clear ...
-ocpp-csms txn start [CHARGE_POINT] [-c N|--connector N] [--rfid TAG]
+ocpp-csms txn start [--cp CHARGE_POINT] [-c N|--connector N] [--rfid TAG]
 ocpp-csms txn stop ID
-ocpp-csms reset CHARGER [--hard]
-ocpp-csms events [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
+ocpp-csms reset [--cp CHARGER] [--hard]
+ocpp-csms events [--cp CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
 ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
@@ -786,3 +786,9 @@ sudo systemctl start ocpp-csms
 ```
 
 Undo requires the matching post-reset verification record beside the archive, checks every archived file against its SHA-256 manifest, and verifies SQLite integrity and the expected schema. It preserves the displaced post-reset data directory as a separate sibling `-undo-displaced` directory instead of deleting it. If any evidence has changed since reset, **undo fails rather than overwriting it**; recover manually using a separate copy and compare the evidence. Never restore a snapshot into another host or schema without an independent recovery plan.
+
+### Fast fault investigation
+
+Use `ocpp-csms faults` to list recent incoming `StatusNotification` faults without raw JSON or `jq` pipelines. `-n 5` shows the last five matching faults; add `--cp ID` to select a charger. Charger timestamps are shown separately from CSMS receipt time, since offline queues may arrive days late. `ocpp-csms events --detail` also shows `vendor_id` and `vendor_error_code` when supplied.
+
+Charger-scoped commands use `--cp CHARGER` instead of positional charger identifiers. Omit `--cp` where the command supports all-charger inspection or can infer a unique connected charger. Transaction IDs, connector IDs and operation names retain their documented selectors.
