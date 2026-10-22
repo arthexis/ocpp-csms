@@ -44,7 +44,7 @@ def test_parser_accepts_verbose():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
     cli.add_diagnostic_commands(sub)
-    parsed = parser.parse_args(["events", "CP1", "--verbose", "--limit", "2"])
+    parsed = parser.parse_args(["events", "--cp", "CP1", "--verbose", "--limit", "2"])
     assert parsed.command == "events"
     assert parsed.charger == "CP1"
     assert parsed.verbose is True
