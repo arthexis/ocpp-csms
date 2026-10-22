@@ -48,7 +48,7 @@ def _new_events(data_dir, cursor, *, charger_id=None, transaction_id=None, since
     stop = _time(until) if until else None
     result = [row for row in rows
             if (charger_id is None or row["charger_id"] == charger_id)
-            and (transaction_id is None or row["transaction_id"] == transaction_id)
+            and (transaction_id is None or row["transaction_id"] in (transaction_id if isinstance(transaction_id, tuple) else (transaction_id,)))
             and (start is None or row["occurred_at"] >= start)
             and (stop is None or row["occurred_at"] <= stop)]
     return sorted(result, key=lambda row: (row['occurred_at'], row['kind'], row['id']))
