@@ -23,7 +23,7 @@ def events_between(
     data_dir: str | Path,
     *,
     charger_id: str | None = None,
-    transaction_id: int | None = None,
+    transaction_id: int | tuple[int, ...] | None = None,
     since: str | None = None,
     until: str | None = None,
     limit: int | None = 200,
@@ -39,11 +39,13 @@ def events_between(
     if not database.exists():
         return []
 
+    ids = (transaction_id,) if isinstance(transaction_id, int) else transaction_id
+    placeholders = ",".join("?" for _ in ids) if ids is not None else ""
+    tx_condition = f"AND transaction_id IN ({placeholders})" if ids is not None else ""
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
     filters = []
-    params: list[Any] = [charger_id, charger_id, transaction_id, transaction_id,
-                         since, since, until, until]
+    params: list[Any] = [charger_id, charger_id, *(ids or ()), since, since, until, until]
     if only:
         filters.append("(" + " OR ".join("instr(lower(action), ?) > 0" for _ in only) + ")")
         params.extend(only)
@@ -63,7 +65,7 @@ def events_between(
                 FROM runtime_events
             )
             WHERE (? IS NULL OR charger_id = ?)
-              AND (? IS NULL OR transaction_id = ?)
+              {tx_condition}
               AND (? IS NULL OR occurred_at >= ?)
               AND (? IS NULL OR occurred_at <= ?)
               {action_where}

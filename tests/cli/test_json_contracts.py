@@ -29,7 +29,7 @@ def test_json_read_commands_are_registered():
 def test_events_transaction_alias_and_raw_mode_are_registered():
     parser, _ = build_parser()
     args = parser.parse_args(["events", "--txn", "42", "--raw", "--json"])
-    assert args.transaction == 42
+    assert args.transactions == (42,)
     assert args.raw is True
     assert args.json is True
 

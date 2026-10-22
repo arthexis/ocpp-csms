@@ -95,10 +95,12 @@ def test_events_filters_combine_with_transaction_cp_time_limit_and_formats(cli_p
 
 
 def test_events_tx_aliases(cli_parser):
-    for name in ("--tx", "--txn", "--transaction"):
-        args = cli_parser.parse_args(["events", name, "42", "--exclude", "He"])
-        assert args.transaction == 42
-        assert args.exclude == "He"
+    single = cli_parser.parse_args(["events", "--tx", "42", "--exclude", "He"])
+    assert single.transaction == 42
+    assert single.exclude == "He"
+    multiple = cli_parser.parse_args(["events", "--txn", "42,43,42", "--exclude", "He"])
+    assert multiple.transactions == (42, 43)
+    assert multiple.exclude == "He"
 
 
 def test_events_filters_with_follow_poll_and_cursor(tmp_path):

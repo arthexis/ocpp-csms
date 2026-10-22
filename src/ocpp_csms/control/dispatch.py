@@ -45,6 +45,22 @@ def _resolve_charger(registry: SessionRegistry, request: dict[str, Any]) -> tupl
     return None, normalized, {"error": "charger_required", "chargers": connected}
 
 
+async def _smart_charging_unsupported(session: Session) -> bool:
+    """Block only explicit lack of support; unknown capability remains unchanged."""
+    try:
+        response = await session.get_configuration(["SupportedFeatureProfiles"])
+    except Exception:
+        return False
+    payload = _response_payload(response)
+    for entry in payload.get("configuration_key") or []:
+        if not isinstance(entry, dict) or entry.get("key") != "SupportedFeatureProfiles":
+            continue
+        value = entry.get("value")
+        if isinstance(value, str):
+            return "SmartCharging" not in {part.strip() for part in value.split(",")}
+    return False
+
+
 async def _composite_schedule_response(
     registry: SessionRegistry,
     session: Session,
@@ -445,6 +461,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_connector"}
             if not isinstance(profile, dict):
                 return {"error": "invalid_profile"}
+            if await _smart_charging_unsupported(session):
+                return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             response = await session.set_charging_profile(connector, profile)
         elif command == "clear_charging_profile":
             profile_id = request.get("id")
@@ -459,6 +477,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_purpose"}
             if stack_level is not None and not _non_negative_int(stack_level):
                 return {"error": "invalid_stack_level"}
+            if await _smart_charging_unsupported(session):
+                return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             response = await session.clear_charging_profile(
                 profile_id=profile_id,
                 connector_id=connector,
@@ -475,6 +495,8 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_duration"}
             if charging_rate_unit is not None and charging_rate_unit not in {"A", "W"}:
                 return {"error": "invalid_charging_rate_unit"}
+            if await _smart_charging_unsupported(session):
+                return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             return {
                 "ok": True,
                 "response": await _composite_schedule_response(
