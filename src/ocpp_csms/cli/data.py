@@ -15,7 +15,7 @@ import subprocess
 
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.cli.appliance import initialize_storage
-from ocpp_csms.backup_archive import archive_before_reset
+from ocpp_csms.backup_archive import archive_before_reset, verify_live_reset_snapshot
 from ocpp_csms.reset_undo import record_reset_state, undo_reset
 
 
@@ -114,6 +114,7 @@ def reset_live_cp(data_dir: str | Path, cp: str) -> dict:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("BEGIN IMMEDIATE")
         try:
+            verify_live_reset_snapshot(root, archive_path, db)
             if db.execute("SELECT 1 FROM transactions WHERE charger_id=? "
                           "AND state NOT IN ('stopped', 'complete', 'completed') LIMIT 1", (cp,)).fetchone():
                 raise ValueError("charge point has an open transaction; reset refused")

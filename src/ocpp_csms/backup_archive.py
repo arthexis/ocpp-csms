@@ -103,3 +103,52 @@ def archive_before_reset(root: Path, *, scope: str, cp: str | None = None) -> Pa
         finally:
             temp.unlink(missing_ok=True)
     return final
+
+
+def verify_live_reset_snapshot(root: Path, archive_path: Path, current: sqlite3.Connection) -> None:
+    """Refuse deletion if evidence changed after the snapshot was made.
+
+    Call while holding BEGIN IMMEDIATE on the authoritative SQLite database.
+    This checks the database logically (not by SQLite page bytes) and files
+    against the archive. Filesystem writes are not transactional; callers
+    must also prevent new sessions for the selected charge point.
+    """
+    with tempfile.TemporaryDirectory(prefix="reset-verify-", dir=archive_path.parent) as scratch:
+        with tarfile.open(archive_path, "r:gz") as archive:
+            stream = archive.extractfile("manifest.json")
+            if stream is None:
+                raise ValueError("missing reset archive manifest")
+            manifest = json.load(stream)
+            if manifest.get("format") != 1 or not isinstance(manifest.get("files"), dict):
+                raise ValueError("invalid reset archive manifest")
+            info = inspect_schema(root)
+            db_relative = info.path.relative_to(root).as_posix()
+            for name, digest in manifest["files"].items():
+                if name == db_relative:
+                    continue
+                file = root / name
+                if not file.is_file() or file.is_symlink():
+                    raise RuntimeError("evidence changed after backup; reset refused")
+                if hashlib.sha256(file.read_bytes()).hexdigest() != digest:
+                    raise RuntimeError("evidence changed after backup; reset refused")
+            archive_names = set(manifest["files"])
+            for file in root.rglob("*"):
+                if file.is_symlink():
+                    raise ValueError("symlinked evidence: reset refused")
+                if file.is_file():
+                    rel = file.relative_to(root).as_posix()
+                    if rel not in archive_names and rel not in {
+                        db_relative + "-wal", db_relative + "-shm"
+                    }:
+                        raise RuntimeError("new evidence after backup; reset refused")
+            source = archive.extractfile("data/" + db_relative)
+            if source is None:
+                raise ValueError("missing archived database")
+            snapshot = Path(scratch) / "snapshot.sqlite3"
+            with snapshot.open("wb") as dest:
+                shutil.copyfileobj(source, dest)
+        with closing(sqlite3.connect(snapshot)) as archived:
+            before = hashlib.sha256("\n".join(archived.iterdump()).encode()).digest()
+        after = hashlib.sha256("\n".join(current.iterdump()).encode()).digest()
+        if before != after:
+            raise RuntimeError("SQLite evidence changed after backup; reset refused")
