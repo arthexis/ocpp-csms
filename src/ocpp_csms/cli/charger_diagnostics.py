@@ -129,9 +129,6 @@ def run_https_diagnostics(args):
                     return 0
                 if args.follow and current and current["result"] in ("received", "charger_uploadfailed"):
                     return 0 if current["result"] == "received" else 1
-                if args.follow and current and current["result"] == "expired":
-                    print("Diagnostic upload destination expired without a received file.")
-                    return 1
                 time.sleep(0.5)
         except KeyboardInterrupt:
             print("Stopped following; the upload request remains recorded.")
