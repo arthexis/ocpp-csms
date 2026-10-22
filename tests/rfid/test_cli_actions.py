@@ -8,14 +8,14 @@ from ocpp_csms.cli.rfid import run_rfid_action
 def test_parser_accepts_rfid_local_list_commands():
     parser, _ = build_parser()
 
-    export = parser.parse_args(["rfid", "export", "charger-a"])
+    export = parser.parse_args(["rfid", "export", "--cp", "charger-a"])
     version = parser.parse_args(["rfid", "version"])
     clear = parser.parse_args(["rfid", "clear", "--cp", "charger-a"])
 
     assert export.rfid_command == "export"
-    assert export.charger == "charger-a"
+    assert export.charger_option == "charger-a"
     assert version.rfid_command == "version"
-    assert version.charger is None
+    assert version.charger_option is None
     assert clear.rfid_command == "clear"
     assert clear.charger_option == "charger-a"
 
@@ -39,7 +39,7 @@ def test_export_sends_only_enabled_cards(monkeypatch, tmp_path, capsys):
         encoding="utf-8",
     )
     parsed = build_parser()[0].parse_args(
-        ["--data-dir", str(tmp_path), "rfid", "export", "charger-a"]
+        ["--data-dir", str(tmp_path), "rfid", "export", "--cp", "charger-a"]
     )
     captured = {}
 
