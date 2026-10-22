@@ -12,6 +12,8 @@ CONFIG = Path("/etc/ocpp-csms/diagnostics-https.json")
 TOKEN_RE = re.compile(r"^[a-f0-9]{40}$")
 ROOT = Path("/var/lib/ocpp-csms/diagnostics")
 MAX_AGE = timedelta(hours=2)
+ARCHIVE_AGE = timedelta(days=30)
+RETAINED = ROOT / "retained"
 
 
 def _now() -> datetime:
@@ -103,6 +105,12 @@ def _notifications(data_dir: str | Path, charger: str | None, since: str) -> lis
     return output
 
 
+def archive_directory(token: str) -> Path:
+    """Uploaded evidence survives expiration of its public upload capability."""
+    pending = ROOT / token
+    return pending if pending.is_dir() else RETAINED / token
+
+
 def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[dict]:
     folder = _records(data_dir)
     if not folder.is_dir():
@@ -113,7 +121,7 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
             continue
         try:
             entry = json.loads(file.read_text(encoding="utf-8"))
-            directory = ROOT / file.stem
+            directory = archive_directory(file.stem)
             uploads = [p for p in directory.iterdir() if p.is_file() and not p.is_symlink()] if directory.is_dir() else []
             entry["files"] = [{"name": p.name, "bytes": p.stat().st_size} for p in uploads]
             entry["notifications"] = _notifications(data_dir, entry.get("charger"), entry["created_at"])
@@ -134,18 +142,32 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
 
 
 def remove_expired(data_dir: str | Path) -> int:
-    """Remove expired upload directories and metadata; call from maintenance."""
+    """Close expired upload destinations; retain received archives for 30 days."""
     import shutil
     count = 0
     for entry in list_requests(data_dir):
-        if _now() <= datetime.fromisoformat(entry["expires_at"]):
+        age = _now() - datetime.fromisoformat(entry["created_at"])
+        if age <= MAX_AGE:
             continue
         token = entry["id"]
         if not TOKEN_RE.fullmatch(token):
             continue
-        shutil.rmtree(ROOT / token, ignore_errors=True)
-        (_records(data_dir) / (token + ".json")).unlink(missing_ok=True)
-        count += 1
+        pending = ROOT / token
+        archived = RETAINED / token
+        if pending.is_dir() and not pending.is_symlink():
+            files = [p for p in pending.iterdir() if p.is_file() and not p.is_symlink()]
+            if files:
+                RETAINED.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if not archived.exists():
+                    pending.rename(archived)
+            else:
+                shutil.rmtree(pending)
+                count += 1
+        if age > ARCHIVE_AGE or not archived.is_dir():
+            if age > ARCHIVE_AGE and archived.is_dir() and not archived.is_symlink():
+                shutil.rmtree(archived)
+                count += 1
+            (_records(data_dir) / (token + ".json")).unlink(missing_ok=True)
     return count
 
 
