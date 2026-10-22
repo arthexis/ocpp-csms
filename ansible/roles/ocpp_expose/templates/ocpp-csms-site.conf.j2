@@ -23,6 +23,22 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     client_header_timeout 15s;
     add_header X-Content-Type-Options "nosniff" always;
+    # Native nginx WebDAV PUT receiver, isolated from the WebSocket upstream.
+    # The unguessable request directory must already exist. No GET/DELETE.
+    # Deny replacements, do not log bearer-token URLs.
+    location ~ ^/ocpp-diagnostics/([a-f0-9]{40})/(upload\\.bin|[A-Za-z0-9][A-Za-z0-9._-]{0,99})$ {
+        alias /var/lib/ocpp-csms/diagnostics/$1/$2;
+        dav_methods PUT;
+        create_full_put_path off;
+        dav_access user:rw group:r;
+        client_max_body_size 100m;
+        client_body_timeout 120s;
+        access_log off;
+        if ($request_method != PUT) { return 405; }
+        if (-e $request_filename) { return 409; }
+        add_header Cache-Control "no-store" always;
+    }
+    location /ocpp-diagnostics/ { return 404; }
     location / {
         limit_req zone=ocpp_wss_{{ ocpp_csms_expose | replace('.', '_') | replace('-', '_') }} burst=20 nodelay;
         limit_req_status 429;

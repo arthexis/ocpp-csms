@@ -162,6 +162,89 @@
   changed_when: false
   failed_when: "'does match certificate' not in ocpp_expose_hostname_check.stdout"
 
+- name: Ensure nginx supports native DAV uploads
+  become: true
+  ansible.builtin.shell: nginx -V 2>&1 | grep -q -- '--with-http_dav_module'
+  changed_when: false
+
+- name: Install ACL tools for restricted uploads
+  become: true
+  ansible.builtin.apt:
+    name: acl
+    state: present
+
+- name: Create isolated HTTPS diagnostic upload directory
+  become: true
+  ansible.builtin.file:
+    path: /var/lib/ocpp-csms/diagnostics
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    group: www-data
+    mode: "2770"
+
+- name: Grant the operator access to nginx-created diagnostic files
+  become: true
+  ansible.builtin.command:
+    argv:
+      - setfacl
+      - -m
+      - "u:{{ ansible_user_id }}:rwx,d:u:{{ ansible_user_id }}:rwx,d:g:www-data:rwx"
+      - /var/lib/ocpp-csms/diagnostics
+  changed_when: false
+
+- name: Configure HTTPS diagnostic hostname for the CLI
+  become: true
+  ansible.builtin.file:
+    path: /etc/ocpp-csms
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Publish configured HTTPS diagnostic endpoint
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/ocpp-csms/diagnostics-https.json
+    content: "{{ {'hostname': ocpp_csms_expose} | to_json }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install HTTPS diagnostic cleanup service
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnostics-prune.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune expired OCPP diagnostic uploads
+      [Service]
+      Type=oneshot
+      User={{ ansible_user_id }}
+      ExecStart={{ ocpp_expose_runtime_command }} diagnose prune
+
+- name: Install HTTPS diagnostic cleanup timer
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnostics-prune.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune expired OCPP diagnostic uploads periodically
+      [Timer]
+      OnCalendar=hourly
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable HTTPS diagnostic cleanup timer
+  become: true
+  ansible.builtin.systemd_service:
+    name: ocpp-csms-diagnostics-prune.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
 - name: Check previous nginx site for rollback
   become: true
   ansible.builtin.stat:
