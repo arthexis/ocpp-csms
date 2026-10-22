@@ -65,3 +65,30 @@ def test_nginx_dav_regex_quantifiers_are_quoted():
     assert all(line.endswith('$" {') for line in locations)
     assert sum("{0,99}" in line for line in locations) == 1
     assert sum("upload" in line and "{0,99}" not in line for line in locations) == 2
+
+
+def test_expose_checks_socket_activation_before_success():
+    """The nginx expose role must reject a missing or broken diagnose process."""
+    tasks = TASKS.read_text()
+    before_socket, socket_and_later = tasks.split(
+        "Verify diagnostic receiver socket is enabled and listening", 1
+    )
+    socket_config, smoke_and_later = socket_and_later.split(
+        "Confirm socket activation serves the receiver HTTP protocol", 1
+    )
+    smoke_check, rollback = smoke_and_later.split(
+        "  rescue:\n    - name: Restore previous nginx site", 1
+    )
+    assert "Promote validated public WSS site with rollback" in before_socket
+    assert "ocpp-csms-diagnose.socket" in socket_config
+    assert "/run/ocpp-csms-diagnose.sock" in smoke_check
+    assert "HTTP/1.1 405 " in smoke_check
+    assert "Reload restored nginx configuration" in rollback
+
+
+def test_normal_deployment_refreshes_existing_exposure():
+    shell = (ROOT / "deploy.sh").read_text()
+    assert "recovered_expose=$(configured_exposure)" in shell
+    assert 'if [ "$status" -eq 0 ] && [ -n "$recovered_expose" ]; then' in shell
+    assert 'ansible/playbooks/expose.yml" -i localhost, -c local' in shell
+    assert "nginx exposure refresh failed" in shell
