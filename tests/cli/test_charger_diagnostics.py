@@ -1,33 +1,26 @@
 """GetDiagnostics CLI and dispatch contract tests."""
 from __future__ import annotations
 
-import argparse
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from ocpp_csms.cli.charger_diagnostics import add_diagnostics_command, _request
+from ocpp_csms.cli.charger_diagnostics import _request
 from ocpp_csms.control.dispatch import dispatch_control
 
 
-def parse(*argv):
-    parser = argparse.ArgumentParser()
-    add_diagnostics_command(parser.add_subparsers(dest="command"))
-    return parser.parse_args(["diagnose", *argv])
-
-
-def test_request_shape():
-    result = _request(parse("--location", "https://u:pw@example.org/secret?token=123", "--cp", "CP1", "--retries", "2"))
+def test_request_shape(parse_cli):
+    result = _request(parse_cli("diagnose", "--location", "https://u:pw@example.org/secret?token=123", "--cp", "CP1", "--retries", "2"))
     assert result["command"] == "get_diagnostics"
     assert result["charger"] == "CP1"
     assert result["retries"] == 2
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "http://", "not-a-url", "https://host/path#fragment"])
-def test_reject_bad_url(url):
+def test_reject_bad_url(parse_cli, url):
     with pytest.raises(ValueError):
-        _request(parse("--location", url))
+        _request(parse_cli("diagnose", "--location", url))
 
 
 @pytest.mark.asyncio
@@ -52,9 +45,9 @@ async def test_dispatch_rejects_invalid(params, error):
     assert result["error"] == error
 
 
-def test_diagnostic_window_compares_actual_instants_not_iso_strings():
+def test_diagnostic_window_compares_actual_instants_not_iso_strings(parse_cli):
     """Differing UTC offsets may reverse lexicographic timestamp order."""
-    args = parse("--location", "https://example.org/upload",
+    args = parse_cli("diagnose", "--location", "https://example.org/upload",
                  "--since", "2026-10-12T10:00:00+02:00",
                  "--until", "2026-10-12T09:30:00+00:00")
     request = _request(args)
@@ -62,8 +55,8 @@ def test_diagnostic_window_compares_actual_instants_not_iso_strings():
     assert request["stop_time"]
 
 
-def test_diagnostic_window_rejects_reversed_instants():
-    args = parse("--location", "https://example.org/upload",
+def test_diagnostic_window_rejects_reversed_instants(parse_cli):
+    args = parse_cli("diagnose", "--location", "https://example.org/upload",
                  "--since", "2026-10-12T10:00:00+00:00",
                  "--until", "2026-10-12T10:30:00+02:00")
     with pytest.raises(ValueError, match="since"):

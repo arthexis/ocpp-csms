@@ -1,13 +1,12 @@
 """Phase 1 field-maintenance command coverage."""
 from __future__ import annotations
 
-import argparse
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from ocpp_csms.cli.maintenance import add_maintenance_commands, maintenance_request, run_maintenance
+from ocpp_csms.cli.maintenance import maintenance_request, run_maintenance
 from ocpp_csms.control.dispatch import dispatch_control
 
 
@@ -18,11 +17,8 @@ from ocpp_csms.control.dispatch import dispatch_control
     (["availability", "enable"], {"command": "availability", "type": "Operative", "connector": 0}),
     (["unlock", "-c", "1"], {"command": "unlock", "connector": 1}),
 ])
-def test_request_shape(argv, expected):
-    parser = argparse.ArgumentParser()
-    subcommands = parser.add_subparsers(dest="command")
-    add_maintenance_commands(subcommands)
-    args = parser.parse_args(argv)
+def test_request_shape(parse_cli, argv, expected):
+    args = parse_cli(*argv)
     assert maintenance_request(args) == expected
 
 
@@ -32,12 +28,9 @@ def test_request_shape(argv, expected):
     ["trigger", "meter", "-c", "-1"],
     ["availability", "disable", "-c", "-1"],
 ])
-def test_reject_invalid_cli_request(argv):
-    parser = argparse.ArgumentParser()
-    subcommands = parser.add_subparsers(dest="command")
-    add_maintenance_commands(subcommands)
+def test_reject_invalid_cli_request(parse_cli, argv):
     with pytest.raises(ValueError):
-        maintenance_request(parser.parse_args(argv))
+        maintenance_request(parse_cli(*argv))
 
 
 @pytest.mark.asyncio
@@ -70,10 +63,10 @@ async def test_dispatch_rejects_invalid_request(command, error):
     assert (await dispatch_control(registry, command))["error"] == error
 
 
-def test_scheduled_is_reported_as_pending(monkeypatch, capsys):
+def test_scheduled_is_reported_as_pending(monkeypatch, capsys, parse_cli):
     async def send(*_args, **_kwargs):
         return {"ok": True, "response": {"status": "Scheduled"}}
     monkeypatch.setattr("ocpp_csms.cli.maintenance_transport.send_control", send)
-    args = SimpleNamespace(command="availability", charger=None, action="disable", connector=1, json=False, data_dir="/tmp")
+    args = parse_cli("--data-dir", "/tmp", "availability", "disable", "-c", "1")
     assert run_maintenance(args) == 0
     assert "Pending" in capsys.readouterr().out
