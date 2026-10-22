@@ -20,7 +20,7 @@ from ocpp_csms.cli import build_parser
         (["export"], "export"),
         (["txn"], "txn"),
         (["events"], "events"),
-        (["explain", "charger-a"], "explain"),
+        (["explain", "--cp", "charger-a"], "explain"),
         (["help"], "help"),
     ],
 )
