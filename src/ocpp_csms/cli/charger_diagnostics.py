@@ -83,6 +83,8 @@ def run_https_diagnostics(args):
         print("No local HTTPS diagnostic requests.")
         return 0
     for entry in records:
+        if entry.get("notifications"):
+            print("  Charger evidence (time-correlated): " + " -> ".join(n["status"] for n in entry["notifications"]))
         print(f"{entry['created_at']} {entry.get('charger') or '-'} {entry['result']} "
               f"files={len(entry['files'])} suggested={entry.get('suggested_file') or '-'}")
         if op == "show":
