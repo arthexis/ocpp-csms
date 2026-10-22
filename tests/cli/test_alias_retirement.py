@@ -26,4 +26,4 @@ def test_canonical_control_payload_unchanged(argv, expected):
 def test_reset_and_event_filters_remain_distinct():
     parser, _ = build_parser()
     assert parser.parse_args(["reset", "--cp", "CP1"]).charger_option == "CP1"
-    assert parser.parse_args(["events", "--txn", "42"]).transaction == 42
+    assert parser.parse_args(["events", "--txn", "42"]).transactions == (42,)
