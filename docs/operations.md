@@ -854,3 +854,23 @@ notifications until a local file is received, the charger reports
 `Uploaded` status alone is not treated as proof of local file receipt.
 `--limit` does not cut short `--follow` once the initial signal has arrived.
 Press Ctrl-C to stop following; the upload receiver continues independently.
+
+### POST support (ABB and other chargers)
+
+The public HTTPS upload endpoint supports nginx-native PUT and HTTP POST
+(including ABB's `upload.bin/` trailing slash). nginx terminates TLS and
+forwards POST only to the on-demand Unix socket
+`/run/ocpp-csms-diagnose.sock`. The socket is activated by systemd using
+`ocpp-csms-diagnose.socket` and `ocpp-csms-diagnose.service`, both
+provisioned by `deploy.sh --expose HOSTNAME` or an ordinary redeployment
+that reuses the saved exposure hostname. No other public port is opened.
+
+The POST receiver rejects invalid paths, missing request directories, empty
+or oversized uploads, unexpected content types, and attempts to overwrite
+an already received file. Multipart uploads retain only the file payload,
+not client-provided filenames. URL bearer tokens must not be logged.
+
+On the charger host use `ocpp-csms diagnose request --limit 120 --follow`
+after deploying the updated expose role. Test the receiver locally before
+retrying real charger uploads. A charger-reported `Uploaded` does not prove
+that nginx stored a file.
