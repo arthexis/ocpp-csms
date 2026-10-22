@@ -9,6 +9,7 @@ import email.policy
 import os
 import re
 import socket
+import tempfile
 from datetime import datetime, timezone
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -55,10 +56,20 @@ class Handler(BaseHTTPRequestHandler):
         if not (content_type.startswith("multipart/form-data;") or content_type.split(";", 1)[0].strip() in
                 ("application/octet-stream", "application/zip", "application/x-gzip", "application/gzip", "application/x-tar")):
             return self.reply(415)
-        # Never overwrite prior success, including concurrent retries; exclusive create.
+        # A file only becomes visible as upload.bin after a complete, synced POST.
+        # An exclusive marker prevents concurrent POSTs from publishing partial data.
         target = folder / "upload.bin"
+        marker = folder / ".uploading"
+        owned_marker = False
+        temporary = None
         try:
-            with target.open("xb") as stream:
+            if target.exists():
+                return self.reply(409)
+            with marker.open("xb"):
+                owned_marker = True
+            fd, name = tempfile.mkstemp(prefix=".incoming-", dir=folder)
+            temporary = Path(name)
+            with os.fdopen(fd, "wb") as stream:
                 remaining = length
                 while remaining:
                     data = self.rfile.read(min(65536, remaining))
@@ -69,29 +80,33 @@ class Handler(BaseHTTPRequestHandler):
                 stream.flush()
                 os.fsync(stream.fileno())
             if content_type.startswith("multipart/form-data;"):
-                # Parse the bounded MIME envelope and retain only one uploaded
-                # file, without trusting the client-provided filename.
-                raw = target.read_bytes()
+                raw = temporary.read_bytes()
                 message = BytesParser(policy=email.policy.default).parsebytes(
                     b"Content-Type: " + content_type.encode("ascii", errors="ignore") +
-                    b"\r\nMIME-Version: 1.0\r\n\r\n" + raw
+                    b"\\r\\nMIME-Version: 1.0\\r\\n\\r\\n" + raw
                 )
                 parts = [part for part in message.iter_parts() if part.get_filename()]
                 if not message.is_multipart() or len(parts) != 1:
-                    target.unlink(missing_ok=True)
                     return self.reply(400)
                 payload = parts[0].get_payload(decode=True)
                 if not payload:
-                    target.unlink(missing_ok=True)
                     return self.reply(400)
-                with target.open("wb") as stream:
+                with temporary.open("wb") as stream:
                     stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            # link() atomically refuses a concurrent DAV/POST winner; never overwrite.
+            os.link(temporary, target)
             return self.reply(201)
         except FileExistsError:
             return self.reply(409)
         except (OSError, ConnectionError):
-            target.unlink(missing_ok=True)
             return self.reply(500)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            if owned_marker:
+                marker.unlink(missing_ok=True)
 
     def do_PUT(self):
         self.reply(405)
