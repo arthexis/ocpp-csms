@@ -205,7 +205,7 @@
   become: true
   ansible.builtin.copy:
     dest: /etc/ocpp-csms/diagnostics-https.json
-    content: "{{ {'hostname': ocpp_csms_expose} | to_json }}\\n"
+    content: "{{ {'hostname': ocpp_csms_expose} | to_json }}"
     owner: root
     group: root
     mode: "0644"
