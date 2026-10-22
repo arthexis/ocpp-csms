@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -55,7 +56,11 @@ def _sharing_charger(data_dir, specified):
     if specified:
         return specified
     from ocpp_csms.status import appliance_status
-    known = {item.charger_id for item in appliance_status(data_dir).get("chargers", [])}
+    chargers = appliance_status(data_dir).get("chargers", [])
+    connected = {item.charger_id for item in chargers if item.connected}
+    if len(connected) == 1:
+        return next(iter(connected))
+    known = {item.charger_id for item in chargers}
     if len(known) == 1:
         return next(iter(known))
     from ocpp_csms.diagnostic_upload import _records
@@ -92,7 +97,7 @@ def _run_sharing(args):
             print(f"Files: {result['files']}")
             print("Access persists until diagnose serve --revoke is run.")
         return 0
-    except (ValueError, OSError, PermissionError) as exc:
+    except (ValueError, OSError, PermissionError, subprocess.CalledProcessError) as exc:
         print(f"error: {exc}")
         return 1
 
