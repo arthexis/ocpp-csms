@@ -210,14 +210,19 @@
     group: root
     mode: "0644"
 
-- name: Stop and disable legacy diagnostic cleanup timer
+- name: Inspect installed legacy diagnostics cleanup timer
+  become: true
+  ansible.builtin.stat:
+    path: /etc/systemd/system/ocpp-csms-diagnostics-prune.timer
+  register: ocpp_diagnostics_legacy_timer
+
+- name: Stop and disable legacy diagnostics cleanup timer
   become: true
   ansible.builtin.systemd_service:
     name: ocpp-csms-diagnostics-prune.timer
     state: stopped
     enabled: false
-  when: ansible_facts.services is not defined or 'ocpp-csms-diagnostics-prune.timer' in ansible_facts.services
-  failed_when: false
+  when: ocpp_diagnostics_legacy_timer.stat.exists
 
 - name: Remove obsolete diagnostic cleanup units
   become: true
@@ -230,8 +235,6 @@
   become: true
   ansible.builtin.systemd_service:
     daemon_reload: true
-    name: ocpp-csms.service
-  changed_when: false
 
 - name: Install socket-activated POST receiver service
   become: true
