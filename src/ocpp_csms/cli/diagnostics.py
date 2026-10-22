@@ -35,6 +35,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
     add(events, "-f", "--follow", action="store_true", help="Follow newly recorded events until Ctrl+C (JSON uses JSONL)")
+    add(events, "--no-status", action="store_true", help="Exclude Heartbeat and MeterValues requests and responses")
     add(events, "--detail", action="store_true", help="Expand additional event fields in the grouped timeline")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
@@ -116,6 +117,7 @@ def run_events(args: argparse.Namespace) -> int:
         args.data_dir, charger_id=args.charger, transaction_id=args.transaction,
         since=since.isoformat() if since else None,
         until=until.isoformat() if until else None, limit=count,
+        no_status=args.no_status,
     )
     if getattr(args, "follow", False):
         from ocpp_csms.cli.event_follow import follow_events
