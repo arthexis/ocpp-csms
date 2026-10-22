@@ -825,3 +825,16 @@ scripts found inside charger archives. Incoming files are treated as untrusted.
 will not be compatible with this endpoint. Test the particular charger firmware
 and check nginx access/error logs (the bearer path is excluded from access logs).
 Avoid exposing diagnostic archive contents publicly.
+
+### Long-running GetDiagnostics replies
+
+`ocpp-csms diagnose request` waits for the charger CALLRESULT without a
+CLI-imposed response deadline (until response, connection loss, or operator
+interruption); `ocpp-csms diagnose request --limit 120` caps that wait at
+120 seconds. The charger can still report `Uploading` or `UploadFailed`
+after the command exits. Use `ocpp-csms diagnose status` and
+`ocpp-csms diagnose --list` to inspect later evidence. Upload status
+notifications are correlated by charger and time only, not a request ID;
+`Uploaded` alone does not prove a file was received by nginx. The HTTPS
+upload directory expires independently of the response wait. A missing
+CALLRESULT and a failed HTTPS transfer are different failure modes.
