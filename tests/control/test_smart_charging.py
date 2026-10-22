@@ -251,3 +251,29 @@ async def test_get_composite_schedule_reports_missing_response(charge_point_sess
     rows = evidence(session, "GetCompositeSchedule")
     assert [row[0] for row in rows] == ["out", "in"]
     assert "missing_response" in rows[1][1]
+
+
+@pytest.mark.asyncio
+async def test_set_charging_profile_reports_missing_response(charge_point_session):
+    session = charge_point_session
+
+    async def no_response(payload):
+        return None
+
+    session.call = no_response
+    profile = {
+        "chargingProfileId": 1,
+        "stackLevel": 0,
+        "chargingProfilePurpose": "ChargePointMaxProfile",
+        "chargingProfileKind": "Absolute",
+        "chargingSchedule": {
+            "chargingRateUnit": "W",
+            "chargingSchedulePeriod": [{"startPeriod": 0, "limit": 150000}],
+        },
+    }
+    with pytest.raises(ValueError, match="charger returned no SetChargingProfile response"):
+        await session.set_charging_profile(0, profile)
+    rows = evidence(session, "SetChargingProfile")
+    assert [row[0] for row in rows] == ["out", "in"]
+    assert "150000" in rows[0][1]
+    assert "missing_response" in rows[1][1]
