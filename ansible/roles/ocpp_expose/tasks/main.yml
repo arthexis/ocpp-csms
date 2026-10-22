@@ -425,4 +425,3 @@
     state: started
     enabled: true
   when: not (ocpp_csms_no_certbot | default(false) | bool)
-
