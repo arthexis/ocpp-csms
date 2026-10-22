@@ -53,6 +53,16 @@ def run_https_diagnostics(args):
         if args.limit is not None and args.limit < 1:
             print("error: --limit must be a positive number of seconds")
             return 1
+        if not args.charger:
+            # Persist the same unambiguous identity that the control command targets.
+            # Archive forwarding must never attribute an anonymous upload by guesswork.
+            from ocpp_csms.status import appliance_status
+            connected = {item.charger_id for item in appliance_status(args.data_dir).get("chargers", [])
+                         if item.connected}
+            if len(connected) != 1:
+                print("error: specify --cp unless exactly one charger is connected")
+                return 1
+            args.charger = next(iter(connected))
         # Dispatch in a daemon worker so an independently reported Uploading
         # can acknowledge the request even if the CALLRESULT never arrives.
         # The server owns the outgoing OCPP task after the control socket closes.
