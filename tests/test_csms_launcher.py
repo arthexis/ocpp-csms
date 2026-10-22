@@ -86,7 +86,7 @@ async def test_launcher_reaches_connected_charger_control_session(tmp_path):
             "--data-dir",
             str(tmp_path),
             "reset",
-            "charger-a",
+            "--cp", "charger-a",
             cwd=str(tmp_path),
             env={**os.environ, "OCPP_CSMS_VENV": sys.prefix},
             stdout=asyncio.subprocess.PIPE,
