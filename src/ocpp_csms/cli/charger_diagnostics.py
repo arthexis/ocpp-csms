@@ -38,7 +38,7 @@ def add_diagnostics_command(subcommands):
     request.add_argument("--limit", type=int, default=None, help="Maximum seconds to wait for OCPP response (default: unlimited)")
     request.add_argument("--follow", action="store_true", help="Follow charger status and file receipt until completion or failure")
     request.add_argument("--json", action="store_true")
-    for name in ("status", "list", "show", "prune"):
+    for name in ("status", "list", "show"):
         op = ops.add_parser(name, help="Inspect locally received diagnostic uploads")
         op.add_argument("--cp", dest="charger", help="Filter by charge point ID")
         op.add_argument("--json", action="store_true")
@@ -129,16 +129,10 @@ def run_https_diagnostics(args):
                     return 0
                 if args.follow and current and current["result"] in ("received", "charger_uploadfailed"):
                     return 0 if current["result"] == "received" else 1
-                if args.follow and current and current["result"] == "expired":
-                    print("Diagnostic upload destination expired without a received file.")
-                    return 1
                 time.sleep(0.5)
         except KeyboardInterrupt:
             print("Stopped following; the upload request remains recorded.")
             return 130
-    if op == "prune":
-        print(f"Expired diagnostic requests removed: {diagnostic_upload.remove_expired(args.data_dir)}")
-        return 0
     records = diagnostic_upload.list_requests(args.data_dir, charger=args.charger)
     if op == "status":
         records = records[:1]

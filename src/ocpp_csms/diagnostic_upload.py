@@ -4,15 +4,13 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 CONFIG = Path("/etc/ocpp-csms/diagnostics-https.json")
 TOKEN_RE = re.compile(r"^[a-f0-9]{40}$")
 ROOT = Path("/var/lib/ocpp-csms/diagnostics")
-MAX_AGE = timedelta(hours=2)
-ARCHIVE_AGE = timedelta(days=30)
 RETAINED = ROOT / "retained"
 
 
@@ -53,7 +51,6 @@ def prepare(data_dir: str | Path, charger: str | None) -> tuple[dict, str]:
         "id": token,
         "charger": charger,
         "created_at": created.isoformat(),
-        "expires_at": (created + MAX_AGE).isoformat(),
         "suggested_file": None,
         "result": "requested",
     }
@@ -106,7 +103,7 @@ def _notifications(data_dir: str | Path, charger: str | None, since: str) -> lis
 
 
 def archive_directory(token: str) -> Path:
-    """Uploaded evidence survives expiration of its public upload capability."""
+    """Locate the immutable received file, including files retained by older deployments."""
     pending = ROOT / token
     return pending if pending.is_dir() else RETAINED / token
 
@@ -131,8 +128,6 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
                 status = entry["notifications"][-1]["status"]
                 if status in ("Uploading", "UploadFailed", "Uploaded"):
                     entry["result"] = "charger_" + status.lower()
-            elif _now() > datetime.fromisoformat(entry["expires_at"]):
-                entry["result"] = "expired"
             if charger is None or entry.get("charger") == charger:
                 # Never expose bearer token in ordinary output.
                 result.append(entry)
@@ -140,35 +135,6 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
             continue
     return sorted(result, key=lambda r: r["created_at"], reverse=True)
 
-
-def remove_expired(data_dir: str | Path) -> int:
-    """Close expired upload destinations; retain received archives for 30 days."""
-    import shutil
-    count = 0
-    for entry in list_requests(data_dir):
-        age = _now() - datetime.fromisoformat(entry["created_at"])
-        if age <= MAX_AGE:
-            continue
-        token = entry["id"]
-        if not TOKEN_RE.fullmatch(token):
-            continue
-        pending = ROOT / token
-        archived = RETAINED / token
-        if pending.is_dir() and not pending.is_symlink():
-            files = [p for p in pending.iterdir() if p.name == "upload.bin" and p.is_file() and not p.is_symlink()]
-            if files:
-                RETAINED.mkdir(parents=True, exist_ok=True, mode=0o700)
-                if not archived.exists():
-                    pending.rename(archived)
-            else:
-                shutil.rmtree(pending)
-                count += 1
-        if age > ARCHIVE_AGE or not archived.is_dir():
-            if age > ARCHIVE_AGE and archived.is_dir() and not archived.is_symlink():
-                shutil.rmtree(archived)
-                count += 1
-            (_records(data_dir) / (token + ".json")).unlink(missing_ok=True)
-    return count
 
 
 def inspect_file(path: Path, *, max_members: int = 32, max_read: int = 262144) -> list[str]:

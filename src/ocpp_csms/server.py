@@ -160,6 +160,9 @@ class CSMSServer:
             LOGGER.exception("Could not persist runtime event %s", event)
 
     async def serve_forever(self) -> None:
+        # Evidence is stored in SQLite; do not duplicate every OCPP frame in journald.
+        logging.getLogger("ocpp").setLevel(logging.WARNING)
+        logging.getLogger("websockets").setLevel(logging.WARNING)
         write_pid(self.events.data_dir)
         self._record_runtime("server_started")
         # Invalid auth configuration must fail startup, not open an anonymous listener.
