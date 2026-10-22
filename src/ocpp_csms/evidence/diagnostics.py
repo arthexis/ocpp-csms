@@ -27,6 +27,8 @@ def events_between(
     since: str | None = None,
     until: str | None = None,
     limit: int | None = 200,
+    exclude: tuple[str, ...] = (),
+    only: tuple[str, ...] = (),
 ) -> list[sqlite3.Row]:
     since = _time(since) if since else None
     until = _time(until) if until else None
@@ -39,9 +41,19 @@ def events_between(
 
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
+    filters = []
+    params: list[Any] = [charger_id, charger_id, transaction_id, transaction_id,
+                         since, since, until, until]
+    if only:
+        filters.append("(" + " OR ".join("instr(lower(action), ?) > 0" for _ in only) + ")")
+        params.extend(only)
+    if exclude:
+        filters.extend("instr(lower(action), ?) = 0" for _ in exclude)
+        params.extend(exclude)
+    action_where = (" AND " + " AND ".join(filters)) if filters else ""
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT * FROM (
                 SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
                        action, direction, transaction_id, id_tag, payload_json AS payload
@@ -54,20 +66,11 @@ def events_between(
               AND (? IS NULL OR transaction_id = ?)
               AND (? IS NULL OR occurred_at >= ?)
               AND (? IS NULL OR occurred_at <= ?)
+              {action_where}
             ORDER BY occurred_at DESC, id DESC
             LIMIT ?
             """,
-            (
-                charger_id,
-                charger_id,
-                transaction_id,
-                transaction_id,
-                since,
-                since,
-                until,
-                until,
-                limit if limit is not None else -1,
-            ),
+            (*params, limit if limit is not None else -1),
         ).fetchall()
     finally:
         connection.close()
