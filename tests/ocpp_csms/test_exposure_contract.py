@@ -72,7 +72,7 @@ def test_expose_checks_socket_activation_before_success():
     tasks = TASKS.read_text()
     socket_check = tasks.index("Verify diagnostic receiver socket is enabled and listening")
     smoke = tasks.index("Confirm socket activation serves the receiver HTTP protocol")
-    rollback = tasks.index("  rescue:\\n    - name: Restore previous nginx site") if False else tasks.index("  rescue:\n    - name: Restore previous nginx site")
+    rollback = tasks.index("  rescue:\n    - name: Restore previous nginx site")
     assert socket_check < smoke < rollback
     assert "ocpp-csms-diagnose.socket" in tasks[socket_check:smoke]
     assert "/run/ocpp-csms-diagnose.sock" in tasks[smoke:rollback]
