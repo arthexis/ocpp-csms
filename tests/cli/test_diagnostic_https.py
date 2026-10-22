@@ -54,3 +54,14 @@ def test_expired_request_is_reported(tmp_path, monkeypatch):
     saved["expires_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     file.write_text(json.dumps(saved))
     assert diagnostic_upload.list_requests(tmp_path)[0]["result"] == "expired"
+
+
+def test_safe_archive_inspection_reports_fault_without_extracting(tmp_path):
+    import zipfile
+    archive = tmp_path / "diag.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("../outside.log", "INFO starting\\nERROR ABB converter alarm\\n")
+        z.writestr("binary.bin", b"\\x00\\x01\\x02")
+    lines = diagnostic_upload.inspect_file(archive)
+    assert any("ABB converter alarm" in line for line in lines)
+    assert not (tmp_path.parent / "outside.log").exists()
