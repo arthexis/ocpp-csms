@@ -277,3 +277,30 @@ async def test_set_charging_profile_reports_missing_response(charge_point_sessio
     assert [row[0] for row in rows] == ["out", "in"]
     assert "150000" in rows[0][1]
     assert "missing_response" in rows[1][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["set_charging_profile", "clear_charging_profile", "get_composite_schedule"])
+async def test_smart_charging_explicitly_unsupported_is_not_sent(command):
+    session = ControlSession()
+    async def configuration(keys):
+        assert keys == ["SupportedFeatureProfiles"]
+        return SimpleNamespace(configuration_key=[{"key": "SupportedFeatureProfiles", "value": "Core,LocalAuthListManagement", "readonly": True}])
+    session.get_configuration = configuration
+    request = {"command": command, "connector": 0, "duration": 3600, "profile": {"chargingProfileId": 1}}
+    response = await dispatch_control(Registry({"charger-a": session}), request)
+    assert response["error"] == "smart_charging_not_advertised"
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_smart_charging_advertised_remains_allowed():
+    session = ControlSession()
+    async def configuration(keys):
+        return SimpleNamespace(configuration_key=[{"key": "SupportedFeatureProfiles", "value": "Core, SmartCharging"}])
+    session.get_configuration = configuration
+    response = await dispatch_control(Registry({"charger-a": session}), {
+        "command": "set_charging_profile", "connector": 0, "profile": {"chargingProfileId": 1},
+    })
+    assert response["response"]["status"] == "Accepted"
+    assert session.calls[0][0] == "set"
