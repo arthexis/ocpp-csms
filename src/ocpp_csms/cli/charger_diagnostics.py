@@ -44,68 +44,11 @@ def add_diagnostics_command(subcommands):
         op.add_argument("--json", action="store_true")
         if name == "show":
             op.add_argument("--id", help="Upload request ID; default: latest")
-    sharing = ops.add_parser("serve", help="Enable, inspect or revoke authenticated diagnostic downloads")
-    sharing.add_argument("--cp", dest="charger", help="Charge point ID (default: unique known charger)")
-    mode = sharing.add_mutually_exclusive_group()
-    mode.add_argument("--status", action="store_true", help="Show sharing state, without credentials")
-    mode.add_argument("--revoke", action="store_true", help="Revoke downloads without deleting original archives")
     return parser
-
-
-def _sharing_charger(data_dir, specified):
-    if specified:
-        return specified
-    from ocpp_csms.status import appliance_status
-    chargers = appliance_status(data_dir).get("chargers", [])
-    connected = {item.charger_id for item in chargers if item.connected}
-    if len(connected) == 1:
-        return next(iter(connected))
-    known = {item.charger_id for item in chargers}
-    if len(known) == 1:
-        return next(iter(known))
-    from ocpp_csms.diagnostic_upload import _records
-    for entry in _records(data_dir).glob("*.json") if _records(data_dir).exists() else ():
-        try:
-            item = json.loads(entry.read_text(encoding="utf-8"))
-            if item.get("charger"):
-                known.add(item["charger"])
-        except (OSError, ValueError):
-            continue
-    if len(known) == 1:
-        return next(iter(known))
-    raise ValueError("specify --cp when no unique charger can be identified")
-
-
-def _run_sharing(args):
-    from ocpp_csms import diagnose_sharing
-    try:
-        charger = _sharing_charger(args.data_dir, args.charger)
-        if args.status:
-            result = diagnose_sharing.status(charger)
-            print(f"Diagnostic sharing for {charger}: {'enabled' if result['enabled'] else 'disabled'}")
-            if result["url"]:
-                print(f"URL: {result['url']}")
-        elif args.revoke:
-            result = diagnose_sharing.revoke(charger)
-            print(f"Diagnostic sharing revoked for {result['charger']}")
-        else:
-            result = diagnose_sharing.serve(args.data_dir, charger)
-            print(f"Diagnostic sharing enabled for {result['charger']}")
-            print(f"URL: {result['url']}")
-            print(f"Username: {result['charger']}")
-            print(f"Password: {result['password']}")
-            print(f"Files: {result['files']}")
-            print("Access persists until diagnose serve --revoke is run.")
-        return 0
-    except (ValueError, OSError, PermissionError, subprocess.CalledProcessError) as exc:
-        print(f"error: {exc}")
-        return 1
 
 
 def run_https_diagnostics(args):
     op = args.diagnostic_operation
-    if op == "serve":
-        return _run_sharing(args)
     if op == "request":
         if args.limit is not None and args.limit < 1:
             print("error: --limit must be a positive number of seconds")
