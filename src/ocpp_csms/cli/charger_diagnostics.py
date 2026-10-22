@@ -33,7 +33,7 @@ def add_diagnostics_command(subcommands):
     request.add_argument("--retries", type=int)
     request.add_argument("--retry-interval", type=int)
     request.add_argument("--json", action="store_true")
-    for name in ("status", "list", "show"):
+    for name in ("status", "list", "show", "prune"):
         op = ops.add_parser(name, help="Inspect locally received diagnostic uploads")
         op.add_argument("--cp", dest="charger", help="Filter by charge point ID")
         op.add_argument("--json", action="store_true")
@@ -58,6 +58,9 @@ def run_https_diagnostics(args):
         if payload.get("file_name") or payload.get("fileName"):
             print(f"Charger suggested filename: {payload.get('file_name', payload.get('fileName'))}")
         print("The response does not confirm successful file receipt.")
+        return 0
+    if op == "prune":
+        print(f"Expired diagnostic requests removed: {diagnostic_upload.remove_expired(args.data_dir)}")
         return 0
     records = diagnostic_upload.list_requests(args.data_dir, charger=args.charger)
     if op == "status":
