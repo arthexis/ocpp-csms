@@ -879,7 +879,7 @@ that nginx stored a file.
 ### Temporary operator-controlled diagnostic downloads
 
 Provision the separate read-only nginx host with DNS pointing at this server and the
-existing expose playbook, setting `ocpp_csms_diagnose_download_host=diagnose.gelectriic.com`
+existing expose playbook, setting `ocpp_expose_diagnose_download_host=diagnose.gelectriic.com`
 (and the existing Certbot email). The download site requires its own TLS certificate.
 This setting is opt-in and does not create systemd services or alter the charger upload URL.
 
