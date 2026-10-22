@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 from ocpp_csms.diagnostic_upload import ROOT, TOKEN_RE
 
 MAX_BODY = 100 * 1024 * 1024
-PATH = re.compile(r"^/ocpp-diagnostics/([a-f0-9]{40})/upload\.bin/?$")
+PATH = re.compile(r"^/ocpp-diagnose/([a-f0-9]{40})/upload\.bin/?$")
 
 
 class Handler(BaseHTTPRequestHandler):
