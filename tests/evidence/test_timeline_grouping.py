@@ -1,11 +1,10 @@
 """Regression checks for the conservative human-readable event grouping."""
 import copy
 import json
-from argparse import Namespace
 
 import pytest
 
-from ocpp_csms.cli import diagnostics as cli
+from ocpp_csms.cli import build_parser, diagnostics as cli
 from ocpp_csms.evidence import diagnostics
 
 from ocpp_csms.evidence.diagnostics import format_events
@@ -306,9 +305,8 @@ def test_events_cli_text_verbose_and_json_use_identical_source_rows(monkeypatch,
     emitted = []
     monkeypatch.setattr(cli, "emit_json", emitted.append)
 
-    args = Namespace(data_dir="/unused", charger="CP1", transaction=None,
-                     since=None, until=None, limit="4", no_limit=False,
-                     raw=False, follow=False, detail=False, verbose=False, json=False)
+    parser, _ = build_parser()
+    args = parser.parse_args(["--data-dir", "/unused", "events", "--cp", "CP1", "--limit", "4"])
     assert cli.run_events(args) == 0
     assert "MeterValues C1 tx=42 ↔ ×2" in capsys.readouterr().out
     args.verbose = True
@@ -376,10 +374,7 @@ def test_transaction_cli_events_uses_request_only_compaction(monkeypatch):
     monkeypatch.setattr(transactions, "TransactionQuery", FakeQuery)
     monkeypatch.setattr(transactions, "format_transaction", lambda view, **kw: "Transaction detail")
     monkeypatch.setattr(transactions, "transaction_events", lambda *a: [meter(1), meter(2), meter(3)])
-    args = Namespace(data_dir="/unused", transaction_id=42, active=False, last=False,
-                     charger=None, connector=None, id_tag=None, since=None, until=None,
-                     between=None, at=None, today=False, limit=None, no_limit=False,
-                     events=True, local_time=False)
+    args = build_parser()[0].parse_args(["--data-dir", "/unused", "txn", "42", "--events"])
     result = transactions.run_transactions(args)
     assert "Transaction detail" in result
     assert "requests (responses not established) ×3" in result
