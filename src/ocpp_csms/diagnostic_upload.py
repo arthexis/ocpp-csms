@@ -80,6 +80,14 @@ def _notifications(data_dir: str | Path, charger: str | None, since: str) -> lis
     """Use timestamped OCPP evidence, never assume a notification's request ID."""
     from ocpp_csms.evidence.diagnostics import events_between
     if not charger:
+        # The CLI may omit --cp for a unique connected charger. Recover its
+        # identity from the outgoing recorded GetDiagnostics action after
+        # creation; do not guess using other charger notifications.
+        sent = events_between(data_dir, charger_id=None, since=since, limit=None)
+        matching = [row["charger_id"] for row in sent if row["kind"] == "ocpp"
+                    and row["action"] == "GetDiagnostics" and row["direction"] == "out"]
+        charger = matching[0] if matching else None
+    if not charger:
         return []
     rows = events_between(data_dir, charger_id=charger, since=since, limit=None)
     output = []
