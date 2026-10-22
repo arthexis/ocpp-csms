@@ -796,7 +796,7 @@ Charger-scoped commands use `--cp CHARGER` instead of positional charger identif
 ## HTTPS charger diagnostic uploads (nginx DAV)
 
 Public `deploy.sh --expose HOSTNAME` provisions a native nginx HTTPS PUT receiver at
-`/ocpp-diagnostics/<unpredictable-request-id>/upload.bin`. The URL is a bearer
+`/ocpp-diagnose/<unpredictable-request-id>/upload.bin`. The URL is a bearer
 capability: anyone possessing it can attempt to upload before expiry; do not
 paste it into tickets or logs. Requests have a two-hour expiry and an hourly
 pruning timer; nginx denies GET and DELETE, caps request bodies at 100 MiB,
