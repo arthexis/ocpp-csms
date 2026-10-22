@@ -1,0 +1,19 @@
+# Dedicated authenticated download host. No upload path, no access to bearer tokens.
+server {
+    listen 80;
+    server_name {{ ocpp_csms_diagnose_download_host }};
+    location ^~ /.well-known/acme-challenge/ { root /var/www/ocpp-csms-acme; }
+    location / { return 404; }
+}
+server {
+    listen 443 ssl;
+    server_name {{ ocpp_csms_diagnose_download_host }};
+    server_tokens off;
+    ssl_certificate /etc/letsencrypt/live/{{ ocpp_csms_diagnose_download_host }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ ocpp_csms_diagnose_download_host }}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    add_header X-Content-Type-Options "nosniff" always;
+    # Each generated exact CP location has its own auth_basic_user_file.
+    include /etc/nginx/ocpp-csms-diagnose-download/*.conf;
+    location / { return 404; }
+}
