@@ -874,3 +874,34 @@ On the charger host use `ocpp-csms diagnose request --limit 120 --follow`
 after deploying the updated expose role. Test the receiver locally before
 retrying real charger uploads. A charger-reported `Uploaded` does not prove
 that nginx stored a file.
+
+
+### Temporary operator-controlled diagnostic downloads
+
+Provision the separate read-only nginx host with DNS pointing at this server:
+
+```bash
+./deploy.sh --expose YOUR_EXISTING_CSMS_HOST --diagnose-download-host diagnose.gelectriic.com --email YOUR_CERTBOT_EMAIL
+```
+
+This passes the optional Ansible setting `ocpp_expose_diagnose_download_host`. The download site requires its own TLS certificate.
+This setting is opt-in and does not create systemd services or alter the charger upload URL.
+
+Once provisioned, use the installed CLI with root privileges because it changes nginx
+configuration and HTTP Basic credentials. The same `--data-dir` as the running CSMS
+must be selected (normally discovered from its systemd unit):
+
+```bash
+sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --cp T175-IT1-0620-055
+sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --status --cp T175-IT1-0620-055
+sudo /home/ubuntu/.local/share/ocpp-csms/current/venv/bin/ocpp-csms diagnose serve --revoke --cp T175-IT1-0620-055
+```
+
+`serve` prints the HTTPS URL, CP ID username, and a fresh random password exactly
+once. It rotates an existing grant for that CP, publishing safe-named copies of the
+retained archives; original upload paths/tokens are never served. Other CPs use
+separate nginx locations and separate credential files. `--status` does not reveal
+passwords. `--revoke` disables that CP's grant and removes only published copies,
+not the diagnostic uploads. Grants do **not** expire automatically; operators must
+revoke them explicitly. The published set is a snapshot at grant time: repeat
+`serve` to include newly arrived files (the password will rotate).
