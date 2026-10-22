@@ -71,7 +71,7 @@ recover_exposure() {
         fi
     done
     if [ "$count" -gt 1 ]; then
-        printf 'Multiple managed CSMS nginx sites found; specify --expose HOSTNAME.\\n' >&2
+        printf 'Multiple managed CSMS nginx sites found; specify --expose HOSTNAME.\n' >&2
         return 2
     fi
     [ "$count" -eq 1 ] && printf '%s' "$found"
@@ -124,10 +124,10 @@ else
     printf 'OCPP critical handoff time: n/a (no verified handoff)\n'
 fi
 if [ "$status" -eq 0 ] && [ -n "$recovered_expose" ]; then
-    printf 'Reusing existing public exposure: %s\\n' "$recovered_expose"
-    if ! ansible-playbook "$ROOT/ansible/playbooks/expose.yml" -i localhost, -c local \\
+    printf 'Reusing existing public exposure: %s\n' "$recovered_expose"
+    if ! ansible-playbook "$ROOT/ansible/playbooks/expose.yml" -i localhost, -c local \
         -e "ocpp_csms_expose=$recovered_expose"; then
-        printf 'CSMS install succeeded, but nginx exposure refresh failed.\\n' >&2
+        printf 'CSMS install succeeded, but nginx exposure refresh failed.\n' >&2
         status=1
     fi
 fi
