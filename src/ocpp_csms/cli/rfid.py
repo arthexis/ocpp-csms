@@ -45,17 +45,11 @@ def add_rfid_command(
         ("clear", "Clear the charger's local authorization list"),
     ):
         command = rfid_subcommands.add_parser(name, help=help_text)
-        command.add_argument(
-            "charger",
-            nargs="?",
-            help="Charge point ID (optional when exactly one charger is connected)",
-        )
         command.add_argument("--cp", dest="charger_option", help="Explicit charge point ID")
 
     cache = rfid_subcommands.add_parser("cache", help="Manage the charger's authorization cache (not its local RFID list)")
     cache_sub = cache.add_subparsers(dest="cache_command", required=True)
     clear_cache = cache_sub.add_parser("clear", help="Request OCPP ClearCache without changing the local list")
-    clear_cache.add_argument("charger", nargs="?", help="Charge point ID")
     clear_cache.add_argument("--cp", dest="charger_option", help="Explicit charge point ID")
     return rfid
 
@@ -201,11 +195,7 @@ def run_rfid(args: argparse.Namespace) -> str:
 
 
 def _requested_charger(args: argparse.Namespace) -> str | None:
-    positional = getattr(args, "charger", None)
-    option = getattr(args, "charger_option", None)
-    if positional and option:
-        raise ValueError("charger may be provided either positionally or with --cp, not both")
-    return option or positional
+    return getattr(args, "charger_option", None)
 
 
 def _list_hash(entries: list[dict[str, object]]) -> str:
