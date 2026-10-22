@@ -20,7 +20,7 @@ def _cursor(data_dir):
                 "runtime": connection.execute("SELECT COALESCE(MAX(id), 0) FROM runtime_events").fetchone()[0]}
 
 
-def _new_events(data_dir, cursor, *, charger_id=None, transaction_id=None, since=None, until=None, batch_size=500):
+def _new_events(data_dir, cursor, *, charger_id=None, transaction_id=None, since=None, until=None, only=(), exclude=(), batch_size=500):
     path = Path(data_dir).expanduser() / DATABASE_FILENAME
     if not path.exists():
         return []
@@ -50,7 +50,9 @@ def _new_events(data_dir, cursor, *, charger_id=None, transaction_id=None, since
             if (charger_id is None or row["charger_id"] == charger_id)
             and (transaction_id is None or row["transaction_id"] in (transaction_id if isinstance(transaction_id, tuple) else (transaction_id,)))
             and (start is None or row["occurred_at"] >= start)
-            and (stop is None or row["occurred_at"] <= stop)]
+            and (stop is None or row["occurred_at"] <= stop)
+            and (not only or any(fragment in row["action"].casefold() for fragment in only))
+            and not any(fragment in row["action"].casefold() for fragment in exclude)]
     return sorted(result, key=lambda row: (row['occurred_at'], row['kind'], row['id']))
 
 
@@ -63,7 +65,9 @@ def follow_events(args, initial_rows, *, cursor, since=None, until=None, interva
         while True:
             rows = _new_events(args.data_dir, cursor, charger_id=args.charger,
                                transaction_id=args.transaction,
-                               since=since, until=until)
+                               since=since, until=until,
+                               only=tuple(part.strip().casefold() for part in args.only.split(",")) if getattr(args, "only", None) else (),
+                               exclude=tuple(part.strip().casefold() for part in args.exclude.split(",")) if getattr(args, "exclude", None) else ())
             if rows:
                 _emit(args, rows)
                 continue  # drain backlog before sleeping
