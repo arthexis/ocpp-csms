@@ -155,7 +155,7 @@ def remove_expired(data_dir: str | Path) -> int:
         pending = ROOT / token
         archived = RETAINED / token
         if pending.is_dir() and not pending.is_symlink():
-            files = [p for p in pending.iterdir() if p.is_file() and not p.is_symlink()]
+            files = [p for p in pending.iterdir() if p.name == "upload.bin" and p.is_file() and not p.is_symlink()]
             if files:
                 RETAINED.mkdir(parents=True, exist_ok=True, mode=0o700)
                 if not archived.exists():
