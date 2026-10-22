@@ -26,7 +26,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
 
     events = subcommands.add_parser("events", help="Show recorded events")
     add_cp(events, help="Filter by charge point ID")
-    add(events, "--transaction", "--txn", dest="transaction", type=int, help="Filter by OCPP transaction ID")
+    add(events, "--transaction", "--txn", "--tx", dest="transaction", type=int, help="Filter by OCPP transaction ID")
     add(events, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 3d)")
     add(events, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 12h)")
     limit_group = events.add_mutually_exclusive_group()
