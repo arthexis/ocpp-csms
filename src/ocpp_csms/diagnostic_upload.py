@@ -4,14 +4,13 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 CONFIG = Path("/etc/ocpp-csms/diagnostics-https.json")
 TOKEN_RE = re.compile(r"^[a-f0-9]{40}$")
 ROOT = Path("/var/lib/ocpp-csms/diagnostics")
-MAX_AGE = timedelta(hours=2)
 RETAINED = ROOT / "retained"
 
 
@@ -52,7 +51,6 @@ def prepare(data_dir: str | Path, charger: str | None) -> tuple[dict, str]:
         "id": token,
         "charger": charger,
         "created_at": created.isoformat(),
-        "expires_at": (created + MAX_AGE).isoformat(),
         "suggested_file": None,
         "result": "requested",
     }
@@ -105,7 +103,7 @@ def _notifications(data_dir: str | Path, charger: str | None, since: str) -> lis
 
 
 def archive_directory(token: str) -> Path:
-    """Uploaded evidence survives expiration of its public upload capability."""
+    """Locate the immutable received file, including files retained by older deployments."""
     pending = ROOT / token
     return pending if pending.is_dir() else RETAINED / token
 
@@ -130,8 +128,6 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
                 status = entry["notifications"][-1]["status"]
                 if status in ("Uploading", "UploadFailed", "Uploaded"):
                     entry["result"] = "charger_" + status.lower()
-            elif _now() > datetime.fromisoformat(entry["expires_at"]):
-                entry["result"] = "expired"
             if charger is None or entry.get("charger") == charger:
                 # Never expose bearer token in ordinary output.
                 result.append(entry)
