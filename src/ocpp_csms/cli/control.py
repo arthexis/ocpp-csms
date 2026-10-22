@@ -4,6 +4,7 @@ import argparse
 import asyncio
 
 from ocpp_csms.control import send_control
+from ocpp_csms.cli.options import add_cp
 
 
 CONTROL_COMMANDS = ("start", "reset",)
@@ -16,30 +17,20 @@ def add_control_commands(
     add = argparse.ArgumentParser.add_argument
 
     start = subcommands.add_parser("start", help="Request a remote charging session")
-    add(start, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(start, "--cp", dest="charger_option", help="Explicit charge point ID")
+    add(start, "--cp", dest="charger_option", help="Charge point ID (optional with one connection)")
     add(start, "--connector", type=int, help="Target connector ID; omit to let the charger choose")
     add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
 
     reset = subcommands.add_parser("reset", help="Request charger reset")
-    add(reset, "charger", nargs="?", help="Charge point ID (optional when exactly one charger is connected)")
-    add(reset, "--cp", dest="charger_option", help="Explicit charge point ID")
+    add(reset, "--cp", dest="charger_option", help="Charge point ID (optional with one connection)")
     add(reset, "--hard", action="store_true", help="Request a Hard reset instead of Soft")
 
     return {"start": start, "reset": reset}
 
 
-def _requested_charger(args: argparse.Namespace) -> str | None:
-    positional = getattr(args, "charger", None)
-    option = getattr(args, "charger_option", None)
-    if positional and option:
-        raise ValueError("charger may be provided either positionally or with --cp, not both")
-    return option or positional
-
-
 def control_request(args: argparse.Namespace) -> dict[str, object]:
     request: dict[str, object] = {"command": args.command}
-    charger = _requested_charger(args)
+    charger = getattr(args, "charger", None) or getattr(args, "charger_option", None)
     if charger is not None:
         request["charger"] = charger
     if args.command == "start":

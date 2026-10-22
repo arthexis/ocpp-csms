@@ -13,7 +13,7 @@ def test_status_runs_through_cli_module(cli_parser, tmp_path, capsys):
 def test_events_runs_through_cli_module(cli_parser, tmp_path, capsys):
     store = EventStore(tmp_path)
     store.record_ocpp("charger-a", "Heartbeat", {})
-    args = cli_parser.parse_args(["--data-dir", str(tmp_path), "events", "charger-a"])
+    args = cli_parser.parse_args(["--data-dir", str(tmp_path), "events", "--cp", "charger-a"])
 
     assert run_diagnostic(args) == 0
     assert "Heartbeat" in capsys.readouterr().out
@@ -27,7 +27,7 @@ def test_explain_runs_through_cli_module(cli_parser, tmp_path, capsys):
         "--data-dir",
         str(tmp_path),
         "explain",
-        "charger-a",
+        "--cp", "charger-a",
         "--at",
         occurred_at,
     ])

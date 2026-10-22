@@ -75,6 +75,62 @@ def events_between(
     return rows
 
 
+def fault_events(
+    data_dir: str | Path,
+    *,
+    charger_id: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Recent fault notifications, using receive time for selection.
+
+    Preserve both the receive timestamp and charger-reported timestamp; these
+    can be days apart when a charger replays queued OCPP evidence.
+    """
+    if limit < 1:
+        raise ValueError("--limit must be positive")
+    rows = events_between(data_dir, charger_id=charger_id, since=since, until=until, limit=None)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        if row["kind"] != "ocpp" or row["direction"] != "in" or row["action"] != "StatusNotification":
+            continue
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get("status") != "Faulted":
+            continue
+        result.append({
+            "received_at": row["occurred_at"],
+            "charger_id": row["charger_id"],
+            "charger_at": payload.get("timestamp"),
+            "connector_id": payload.get("connector_id"),
+            "status": payload["status"],
+            "error_code": payload.get("error_code"),
+            "info": payload.get("info"),
+            "vendor_id": payload.get("vendor_id"),
+            "vendor_error_code": payload.get("vendor_error_code"),
+        })
+    return result[-limit:]
+
+
+def format_faults(faults: list[dict[str, Any]]) -> str:
+    if not faults:
+        return "No recorded fault notifications."
+    lines = []
+    for fault in faults:
+        connector = fault["connector_id"]
+        parts = [str(fault["received_at"]), str(fault["charger_id"]),
+                 f"C{connector}" if connector is not None else "C?",
+                 "Faulted", str(fault.get("error_code") or "UnknownError")]
+        for name in ("charger_at", "info", "vendor_id", "vendor_error_code"):
+            if fault.get(name) not in (None, ""):
+                parts.append(f"{name}={fault[name]}")
+        lines.append("  ".join(parts))
+    return "\n".join(lines)
+
+
 def transaction_events(
     data_dir: str | Path,
     transaction_id: int,
@@ -162,6 +218,10 @@ def _summary(row: sqlite3.Row, *, detail: bool = False) -> str:
         details.extend(str(value) for value in (
             payload.get("status"), payload.get("error_code"), payload.get("info")
         ) if value is not None and value != "" and value != "NoError")
+        if detail:
+            for key in ("vendor_id", "vendor_error_code", "timestamp"):
+                if payload.get(key) not in (None, ""):
+                    details.append(f"{key}={payload[key]}")
     elif direction == "out":
         status = payload.get("status")
         info = payload.get("idTagInfo")

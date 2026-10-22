@@ -129,7 +129,6 @@ def build_txn_operations_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ocpp-csms txn", description="Transaction operations")
     operations = parser.add_subparsers(dest="operation", required=True)
     start = operations.add_parser("start", help="Request remote transaction start")
-    start.add_argument("charger", nargs="?")
     start.add_argument("--cp", dest="charger_option")
     start.add_argument("-c", "--connector", type=int)
     start.add_argument("--rfid", dest="id_tag")

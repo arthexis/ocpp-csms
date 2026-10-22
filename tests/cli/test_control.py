@@ -36,7 +36,7 @@ def test_start_command_builds_control_request_with_or_without_charger(parse_cli)
         "id_tag": "REMOTE",
         "connector": 2,
     }
-    assert control_request(parse_cli("start", "charger-a", "--connector", "2", "--rfid", "REMOTE")) == expected
+    assert control_request(parse_cli("start", "--cp", "charger-a", "--connector", "2", "--rfid", "REMOTE")) == expected
     assert control_request(parse_cli("start", "--cp", "charger-a", "-c", "2", "--rfid", "REMOTE")) == expected
 
 
@@ -67,9 +67,9 @@ def test_reset_defaults_to_soft_and_supports_explicit_charger(parse_cli):
     }
 
 
-def test_control_rejects_two_charger_selectors(parse_cli):
-    with pytest.raises(ValueError):
-        control_request(parse_cli("reset", "charger-a", "--cp", "charger-b"))
+def test_control_rejects_positional_charger(parse_cli):
+    with pytest.raises(SystemExit):
+        parse_cli("reset", "charger-a")
 
 
 def install_control_response(monkeypatch, response=None, exc=None):
