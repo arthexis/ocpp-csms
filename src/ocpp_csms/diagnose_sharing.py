@@ -129,14 +129,14 @@ def serve(data_dir: str | Path, cp: str) -> dict:
         _replace_file(auth, f"{cp}:{hashed}\n")
         # Separate exact location and credentials prevent one CP from browsing another.
         snippet = (
-            f"location ^~ /{cp}/ {{\\n"
-            f"    alias {PUBLIC_ROOT}/{cp}/;\\n"
-            "    autoindex on;\\n"
-            '    auth_basic "OCPP diagnostics";\\n'
-            f"    auth_basic_user_file {auth};\\n"
-            "    limit_except GET { deny all; }\\n"
-            '    add_header Cache-Control "private, no-store" always;\\n'
-            "}\\n"
+            f"location ^~ /{cp}/ {{\n"
+            f"    alias {PUBLIC_ROOT}/{cp}/;\n"
+            "    autoindex on;\n"
+            '    auth_basic "OCPP diagnostics";\n'
+            f"    auth_basic_user_file {auth};\n"
+            "    limit_except GET { deny all; }\n"
+            '    add_header Cache-Control "private, no-store" always;\n'
+            "}\n"
         )
         _replace_file(conf, snippet, 0o644)
         if backup.exists():
