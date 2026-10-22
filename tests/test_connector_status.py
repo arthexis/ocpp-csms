@@ -141,3 +141,20 @@ def test_no_fabricated_second_connector(tmp_path: Path):
     text = format_status(appliance_status(tmp_path))
     assert "State C1" in text
     assert "State C2" not in text
+
+
+def test_status_table_shows_observed_connector_zero_independently(tmp_path: Path):
+    events = EventStore(tmp_path)
+    events.record_connector_status("charger-a", {
+        "connector_id": 0, "status": "Available", "timestamp": "2026-10-22T14:58:39Z",
+    })
+    events.record_connector_status("charger-a", {
+        "connector_id": 1, "status": "Faulted", "timestamp": "2026-10-22T14:58:38Z",
+    })
+    text = format_status(appliance_status(tmp_path))
+    header = next(line for line in text.splitlines() if line.startswith("ID "))
+    row = next(line for line in text.splitlines() if line.startswith("charger-a"))
+    assert "State C0" in header and "State C1" in header
+    assert header.index("State C0") < header.index("State C1")
+    assert "Available" in row and "Faulted" in row
+    assert "State C2" not in header
