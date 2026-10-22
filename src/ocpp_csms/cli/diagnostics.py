@@ -26,7 +26,8 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
 
     events = subcommands.add_parser("events", help="Show recorded events")
     add_cp(events, help="Filter by charge point ID")
-    add(events, "--transaction", "--txn", "--tx", dest="transaction", type=int, help="Filter by OCPP transaction ID")
+    add(events, "--tx", dest="transaction", type=int, help="Filter by one OCPP transaction ID")
+    add(events, "--txn", dest="transactions", type=_parse_transaction_ids, help="Filter by comma-separated OCPP transaction IDs")
     add(events, "--since", help="Lower timestamp bound (ISO-8601 or relative, e.g. 3d)")
     add(events, "--until", help="Upper timestamp bound (ISO-8601 or relative, e.g. 12h)")
     limit_group = events.add_mutually_exclusive_group()
@@ -89,10 +90,26 @@ def _parse_event_limit(value: str | int) -> tuple[int | None, str | None]:
     raise ValueError("--limit must be a positive event count or duration (e.g. 1d)")
 
 
+def _parse_transaction_ids(value: str) -> tuple[int, ...]:
+    parts = value.split(",")
+    if any(not part.strip().isdigit() for part in parts):
+        raise argparse.ArgumentTypeError("--txn requires comma-separated non-negative transaction IDs")
+    return tuple(dict.fromkeys(int(part.strip()) for part in parts))
+
+
+def _event_transaction_filter(args: argparse.Namespace) -> int | tuple[int, ...] | None:
+    single = getattr(args, "transaction", None)
+    multiple = getattr(args, "transactions", None)
+    if single is not None and multiple is not None:
+        raise ValueError("--tx and --txn cannot be combined")
+    if single is not None and single < 0:
+        raise ValueError("--tx must be zero or greater")
+    return multiple if multiple is not None else single
+
+
 def run_events(args: argparse.Namespace) -> int:
     count, duration = (None, None) if getattr(args, 'no_limit', False) or (args.since is not None and args.limit is None) else _parse_event_limit(args.limit if args.limit is not None else '200')
-    if args.transaction is not None and args.transaction < 0:
-        raise ValueError("--transaction/--txn must be zero or greater")
+    transaction_filter = _event_transaction_filter(args)
     if args.raw and not args.json:
         raise ValueError("--raw requires --json")
     if args.verbose and args.json:
@@ -113,12 +130,13 @@ def run_events(args: argparse.Namespace) -> int:
         from ocpp_csms.cli.event_follow import _cursor
         cursor = _cursor(args.data_dir)
     rows = events_between(
-        args.data_dir, charger_id=args.charger, transaction_id=args.transaction,
+        args.data_dir, charger_id=args.charger, transaction_id=transaction_filter,
         since=since.isoformat() if since else None,
         until=until.isoformat() if until else None, limit=count,
     )
     if getattr(args, "follow", False):
         from ocpp_csms.cli.event_follow import follow_events
+        args.transaction = transaction_filter
         return follow_events(args, rows, cursor=cursor, since=since.isoformat() if since else None,
                              until=until.isoformat() if until else None)
     if args.json:
