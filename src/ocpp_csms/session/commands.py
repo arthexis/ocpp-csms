@@ -171,6 +171,9 @@ class SessionCommands:
                 charging_rate_unit=charging_rate_unit,
             )
         )
+        if response is None:
+            self._record("GetCompositeSchedule", {"error": "missing_response"}, direction="in")
+            raise ValueError("charger returned no GetCompositeSchedule response")
         self._record("GetCompositeSchedule", dict(response.__dict__), direction="in")
         return response
 
