@@ -19,6 +19,19 @@ def test_events_runs_through_cli_module(cli_parser, tmp_path, capsys):
     assert "Heartbeat" in capsys.readouterr().out
 
 
+def test_events_no_status_filters_before_limit(cli_parser, tmp_path, capsys):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "StartTransaction", {"connector_id": 1})
+    store.record_ocpp("charger-a", "Heartbeat", {})
+    store.record_ocpp("charger-a", "MeterValues", {"connector_id": 1, "meter_value": []})
+    args = cli_parser.parse_args(["--data-dir", str(tmp_path), "events", "-n", "1", "--no-status"])
+    assert run_diagnostic(args) == 0
+    output = capsys.readouterr().out
+    assert "StartTransaction" in output
+    assert "Heartbeat" not in output
+    assert "MeterValues" not in output
+
+
 def test_explain_runs_through_cli_module(cli_parser, tmp_path, capsys):
     store = EventStore(tmp_path)
     store.record_ocpp("charger-a", "Heartbeat", {})
