@@ -792,3 +792,36 @@ Undo requires the matching post-reset verification record beside the archive, ch
 Use `ocpp-csms faults` to list recent incoming `StatusNotification` faults without raw JSON or `jq` pipelines. `-n 5` shows the last five matching faults; add `--cp ID` to select a charger. Charger timestamps are shown separately from CSMS receipt time, since offline queues may arrive days late. `ocpp-csms events --detail` also shows `vendor_id` and `vendor_error_code` when supplied.
 
 Charger-scoped commands use `--cp CHARGER` instead of positional charger identifiers. Omit `--cp` where the command supports all-charger inspection or can infer a unique connected charger. Transaction IDs, connector IDs and operation names retain their documented selectors.
+
+## HTTPS charger diagnostic uploads (nginx DAV)
+
+Public `deploy.sh --expose HOSTNAME` provisions a native nginx HTTPS PUT receiver at
+`/ocpp-diagnostics/<unpredictable-request-id>/upload.bin`. The URL is a bearer
+capability: anyone possessing it can attempt to upload before expiry; do not
+paste it into tickets or logs. Requests have a two-hour expiry and an hourly
+pruning timer; nginx denies GET and DELETE, caps request bodies at 100 MiB,
+and rejects overwriting an existing target. Public port 443 is sufficient.
+There is no custom HTTP upload backend. This is available only when the
+public nginx expose role was deployed, not via local install alone.
+
+Operator workflow after expose:
+```bash
+ocpp-csms diagnose request --cp CHARGER
+ocpp-csms diagnose status --cp CHARGER
+ocpp-csms diagnose list
+ocpp-csms diagnose show
+```
+With exactly one connected charger, `--cp` can be omitted for a request.
+The older `ocpp-csms diagnose --location URL` remains supported for
+charger-specific or alternate transfer services.
+
+A successful `GetDiagnostics` response does *not* prove the upload succeeded.
+`diagnose status` confirms that a file appeared on disk but does not validate
+the diagnostic contents. Use `diagnose show` to locate the received archive,
+then inspect it with standard offline tools on a trusted machine. Never execute
+scripts found inside charger archives. Incoming files are treated as untrusted.
+
+**Compatibility:** nginx DAV accepts HTTP PUT. Chargers using POST or FTP/FTPS
+will not be compatible with this endpoint. Test the particular charger firmware
+and check nginx access/error logs (the bearer path is excluded from access logs).
+Avoid exposing diagnostic archive contents publicly.
