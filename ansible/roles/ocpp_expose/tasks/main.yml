@@ -264,7 +264,7 @@
       PrivateTmp=true
       ProtectSystem=strict
       ReadWritePaths=/var/lib/ocpp-csms/diagnostics
-      ProtectHome=true
+      ProtectHome=read-only
       MemoryMax=384M
       TasksMax=32
 
