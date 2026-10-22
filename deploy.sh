@@ -47,8 +47,46 @@ if [ "$uninstall" -eq 1 ]; then
     exec ansible-playbook "$ROOT/ansible/playbooks/uninstall.yml" -i localhost, -c local
 fi
 
+# Recover an existing CSMS public hostname only from managed nginx sites.
+# Refuse ambiguous installations; never guess from generic system hostnames.
+recover_exposure() {
+    found=""
+    count=0
+    for site in /etc/nginx/sites-enabled/*; do
+        [ -f "$site" ] || continue
+        case "$(basename "$site")" in
+            *.*) ;;
+            *) continue ;;
+        esac
+        if grep -q 'proxy_set_header Sec-WebSocket-Protocol' "$site" 2>/dev/null &&
+           grep -q 'proxy_pass http://127.0.0.1:' "$site" 2>/dev/null; then
+            hostname=$(basename "$site")
+            case "$hostname" in
+                *[!a-z0-9.-]*|.*|*..*) continue ;;
+            esac
+            if [ -f "/etc/letsencrypt/live/$hostname/fullchain.pem" ]; then
+                found=$hostname
+                count=$((count + 1))
+            fi
+        fi
+    done
+    if [ "$count" -gt 1 ]; then
+        printf 'Multiple managed CSMS nginx sites found; specify --expose HOSTNAME.\\n' >&2
+        return 2
+    fi
+    [ "$count" -eq 1 ] && printf '%s' "$found"
+    return 0
+}
+
 if [ -n "$email" ] || [ "$no_certbot" -eq 1 ]; then
     [ -n "$expose" ] || { printf '%s\n' '--email and --no-certbot require --expose.' >&2; exit 2; }
+fi
+
+# On an ordinary reinstall, refresh a previously configured public nginx
+# site after the application install; do not create exposure on private hosts.
+recovered_expose=""
+if [ -z "$expose" ] && [ "$stage_only" -eq 0 ] && [ "$dev" -eq 0 ]; then
+    recovered_expose=$(recover_exposure) || exit $?
 fi
 
 if [ -n "$expose" ]; then
@@ -84,5 +122,13 @@ if [ -s "$timing_file" ]; then
     esac
 else
     printf 'OCPP critical handoff time: n/a (no verified handoff)\n'
+fi
+if [ "$status" -eq 0 ] && [ -n "$recovered_expose" ]; then
+    printf 'Reusing existing public exposure: %s\\n' "$recovered_expose"
+    if ! ansible-playbook "$ROOT/ansible/playbooks/expose.yml" -i localhost, -c local \\
+        -e "ocpp_csms_expose=$recovered_expose"; then
+        printf 'CSMS install succeeded, but nginx exposure refresh failed.\\n' >&2
+        status=1
+    fi
 fi
 exit "$status"
