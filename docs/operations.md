@@ -878,9 +878,13 @@ that nginx stored a file.
 
 ### Temporary operator-controlled diagnostic downloads
 
-Provision the separate read-only nginx host with DNS pointing at this server and the
-existing expose playbook, setting `ocpp_expose_diagnose_download_host=diagnose.gelectriic.com`
-(and the existing Certbot email). The download site requires its own TLS certificate.
+Provision the separate read-only nginx host with DNS pointing at this server:
+
+```bash
+./deploy.sh --expose YOUR_EXISTING_CSMS_HOST --diagnose-download-host diagnose.gelectriic.com --email YOUR_CERTBOT_EMAIL
+```
+
+This passes the optional Ansible setting `ocpp_expose_diagnose_download_host`. The download site requires its own TLS certificate.
 This setting is opt-in and does not create systemd services or alter the charger upload URL.
 
 Once provisioned, use the installed CLI with root privileges because it changes nginx
