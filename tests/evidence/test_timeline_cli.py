@@ -1,11 +1,10 @@
 """CLI-level regression tests for the compact and verbose event timeline."""
-import argparse
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from ocpp_csms.cli import diagnostics as cli
+from ocpp_csms.cli import build_parser, diagnostics as cli
 from ocpp_csms.evidence.diagnostics import format_events
 from ocpp_csms.evidence.contracts import events_contract, raw_events_contract
 
@@ -21,11 +20,18 @@ def event(n, action="Heartbeat", payload=None, *, direction="in", charger="CP1",
 
 
 def args(**overrides):
-    defaults = dict(data_dir="unused", charger=None, transaction=None, since=None,
-                    until=None, limit=None, json=False, raw=False, verbose=False, detail=False)
-    defaults.update(overrides)
-    return argparse.Namespace(**defaults)
-
+    """Parse real CLI arguments so defaults track the production grammar."""
+    argv = ["--data-dir", "unused", "events"]
+    names = {"charger": "--cp", "transaction": "--tx",
+             "no_limit": "--no-limit"}
+    for key, value in overrides.items():
+        if value is None or value is False:
+            continue
+        flag = names.get(key, "--" + key.replace("_", "-"))
+        argv.append(flag)
+        if value is not True:
+            argv.append(str(value))
+    return build_parser()[0].parse_args(argv)
 
 
 @pytest.fixture
@@ -40,10 +46,8 @@ def query_events(captured_queries, **options):
     cli.run_events(args(**options))
     return captured_queries[-1]
 
-def test_parser_accepts_verbose():
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_parser_accepts_verbose(cli_parser):
+    parser = cli_parser
     parsed = parser.parse_args(["events", "--cp", "CP1", "--verbose", "--limit", "2"])
     assert parsed.command == "events"
     assert parsed.charger == "CP1"
@@ -52,16 +56,12 @@ def test_parser_accepts_verbose():
     assert parser.parse_args(["events", "--detail"]).detail is True
 
 
-def test_events_tx_alias_uses_transaction_query(captured_queries):
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_events_tx_alias_uses_transaction_query(captured_queries, cli_parser):
+    parser = cli_parser
     single = parser.parse_args(["events", "--tx", "240"])
-    single.data_dir = "unused"
     assert cli.run_events(single) == 0
     assert captured_queries[-1]["transaction_id"] == 240
     multiple = parser.parse_args(["events", "--txn", "240,241,240"])
-    multiple.data_dir = "unused"
     assert cli.run_events(multiple) == 0
     assert captured_queries[-1]["transaction_id"] == (240, 241)
     with pytest.raises(SystemExit):
@@ -231,16 +231,13 @@ def test_invalid_event_limits(monkeypatch, limit):
         cli.run_events(args(limit=limit))
 
 
-def test_short_limit_alias_matches_long_flag(monkeypatch):
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_short_limit_alias_matches_long_flag(monkeypatch, cli_parser):
+    parser = cli_parser
     recorded = []
     monkeypatch.setattr(cli, "events_between", lambda *_a, **kw: recorded.append(kw) or [])
     for value in ("50", "1d", "1.5h"):
         for flag in ("-n", "--limit"):
             parsed = parser.parse_args(["events", flag, value])
-            parsed.data_dir = "unused"
             cli.run_events(parsed)
         short, long = recorded[-2:]
         assert short["limit"] == long["limit"]
@@ -250,10 +247,8 @@ def test_short_limit_alias_matches_long_flag(monkeypatch):
             assert abs((datetime.fromisoformat(short["since"]) - datetime.fromisoformat(long["since"])).total_seconds()) < 1
 
 
-def test_parser_default_limit_is_implicit():
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_parser_default_limit_is_implicit(cli_parser):
+    parser = cli_parser
     assert parser.parse_args(["events"]).limit is None
 
 
@@ -269,37 +264,29 @@ def test_default_and_explicit_count_limit(captured_queries):
     assert query_events(captured_queries, since="7d", limit="50")["limit"] == 50
 
 
-def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries):
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_parser_distinguishes_implicit_and_explicit_limit(captured_queries, cli_parser):
+    parser = cli_parser
     for flags, expected in (
         (["events"], 200),
         (["events", "--since", "7d"], None),
         (["events", "--since", "7d", "-n", "50"], 50),
     ):
         parsed = parser.parse_args(flags)
-        parsed.data_dir = "unused"
         cli.run_events(parsed)
         assert captured_queries[-1]["limit"] == expected
 
 
-def test_no_limit_aliases_disable_count_cap(captured_queries):
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_no_limit_aliases_disable_count_cap(captured_queries, cli_parser):
+    parser = cli_parser
     for flag in ("--no-limit", "-N"):
         parsed = parser.parse_args(["events", "--since", "3d", flag])
-        parsed.data_dir = "unused"
         cli.run_events(parsed)
         assert captured_queries[-1]["limit"] is None
         assert captured_queries[-1]["since"] is not None
 
 
-def test_no_limit_conflicts_with_explicit_limit():
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    cli.add_diagnostic_commands(sub)
+def test_no_limit_conflicts_with_explicit_limit(cli_parser):
+    parser = cli_parser
     for explicit in ("--limit", "-n"):
         with pytest.raises(SystemExit):
             parser.parse_args(["events", explicit, "10", "--no-limit"])

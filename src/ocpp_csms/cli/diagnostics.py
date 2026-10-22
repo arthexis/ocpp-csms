@@ -36,6 +36,8 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "-j", "--json", action="store_true", help="Print the stable machine-readable event contract")
     add(events, "--raw", action="store_true", help="Include raw diagnostic payloads (requires --json)")
     add(events, "-f", "--follow", action="store_true", help="Follow newly recorded events until Ctrl+C (JSON uses JSONL)")
+    add(events, "--exclude", help="Comma-separated, case-insensitive action substrings to hide (e.g. He,Me)")
+    add(events, "--only", help="Comma-separated, case-insensitive action substrings to include")
     add(events, "--detail", action="store_true", help="Expand additional event fields in the grouped timeline")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
@@ -107,6 +109,13 @@ def _event_transaction_filter(args: argparse.Namespace) -> int | tuple[int, ...]
     return multiple if multiple is not None else single
 
 
+def parse_action_patterns(value: str) -> tuple[str, ...]:
+    patterns = tuple(part.strip().casefold() for part in value.split(","))
+    if not all(patterns):
+        raise ValueError("--exclude/--only requires nonempty comma-separated message name fragments")
+    return patterns
+
+
 def run_events(args: argparse.Namespace) -> int:
     count, duration = (None, None) if getattr(args, 'no_limit', False) or (args.since is not None and args.limit is None) else _parse_event_limit(args.limit if args.limit is not None else '200')
     transaction_filter = _event_transaction_filter(args)
@@ -129,10 +138,15 @@ def run_events(args: argparse.Namespace) -> int:
     if getattr(args, "follow", False):
         from ocpp_csms.cli.event_follow import _cursor
         cursor = _cursor(args.data_dir)
+    filters = {}
+    for option in ("exclude", "only"):
+        value = getattr(args, option, None)
+        if value is not None:
+            filters[option] = parse_action_patterns(value)
     rows = events_between(
         args.data_dir, charger_id=args.charger, transaction_id=transaction_filter,
         since=since.isoformat() if since else None,
-        until=until.isoformat() if until else None, limit=count,
+        until=until.isoformat() if until else None, limit=count, **filters,
     )
     if getattr(args, "follow", False):
         from ocpp_csms.cli.event_follow import follow_events
