@@ -32,6 +32,7 @@ def add_diagnostics_command(subcommands):
     request.add_argument("--until", help="Charger diagnostics end time")
     request.add_argument("--retries", type=int)
     request.add_argument("--retry-interval", type=int)
+    request.add_argument("--limit", type=int, default=None, help="Maximum seconds to wait for OCPP response (default: unlimited)")
     request.add_argument("--json", action="store_true")
     for name in ("status", "list", "show", "prune"):
         op = ops.add_parser(name, help="Inspect locally received diagnostic uploads")
@@ -45,14 +46,19 @@ def add_diagnostics_command(subcommands):
 def run_https_diagnostics(args):
     op = args.diagnostic_operation
     if op == "request":
+        if args.limit is not None and args.limit < 1:
+            print("error: --limit must be a positive number of seconds")
+            return 1
         # The request directory exists before GetDiagnostics is sent, to avoid races.
         record, location = diagnostic_upload.prepare(args.data_dir, args.charger)
         try:
             args.location = location
             payload = maintenance_control(args.data_dir, _request(args), malformed="invalid GetDiagnostics response")
             diagnostic_upload.record_response(args.data_dir, record["id"], payload)
-        except (MaintenanceControlError, ValueError, OSError) as exc:
-            print(f"error: {exc}")
+        except (MaintenanceControlError, ValueError, OSError):
+            diagnostic_upload.mark_timeout(args.data_dir, record["id"])
+            # Timeout exceptions include raw OCPP payloads (bearer upload URLs).
+            print("GetDiagnostics response unconfirmed; destination retained. Check diagnose status.")
             return 1
         print("Diagnostic request sent. Run: ocpp-csms diagnose status")
         if payload.get("file_name") or payload.get("fileName"):
@@ -107,6 +113,8 @@ def _request(args):
     request = {"command": "get_diagnostics", "location": args.location}
     if args.charger:
         request["charger"] = args.charger
+    if getattr(args, "diagnostic_operation", None) == "request":
+        request["response_timeout"] = args.limit
     for key, value in (("start_time", start), ("stop_time", stop), ("retries", args.retries), ("retry_interval", args.retry_interval)):
         if value is not None:
             request[key] = value
