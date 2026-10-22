@@ -245,6 +245,54 @@
     enabled: true
     daemon_reload: true
 
+- name: Install socket-activated POST receiver service
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnose.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=OCPP diagnostic POST receiver
+      Requires=ocpp-csms-diagnose.socket
+      After=ocpp-csms-diagnose.socket
+      [Service]
+      Type=simple
+      User={{ ansible_user_id }}
+      Group=www-data
+      ExecStart={{ ansible_env.HOME }}/.local/share/ocpp-csms/current/venv/bin/python -m ocpp_csms.diagnose_receiver
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ReadWritePaths=/var/lib/ocpp-csms/diagnostics
+      ProtectHome=true
+      MemoryMax=384M
+      TasksMax=32
+
+- name: Install on-demand POST receiver socket
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnose.socket
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=OCPP diagnostic HTTP POST socket
+      [Socket]
+      ListenStream=/run/ocpp-csms-diagnose.sock
+      SocketMode=0660
+      SocketUser=root
+      SocketGroup=www-data
+      RemoveOnStop=true
+      [Install]
+      WantedBy=sockets.target
+
+- name: Activate on-demand POST receiver socket
+  become: true
+  ansible.builtin.systemd_service:
+    name: ocpp-csms-diagnose.socket
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Check previous nginx site for rollback
   become: true
   ansible.builtin.stat:
