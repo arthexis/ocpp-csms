@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from ocpp_csms.cli import build_parser
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.rfid.cache import RFIDCacheState
 from ocpp_csms.rfid.list_query import RFIDListEntrySnapshot, RFIDListSnapshot
@@ -39,8 +39,11 @@ def stop_payload(
     }
 
 
-def report_args(tmp_path: Path, tag: str | None = "card-a") -> argparse.Namespace:
-    return argparse.Namespace(data_dir=str(tmp_path), rfid_command="report", tag=tag)
+def report_args(tmp_path: Path, tag: str | None = "card-a"):
+    argv = ["--data-dir", str(tmp_path), "rfid", "report"]
+    if tag is not None:
+        argv.append(tag)
+    return build_parser()[0].parse_args(argv)
 
 
 def cache_state(

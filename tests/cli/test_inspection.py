@@ -1,19 +1,16 @@
 """Phase 2 command contract tests."""
-import argparse
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from ocpp_csms.cli.inspection import _features, _reconciliation, add_inspection_commands
-from ocpp_csms.cli.rfid import add_rfid_command, _control_request
+from ocpp_csms.cli.inspection import _features, _reconciliation
+from ocpp_csms.cli.rfid import _control_request
 from ocpp_csms.control.dispatch import dispatch_control
 
 
-def test_rfid_cache_clear_is_not_list_clear():
-    parser = argparse.ArgumentParser()
-    add_rfid_command(parser.add_subparsers(dest="command"))
-    args = parser.parse_args(["rfid", "cache", "clear", "--cp", "CP1"])
+def test_rfid_cache_clear_is_not_list_clear(parse_cli):
+    args = parse_cli("rfid", "cache", "clear", "--cp", "CP1")
     request = _control_request(args)
     assert request["command"] == "rfid_cache"
     assert request["charger"] == "CP1"
@@ -37,10 +34,8 @@ def test_capability_profile_is_advertised_not_verified():
     assert next(item["status"] for item in result if item["feature"] == "Smart charging") == "Advertised"
 
 
-def test_inspection_parser():
-    parser = argparse.ArgumentParser()
-    add_inspection_commands(parser.add_subparsers(dest="command"))
-    assert parser.parse_args(["reconcile", "--cp", "CP1", "-c", "1"]).connector == 1
+def test_inspection_parser(parse_cli):
+    assert parse_cli("reconcile", "--cp", "CP1", "-c", "1").connector == 1
 
 
 @pytest.mark.parametrize(("connected", "status", "ids", "expected"), [
