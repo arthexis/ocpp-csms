@@ -416,9 +416,9 @@ def format_status(data: dict[str, Any], *, charger_id: str | None = None, chargi
         lines.append("Chargers:")
     physical_ids = sorted({
         connector.connector_id for item in chargers
-        for connector in item.connectors if connector.connector_id > 0
+        for connector in item.connectors if connector.connector_id >= 0
     })
-    # Never invent C2 merely because a charger model might support it.
+    # Show observed C0 separately from physical connectors; never invent missing connectors.
     status_headers = [f"State C{connector_id}" for connector_id in physical_ids] if physical_ids else ["Status"]
     widths = [max(12, len(header)) for header in status_headers]
     id_width = max(22, *(len(item.charger_id) + 2 for item in chargers))
