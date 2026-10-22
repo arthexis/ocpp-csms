@@ -838,3 +838,19 @@ notifications are correlated by charger and time only, not a request ID;
 `Uploaded` alone does not prove a file was received by nginx. The HTTPS
 upload directory expires independently of the response wait. A missing
 CALLRESULT and a failed HTTPS transfer are different failure modes.
+
+### Follow a diagnostic upload
+
+`ocpp-csms diagnose request` returns when either the OCPP `GetDiagnostics`
+CALLRESULT is received **or** a charger `DiagnosticsStatusNotification`
+indicates `Uploading`, `Uploaded`, or `UploadFailed`. The CLI no longer
+needs to wait for a missing CALLRESULT once the charger provides independent
+upload evidence. By default the initial acknowledgement has no CLI timeout;
+`--limit 90` caps that *initial* wait at 90 seconds.
+
+`ocpp-csms diagnose request --follow` continues printing upload status
+notifications until a local file is received, the charger reports
+`UploadFailed`, or the upload destination expires. A charger-reported
+`Uploaded` status alone is not treated as proof of local file receipt.
+`--limit` does not cut short `--follow` once the initial signal has arrived.
+Press Ctrl-C to stop following; the upload receiver continues independently.
