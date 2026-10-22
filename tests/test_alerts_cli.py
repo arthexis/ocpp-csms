@@ -17,7 +17,7 @@ class AlertsCliTests(unittest.TestCase):
 
     def test_filter_parsing(self):
         args = self.parser.parse_args(["alerts", "--cp", "CP001", "--since", "3d", "-N", "--txn", "44"])
-        self.assertEqual(args.cp, "CP001")
+        self.assertEqual(args.charger, "CP001")
         self.assertEqual(args.since, "3d")
         self.assertTrue(args.no_limit)
         self.assertEqual(args.transaction, 44)
