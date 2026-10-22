@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ocpp_csms.diagnostic_upload import ROOT, TOKEN_RE
 
@@ -55,6 +56,23 @@ def _archive_files(data_dir: str | Path, cp: str) -> list[Path]:
     found = []
     if not records.is_dir():
         return found
+    # Older CLI requests could omit --cp. Attribute those archives only when
+    # a stored outgoing GetDiagnostics command contains their exact upload URL.
+    legacy_tokens = set()
+    from ocpp_csms.evidence.diagnostics import events_between
+    for event in events_between(data_dir, charger_id=cp, limit=None):
+        if event["action"] != "GetDiagnostics" or event["direction"] != "out":
+            continue
+        try:
+            payload = json.loads(event["payload"])
+            location = payload.get("location")
+            path = urlsplit(location).path if isinstance(location, str) else ""
+        except (ValueError, TypeError, AttributeError):
+            continue
+        segments = path.split("/")
+        if len(segments) == 4 and segments[1] == "ocpp-diagnose" and segments[3] == "upload.bin":
+            if TOKEN_RE.fullmatch(segments[2]):
+                legacy_tokens.add(segments[2])
     for record in records.glob("*.json"):
         if not TOKEN_RE.fullmatch(record.stem) or record.is_symlink():
             continue
@@ -62,7 +80,7 @@ def _archive_files(data_dir: str | Path, cp: str) -> list[Path]:
             data = json.loads(record.read_text(encoding="utf-8"))
         except (ValueError, OSError):
             continue
-        if data.get("charger") != cp:
+        if data.get("charger") != cp and not (data.get("charger") is None and record.stem in legacy_tokens):
             continue
         folder = ROOT / record.stem
         if not folder.is_dir() or folder.is_symlink():
