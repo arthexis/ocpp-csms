@@ -208,6 +208,7 @@ class SessionCommands:
         self, location: str, *, retries: int | None = None,
         retry_interval: int | None = None, start_time: str | None = None,
         stop_time: str | None = None,
+        response_timeout: int | None = 30,
     ) -> call_result.GetDiagnosticsPayload:
         # Upload URLs may contain credentials or signed tokens. Never persist them.
         from urllib.parse import urlsplit, urlunsplit
@@ -219,10 +220,18 @@ class SessionCommands:
         if start_time is not None: payload["start_time"] = start_time
         if stop_time is not None: payload["stop_time"] = stop_time
         self._record("GetDiagnostics", payload, direction="out")
-        response = await self.call(call.GetDiagnosticsPayload(
-            location=location, retries=retries, retry_interval=retry_interval,
-            start_time=start_time, stop_time=stop_time,
-        ))
+        # The ocpp library serializes outgoing CALLs per session. Its default
+        # response timeout is 30s; extend only for this call and restore it.
+        # 10**9 seconds represents an effectively unbounded wait until disconnect.
+        previous_timeout = getattr(self, "_response_timeout", 30)
+        self._response_timeout = response_timeout if response_timeout is not None else 10**9
+        try:
+            response = await self.call(call.GetDiagnosticsPayload(
+                location=location, retries=retries, retry_interval=retry_interval,
+                start_time=start_time, stop_time=stop_time,
+            ))
+        finally:
+            self._response_timeout = previous_timeout
         self._record("GetDiagnostics", dict(response.__dict__), direction="in")
         return response
 

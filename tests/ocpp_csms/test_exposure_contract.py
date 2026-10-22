@@ -56,11 +56,12 @@ def test_install_expose_and_uninstall_are_independent():
 
 
 def test_nginx_dav_regex_quantifiers_are_quoted():
-    """Unquoted {40} is interpreted as nginx syntax, truncating the PCRE2 regex."""
+    """All upload location regexes must quote nginx-special PCRE quantifiers."""
     content = SITE.read_text()
-    locations = [line.strip() for line in content.splitlines() if "location ~ " in line and "/ocpp-diagnostics/" in line]
-    assert len(locations) == 1
-    assert locations[0].startswith('location ~ "^/ocpp-diagnostics/')
-    assert '{40}' in locations[0]
-    assert '{0,99}' in locations[0]
-    assert locations[0].endswith('$" {')
+    locations = [line.strip() for line in content.splitlines() if "location ~ " in line and "/ocpp-diagnose/" in line]
+    assert len(locations) == 3
+    assert all(line.startswith('location ~ "^/ocpp-diagnose/') for line in locations)
+    assert all("{40}" in line for line in locations)
+    assert all(line.endswith('$" {') for line in locations)
+    assert sum("{0,99}" in line for line in locations) == 1
+    assert sum("upload" in line and "{0,99}" not in line for line in locations) == 2

@@ -57,7 +57,7 @@ def prepare(data_dir: str | Path, charger: str | None) -> tuple[dict, str]:
     }
     _save(_records(data_dir) / (token + ".json"), record)
     # nginx only permits a PUT to an existing request directory; unknown IDs fail.
-    url = f"https://{settings['hostname']}/ocpp-diagnostics/{token}/upload.bin"
+    url = f"https://{settings['hostname']}/ocpp-diagnose/{token}/upload.bin"
     return record, url
 
 
@@ -67,6 +67,40 @@ def record_response(data_dir: str | Path, token: str, response: dict) -> None:
     entry["suggested_file"] = response.get("file_name", response.get("fileName"))
     entry["result"] = "acknowledged"
     _save(path, entry)
+
+
+def mark_timeout(data_dir: str | Path, token: str) -> None:
+    path = _records(data_dir) / (token + ".json")
+    entry = json.loads(path.read_text(encoding="utf-8"))
+    entry["result"] = "response_unconfirmed"
+    _save(path, entry)
+
+
+def _notifications(data_dir: str | Path, charger: str | None, since: str) -> list[dict]:
+    """Use timestamped OCPP evidence, never assume a notification's request ID."""
+    from ocpp_csms.evidence.diagnostics import events_between
+    if not charger:
+        # The CLI may omit --cp for a unique connected charger. Recover its
+        # identity from the outgoing recorded GetDiagnostics action after
+        # creation; do not guess using other charger notifications.
+        sent = events_between(data_dir, charger_id=None, since=since, limit=None)
+        matching = [row["charger_id"] for row in sent if row["kind"] == "ocpp"
+                    and row["action"] == "GetDiagnostics" and row["direction"] == "out"]
+        charger = matching[0] if matching else None
+    if not charger:
+        return []
+    rows = events_between(data_dir, charger_id=charger, since=since, limit=None)
+    output = []
+    for row in rows:
+        if row["kind"] != "ocpp" or row["action"] != "DiagnosticsStatusNotification" or row["direction"] != "in":
+            continue
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("status") in ("Idle", "Uploading", "Uploaded", "UploadFailed"):
+            output.append({"at": row["occurred_at"], "status": payload["status"]})
+    return output
 
 
 def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[dict]:
@@ -82,8 +116,13 @@ def list_requests(data_dir: str | Path, *, charger: str | None = None) -> list[d
             directory = ROOT / file.stem
             uploads = [p for p in directory.iterdir() if p.is_file() and not p.is_symlink()] if directory.is_dir() else []
             entry["files"] = [{"name": p.name, "bytes": p.stat().st_size} for p in uploads]
+            entry["notifications"] = _notifications(data_dir, entry.get("charger"), entry["created_at"])
             if uploads:
                 entry["result"] = "received"
+            elif entry["notifications"]:
+                status = entry["notifications"][-1]["status"]
+                if status in ("Uploading", "UploadFailed", "Uploaded"):
+                    entry["result"] = "charger_" + status.lower()
             elif _now() > datetime.fromisoformat(entry["expires_at"]):
                 entry["result"] = "expired"
             if charger is None or entry.get("charger") == charger:

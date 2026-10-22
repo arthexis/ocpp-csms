@@ -796,7 +796,7 @@ Charger-scoped commands use `--cp CHARGER` instead of positional charger identif
 ## HTTPS charger diagnostic uploads (nginx DAV)
 
 Public `deploy.sh --expose HOSTNAME` provisions a native nginx HTTPS PUT receiver at
-`/ocpp-diagnostics/<unpredictable-request-id>/upload.bin`. The URL is a bearer
+`/ocpp-diagnose/<unpredictable-request-id>/upload.bin`. The URL is a bearer
 capability: anyone possessing it can attempt to upload before expiry; do not
 paste it into tickets or logs. Requests have a two-hour expiry and an hourly
 pruning timer; nginx denies GET and DELETE, caps request bodies at 100 MiB,
@@ -825,3 +825,52 @@ scripts found inside charger archives. Incoming files are treated as untrusted.
 will not be compatible with this endpoint. Test the particular charger firmware
 and check nginx access/error logs (the bearer path is excluded from access logs).
 Avoid exposing diagnostic archive contents publicly.
+
+### Long-running GetDiagnostics replies
+
+`ocpp-csms diagnose request` waits for the charger CALLRESULT without a
+CLI-imposed response deadline (until response, connection loss, or operator
+interruption); `ocpp-csms diagnose request --limit 120` caps that wait at
+120 seconds. The charger can still report `Uploading` or `UploadFailed`
+after the command exits. Use `ocpp-csms diagnose status` and
+`ocpp-csms diagnose --list` to inspect later evidence. Upload status
+notifications are correlated by charger and time only, not a request ID;
+`Uploaded` alone does not prove a file was received by nginx. The HTTPS
+upload directory expires independently of the response wait. A missing
+CALLRESULT and a failed HTTPS transfer are different failure modes.
+
+### Follow a diagnostic upload
+
+`ocpp-csms diagnose request` returns when either the OCPP `GetDiagnostics`
+CALLRESULT is received **or** a charger `DiagnosticsStatusNotification`
+indicates `Uploading`, `Uploaded`, or `UploadFailed`. The CLI no longer
+needs to wait for a missing CALLRESULT once the charger provides independent
+upload evidence. By default the initial acknowledgement has no CLI timeout;
+`--limit 90` caps that *initial* wait at 90 seconds.
+
+`ocpp-csms diagnose request --follow` continues printing upload status
+notifications until a local file is received, the charger reports
+`UploadFailed`, or the upload destination expires. A charger-reported
+`Uploaded` status alone is not treated as proof of local file receipt.
+`--limit` does not cut short `--follow` once the initial signal has arrived.
+Press Ctrl-C to stop following; the upload receiver continues independently.
+
+### POST support (ABB and other chargers)
+
+The public HTTPS upload endpoint supports nginx-native PUT and HTTP POST
+(including ABB's `upload.bin/` trailing slash). nginx terminates TLS and
+forwards POST only to the on-demand Unix socket
+`/run/ocpp-csms-diagnose.sock`. The socket is activated by systemd using
+`ocpp-csms-diagnose.socket` and `ocpp-csms-diagnose.service`, both
+provisioned by `deploy.sh --expose HOSTNAME` or an ordinary redeployment
+that reuses the saved exposure hostname. No other public port is opened.
+
+The POST receiver rejects invalid paths, missing request directories, empty
+or oversized uploads, unexpected content types, and attempts to overwrite
+an already received file. Multipart uploads retain only the file payload,
+not client-provided filenames. URL bearer tokens must not be logged.
+
+On the charger host use `ocpp-csms diagnose request --limit 120 --follow`
+after deploying the updated expose role. Test the receiver locally before
+retrying real charger uploads. A charger-reported `Uploaded` does not prove
+that nginx stored a file.

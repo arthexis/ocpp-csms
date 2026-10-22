@@ -27,7 +27,7 @@ def test_request_prepares_destination_and_indexes_received_file(tmp_path, monkey
     monkeypatch.setattr(diagnostic_upload, "ROOT", root)
     monkeypatch.setattr(diagnostic_upload, "CONFIG", config)
     record, location = diagnostic_upload.prepare(tmp_path, "ABB001")
-    assert location.startswith("https://charger.example.com/ocpp-diagnostics/")
+    assert location.startswith("https://charger.example.com/ocpp-diagnose/")
     assert location.endswith("/upload.bin")
     assert record["charger"] == "ABB001"
     diagnostic_upload.record_response(tmp_path, record["id"], {"file_name": "diag.zip"})

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timezone
 
 from ocpp_csms.cli.transactions import resolve_time
@@ -32,6 +34,8 @@ def add_diagnostics_command(subcommands):
     request.add_argument("--until", help="Charger diagnostics end time")
     request.add_argument("--retries", type=int)
     request.add_argument("--retry-interval", type=int)
+    request.add_argument("--limit", type=int, default=None, help="Maximum seconds to wait for OCPP response (default: unlimited)")
+    request.add_argument("--follow", action="store_true", help="Follow charger status and file receipt until completion or failure")
     request.add_argument("--json", action="store_true")
     for name in ("status", "list", "show", "prune"):
         op = ops.add_parser(name, help="Inspect locally received diagnostic uploads")
@@ -45,20 +49,82 @@ def add_diagnostics_command(subcommands):
 def run_https_diagnostics(args):
     op = args.diagnostic_operation
     if op == "request":
-        # The request directory exists before GetDiagnostics is sent, to avoid races.
-        record, location = diagnostic_upload.prepare(args.data_dir, args.charger)
-        try:
-            args.location = location
-            payload = maintenance_control(args.data_dir, _request(args), malformed="invalid GetDiagnostics response")
-            diagnostic_upload.record_response(args.data_dir, record["id"], payload)
-        except (MaintenanceControlError, ValueError, OSError) as exc:
-            print(f"error: {exc}")
+        if args.limit is not None and args.limit < 1:
+            print("error: --limit must be a positive number of seconds")
             return 1
-        print("Diagnostic request sent. Run: ocpp-csms diagnose status")
-        if payload.get("file_name") or payload.get("fileName"):
-            print(f"Charger suggested filename: {payload.get('file_name', payload.get('fileName'))}")
-        print("The response does not confirm successful file receipt.")
-        return 0
+        # Dispatch in a daemon worker so an independently reported Uploading
+        # can acknowledge the request even if the CALLRESULT never arrives.
+        # The server owns the outgoing OCPP task after the control socket closes.
+        record, location = diagnostic_upload.prepare(args.data_dir, args.charger)
+        args.location = location
+        try:
+            request_payload = _request(args)
+        except ValueError:
+            diagnostic_upload.mark_timeout(args.data_dir, record["id"])
+            print("Invalid diagnostic request options.")
+            return 1
+
+        completion = threading.Event()
+        outcome = {}
+        def send():
+            try:
+                outcome["payload"] = maintenance_control(
+                    args.data_dir, request_payload, malformed="invalid GetDiagnostics response"
+                )
+                if not isinstance(outcome["payload"], dict):
+                    raise ValueError("invalid diagnostics response")
+                diagnostic_upload.record_response(args.data_dir, record["id"], outcome["payload"])
+            except (MaintenanceControlError, ValueError, OSError):
+                # Never print original exception; it can contain the bearer URL.
+                outcome["error"] = "response_unconfirmed"
+            finally:
+                completion.set()
+
+        threading.Thread(target=send, daemon=True).start()
+        started = time.monotonic()
+        acknowledged = False
+        seen = set()
+        last_result = None
+        try:
+            while True:
+                entries = diagnostic_upload.list_requests(args.data_dir, charger=args.charger)
+                current = next((item for item in entries if item["id"] == record["id"]), None)
+                if current:
+                    for notification in current.get("notifications", []):
+                        marker = (notification["at"], notification["status"])
+                        if marker not in seen:
+                            seen.add(marker)
+                            print(f"{notification['at']} {notification['status']}", flush=True)
+                    if current["result"] != last_result:
+                        last_result = current["result"]
+                        if current["result"] == "received":
+                            print("Diagnostic file received by the HTTPS server.", flush=True)
+                        elif current["result"] == "charger_uploadfailed":
+                            print("Charger reports UploadFailed.", flush=True)
+                    if current["result"] in ("charger_uploading", "charger_uploaded", "charger_uploadfailed", "received"):
+                        acknowledged = True
+                if completion.is_set() and "payload" in outcome:
+                    acknowledged = True
+                if not acknowledged:
+                    if completion.is_set() and "error" in outcome:
+                        diagnostic_upload.mark_timeout(args.data_dir, record["id"])
+                        print("GetDiagnostics response unconfirmed; upload destination remains available.")
+                        return 1
+                    if args.limit is not None and time.monotonic() - started >= args.limit:
+                        print("Initial acknowledgement not observed before --limit; upload destination remains available.")
+                        return 1
+                elif not args.follow:
+                    print("Initial acknowledgement observed; use diagnose status to inspect later upload results.")
+                    return 0
+                if args.follow and current and current["result"] in ("received", "charger_uploadfailed"):
+                    return 0 if current["result"] == "received" else 1
+                if args.follow and current and current["result"] == "expired":
+                    print("Diagnostic upload destination expired without a received file.")
+                    return 1
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("Stopped following; the upload request remains recorded.")
+            return 130
     if op == "prune":
         print(f"Expired diagnostic requests removed: {diagnostic_upload.remove_expired(args.data_dir)}")
         return 0
@@ -77,6 +143,8 @@ def run_https_diagnostics(args):
         print("No local HTTPS diagnostic requests.")
         return 0
     for entry in records:
+        if entry.get("notifications"):
+            print("  Charger evidence (time-correlated): " + " -> ".join(n["status"] for n in entry["notifications"]))
         print(f"{entry['created_at']} {entry.get('charger') or '-'} {entry['result']} "
               f"files={len(entry['files'])} suggested={entry.get('suggested_file') or '-'}")
         if op == "show":
@@ -107,6 +175,8 @@ def _request(args):
     request = {"command": "get_diagnostics", "location": args.location}
     if args.charger:
         request["charger"] = args.charger
+    if getattr(args, "diagnostic_operation", None) == "request":
+        request["response_timeout"] = args.limit
     for key, value in (("start_time", start), ("stop_time", stop), ("retries", args.retries), ("retry_interval", args.retry_interval)):
         if value is not None:
             request[key] = value
