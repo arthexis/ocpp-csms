@@ -17,7 +17,7 @@ def add_control_commands(
     add = argparse.ArgumentParser.add_argument
 
     start = subcommands.add_parser("start", help="Request a remote charging session")
-    add_cp(start, help="Charge point ID (optional when exactly one charger is connected)")
+    add(start, "--cp", dest="charger_option", help="Charge point ID (optional with one connection)")
     add(start, "--connector", type=int, help="Target connector ID; omit to let the charger choose")
     add(start, "--id-tag", help="RFID/idTag (default: AUTO)")
 
