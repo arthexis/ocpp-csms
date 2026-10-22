@@ -329,9 +329,13 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                     return {"error": "invalid_time_window"}
             except (TypeError, ValueError, AttributeError):
                 return {"error": "invalid_time_window"}
+            response_timeout = request.get("response_timeout", 30)
+            if response_timeout is not None and (type(response_timeout) is not int or response_timeout < 1):
+                return {"error": "invalid_response_timeout"}
             response = await session.get_diagnostics(
                 location, retries=retries, retry_interval=interval,
                 start_time=start_time, stop_time=stop_time,
+                response_timeout=response_timeout,
             )
         elif command == "rfid_cache_clear":
             response = await session.clear_cache()
