@@ -70,3 +70,32 @@ def test_events_action_filters_reject_empty_fragments(cli_parser, tmp_path):
         parse_action_patterns("He,,Me")
     with pytest.raises(ValueError):
         parse_action_patterns(" ")
+
+
+def test_events_filters_combine_with_transaction_cp_time_limit_and_formats(cli_parser, tmp_path, capsys):
+    from ocpp_csms.cli.diagnostics import run_events
+    store = EventStore(tmp_path)
+    store.record_ocpp("A", "StartTransaction", {"transaction_id": 12, "connector_id": 1})
+    store.record_ocpp("A", "MeterValues", {"transaction_id": 12, "connector_id": 1, "meter_value": []})
+    store.record_ocpp("A", "StopTransaction", {"transaction_id": 12})
+    store.record_ocpp("B", "StopTransaction", {"transaction_id": 12})
+    store.record_ocpp("A", "Heartbeat", {})
+    base = ["--data-dir", str(tmp_path), "events"]
+    common = ["--cp", "A", "--tx", "12", "--only", "transaction,values", "--exclude", "values"]
+    for extra in (["-n", "1"], ["-N"], ["--since", "30d"], ["--limit", "30d"],
+                  ["--verbose"], ["--detail"], ["--json"], ["--json", "--raw"]):
+        parsed = cli_parser.parse_args(base + common + extra)
+        assert parsed.transaction == 12
+        assert run_events(parsed) == 0
+        output = capsys.readouterr().out
+        assert "StopTransaction" in output
+        assert "MeterValues" not in output
+        assert "Heartbeat" not in output
+        assert "StartTransaction" not in output or "-n" not in extra
+
+
+def test_events_tx_aliases(cli_parser):
+    for name in ("--tx", "--txn", "--transaction"):
+        args = cli_parser.parse_args(["events", name, "42", "--exclude", "He"])
+        assert args.transaction == 42
+        assert args.exclude == "He"
