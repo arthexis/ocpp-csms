@@ -59,8 +59,12 @@ def test_nginx_dav_regex_quantifiers_are_quoted():
     """Unquoted {40} is interpreted as nginx syntax, truncating the PCRE2 regex."""
     content = SITE.read_text()
     locations = [line.strip() for line in content.splitlines() if "location ~ " in line and "/ocpp-diagnose/" in line]
-    assert len(locations) >= 1
-    assert locations[0].startswith('location ~ "^/ocpp-diagnose/')
-    assert '{40}' in locations[0]
-    assert '{0,99}' in locations[0]
+    assert len(locations) == 3
+    assert all(line.startswith('location ~ "^/ocpp-diagnose/') for line in locations)
+    assert all('{40}' in line for line in locations)
     assert all(line.endswith('$" {') for line in locations)
+    assert any('{0,99}' in line for line in locations)
+    assert any('upload\\\\.bin/
+ in line for line in locations)
+    assert any('upload\\\\.bin
+ in line for line in locations)
