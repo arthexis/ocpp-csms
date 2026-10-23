@@ -21,5 +21,5 @@ def run_transactions_json(args: argparse.Namespace) -> int:
         raise ValueError("transaction ID cannot be combined with list filters or selectors")
 
     views = select_transaction_views(args)
-    emit_json(transactions_contract(views, local_time=args.local_time))
+    emit_json(transactions_contract(views, local_time=args.receive_time))
     return 0
