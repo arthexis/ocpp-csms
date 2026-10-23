@@ -38,6 +38,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(events, "-f", "--follow", action="store_true", help="Follow newly recorded events until Ctrl+C (JSON uses JSONL)")
     add(events, "--exclude", help="Comma-separated, case-insensitive action substrings to hide (e.g. He,Me)")
     add(events, "--only", help="Comma-separated, case-insensitive action substrings to include")
+    add(events, "-L", "--local-time", action="store_true", help="Display event timestamps in the host local timezone")
     add(events, "--detail", action="store_true", help="Expand additional event fields in the grouped timeline")
     add(events, "--verbose", action="store_true", help="Show every original event with full payload, without grouping")
 
@@ -156,7 +157,7 @@ def run_events(args: argparse.Namespace) -> int:
     if args.json:
         emit_json(raw_events_contract(rows) if args.raw else events_contract(rows))
     else:
-        print(format_events(rows, verbose=args.verbose, detail=args.detail))
+        print(format_events(rows, verbose=args.verbose, detail=args.detail, local_time=args.local_time))
     return 0
 
 
