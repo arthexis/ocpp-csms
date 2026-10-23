@@ -411,8 +411,8 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
-                span = (f"{stamp(first['occurred_at'])}–{end_at}" if count > 1
-                        else first["occurred_at"])
+                span = (f"{stamp(first['occurred_at'])}–{stamp(end_at)}" if count > 1
+                        else stamp(first["occurred_at"]))
                 tx = f" tx={meter[3]}" if meter[3] is not None else ""
                 lines.append(f"{span}{charger}  MeterValues C{meter[2]}{tx} ↔ ×{count}")
                 continue
@@ -449,8 +449,8 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
-                span = (f"{stamp(first['occurred_at'])}–{end_at}" if count > 1
-                        else first["occurred_at"])
+                span = (f"{stamp(first['occurred_at'])}–{stamp(end_at)}" if count > 1
+                        else stamp(first["occurred_at"]))
                 lines.append(f"{span}{charger}  Heartbeat ↔ ×{count}")
                 continue
         key = _group_key(first)
