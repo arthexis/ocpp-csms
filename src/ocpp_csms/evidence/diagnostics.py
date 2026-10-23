@@ -120,18 +120,18 @@ def fault_events(
     return result[-limit:]
 
 
-def format_faults(faults: list[dict[str, Any]]) -> str:
+def format_faults(faults: list[dict[str, Any]], *, local_time: bool = False) -> str:
     if not faults:
         return "No recorded fault notifications."
     lines = []
     for fault in faults:
         connector = fault["connector_id"]
-        parts = [str(fault["received_at"]), str(fault["charger_id"]),
+        parts = [_event_display_timestamp(str(fault["received_at"]), local_time=local_time), str(fault["charger_id"]),
                  f"C{connector}" if connector is not None else "C?",
                  "Faulted", str(fault.get("error_code") or "UnknownError")]
         for name in ("charger_at", "info", "vendor_id", "vendor_error_code"):
             if fault.get(name) not in (None, ""):
-                parts.append(f"{name}={fault[name]}")
+                parts.append(f"{name}={_event_display_timestamp(str(fault[name]), local_time=local_time) if name == 'charger_at' else fault[name]}")
         lines.append("  ".join(parts))
     return "\n".join(lines)
 
