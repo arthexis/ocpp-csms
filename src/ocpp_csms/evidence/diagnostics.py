@@ -351,7 +351,21 @@ def _consume_exchanges(
     return index, count
 
 
-def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False, detail: bool = False) -> str:
+def _event_display_timestamp(value: str, *, local_time: bool) -> str:
+    if not local_time:
+        return value
+    try:
+        from datetime import datetime, timezone
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone().isoformat(timespec="seconds")
+    except (TypeError, ValueError):
+        return value
+
+
+def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbose: bool = False, detail: bool = False, local_time: bool = False) -> str:
+    stamp = lambda value: _event_display_timestamp(value, local_time=local_time)
     if not rows:
         return "No matching events."
     lines = [heading, ""] if heading else []
@@ -362,7 +376,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             tx = f" tx={row['transaction_id']}" if row["transaction_id"] is not None else ""
             rfid = f" RFID={row['id_tag']}" if row["id_tag"] else ""
             lines.append(
-                f"{row['occurred_at']}{charger} [{row['kind']}{direction}] "
+                f"{stamp(row['occurred_at'])}{charger} [{row['kind']}{direction}] "
                 f"{row['action']}{tx}{rfid} payload={row['payload']}"
             )
         return "\n".join(lines)
@@ -375,12 +389,12 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             summary = ("Heartbeat requests (responses not established)"
                        if first["direction"] == "in" else "→ Heartbeat responses")
         if len(group) == 1:
-            lines.append(f"{first['occurred_at']}{charger}  {summary}")
+            lines.append(f"{stamp(first['occurred_at'])}{charger}  {summary}")
         else:
             # These are counts of observed stored events, not inferred
             # request/response pairs or claims about unseen window edges.
             lines.append(
-                f"{first['occurred_at']}–{last['occurred_at']}{charger}  "
+                f"{stamp(first['occurred_at'])}–{stamp(last['occurred_at'])}{charger}  "
                 f"{summary} ×{len(group)}"
             )
 
@@ -397,7 +411,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
-                span = (f"{first['occurred_at']}–{end_at}" if count > 1
+                span = (f"{stamp(first['occurred_at'])}–{end_at}" if count > 1
                         else first["occurred_at"])
                 tx = f" tx={meter[3]}" if meter[3] is not None else ""
                 lines.append(f"{span}{charger}  MeterValues C{meter[2]}{tx} ↔ ×{count}")
@@ -411,7 +425,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
                 tx = f" tx={meter[3]}" if meter[3] is not None else ""
                 lines.append(
-                    f"{first['occurred_at']}–{rows[end - 1]['occurred_at']}{charger}  "
+                    f"{stamp(first['occurred_at'])}–{stamp(rows[end - 1]['occurred_at'])}{charger}  "
                     f"MeterValues C{meter[2]}{tx} requests (responses not established) ×{end - index}"
                 )
                 index = end
@@ -435,7 +449,7 @@ def format_events(rows: list[sqlite3.Row], heading: str | None = None, *, verbos
             index = paired_end
             if count:
                 charger = f" {first['charger_id']}" if first["charger_id"] else ""
-                span = (f"{first['occurred_at']}–{end_at}" if count > 1
+                span = (f"{stamp(first['occurred_at'])}–{end_at}" if count > 1
                         else first["occurred_at"])
                 lines.append(f"{span}{charger}  Heartbeat ↔ ×{count}")
                 continue
