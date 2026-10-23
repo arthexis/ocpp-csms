@@ -132,6 +132,13 @@ def _transaction_energy(view: TransactionView) -> str:
     return _format_energy(energy_wh) if energy_wh is not None else "-"
 
 
+def _transaction_kwh(view: TransactionView) -> str:
+    energy_wh = transaction_energy_wh(view)
+    if energy_wh is None:
+        energy_wh = _live_energy_wh(view)
+    return f"{energy_wh / 1000:.3f}" if energy_wh is not None else "-"
+
+
 def _transaction_soc(view: TransactionView) -> str:
     """First and latest measured state of charge, without inferred endpoints."""
     measurements: list[int] = []
@@ -154,7 +161,7 @@ def _transaction_soc(view: TransactionView) -> str:
                     continue
                 measurements.append(round(percent))
     if not measurements:
-        return "- - -"
+        return "-"
     return f"{measurements[0]} - {measurements[-1]}" if len(measurements) > 1 else f"- - {measurements[0]}"
 
 
@@ -205,7 +212,7 @@ def format_transactions(views: Iterable[TransactionView], *, local_time: bool = 
         return "No transactions."
     headers = ("TXN", "STATUS", "CHARGER", "C", "RFID", "KWH", "SoC %", "EVENT TIME")
     body = [
-        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), f"{energy_wh / 1000:.3f}" if (energy_wh := (transaction_energy_wh(view) if transaction_energy_wh(view) is not None else _live_energy_wh(view))) is not None else "-", _transaction_soc(view), _age_key(view.event_time(local_time=local_time)))
+        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_kwh(view), _transaction_soc(view), _age_key(view.event_time(local_time=local_time)))
         for view in rows
     ]
     widths = [max(len(headers[index]), *(len(row[index]) for row in body)) for index in range(len(headers))]
