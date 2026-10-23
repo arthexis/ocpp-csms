@@ -47,6 +47,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     add(faults, "--since", help="CSMS receive time lower bound (ISO-8601 or relative)")
     add(faults, "--until", help="CSMS receive time upper bound (ISO-8601 or relative)")
     add(faults, "-n", "--limit", type=int, default=20, help="Maximum matching fault notifications (default: 20)")
+    add(faults, "-L", "--local-time", action="store_true", help="Display fault timestamps in the host local timezone")
     add_json(faults, help="Print recorded fault details as JSON")
 
     alerts = subcommands.add_parser("alerts", help="Show exceptional events without grouping")
@@ -59,6 +60,7 @@ def add_diagnostic_commands(subcommands: argparse._SubParsersAction[argparse.Arg
     alert_limit_group.add_argument("-N", "--no-limit", action="store_true")
     add(alerts, "-j", "--json", action="store_true")
     add(alerts, "--raw", action="store_true", help="Include diagnostic details (requires --json)")
+    add(alerts, "-L", "--local-time", action="store_true", help="Display alert timestamps in the host local timezone")
     add(alerts, "--verbose", action="store_true", help="Include diagnostic details")
     
     explain_parser = subcommands.add_parser("explain", help="Show charger evidence for a time window")
@@ -170,7 +172,7 @@ def run_faults(args: argparse.Namespace) -> int:
     if args.json:
         emit_json({"faults": faults})
     else:
-        print(format_faults(faults))
+        print(format_faults(faults, local_time=args.local_time))
     return 0
 
 
@@ -204,7 +206,7 @@ def run_alerts(args: argparse.Namespace) -> int:
     if args.json:
         emit_json(alerts_contract(alerts))
     else:
-        print(format_alerts(alerts))
+        print(format_alerts(alerts, local_time=args.local_time))
     return 0
 
 
