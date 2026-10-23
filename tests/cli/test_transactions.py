@@ -198,3 +198,32 @@ def test_txn_soc_missing_and_single_sample(tmp_path):
     rows = format_transactions([missing, one]).splitlines()
     assert "- -" in rows[1]
     assert "- 62" in rows[2]
+
+
+def test_transaction_time_flags_are_independent(parse_cli, monkeypatch, tmp_path):
+    import os
+    import time
+    from ocpp_csms.transactions.formatting import format_transactions
+    from ocpp_csms.transactions.query import TransactionView
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        view = TransactionView(record={
+            "transaction_id": 1, "status": "open", "charge_point_id": "CP",
+            "start": {"timestamp": "2026-10-23T12:00:00Z"},
+            "updated_at": "2026-10-23T18:35:45Z",
+        }, path=tmp_path)
+        assert "2026-10-23T12:00Z" in format_transactions([view])
+        assert "2026-10-23T06:00-06:00" in format_transactions([view], display_local=True)
+        assert "2026-10-23T18:35Z" in format_transactions([view], local_time=True)
+        assert "2026-10-23T12:35-06:00" in format_transactions(
+            [view], local_time=True, display_local=True
+        )
+        flags = parse_cli("txn", "-LT")
+        assert flags.local_time and flags.receive_time
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
