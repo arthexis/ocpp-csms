@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from datetime import datetime, timezone
 
 from ocpp_csms.energy_contract import energy_contract
 from ocpp_csms.cli.options import add_cp, add_connector, add_json, add_time_bounds, require_nonnegative
@@ -14,6 +15,7 @@ def add_energy_command(subcommands: argparse._SubParsersAction[argparse.Argument
     add_cp(energy, help="Filter by charge point ID")
     add_connector(energy, help="Filter by connector ID")
     add_time_bounds(energy, since_help="ISO-8601 lower sample timestamp bound", until_help="ISO-8601 upper sample timestamp bound")
+    energy.add_argument("-L", "--local-time", action="store_true", help="Display sample timestamps in the host local timezone")
     add_json(energy, help="Print the stable machine-readable energy contract")
     return energy
 
@@ -33,6 +35,18 @@ def run_energy(args: argparse.Namespace) -> int:
     print(f"Completed transactions: {transactions}")
     print(f"Telemetry samples: {len(samples)}")
     if samples:
-        print(f"First sample: {samples[0].at}")
-        print(f"Last sample: {samples[-1].at}")
+        print(f"First sample: {_display_sample_time(samples[0].at, local_time=args.local_time)}")
+        print(f"Last sample: {_display_sample_time(samples[-1].at, local_time=args.local_time)}")
     return 0
+
+
+def _display_sample_time(value, *, local_time: bool):
+    if not local_time:
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().isoformat(timespec="seconds")

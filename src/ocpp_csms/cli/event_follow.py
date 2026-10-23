@@ -85,4 +85,4 @@ def _emit(args, rows):
                 item["payload"] = json.loads(row["payload"] or "{}")
             print(json.dumps(item, ensure_ascii=False), flush=True)
     else:
-        print(format_events(rows, verbose=args.verbose, detail=args.detail), flush=True)
+        print(format_events(rows, verbose=args.verbose, detail=args.detail, local_time=args.local_time), flush=True)

@@ -18,7 +18,11 @@ def test_c_alias_matches_connector_filter(parse_cli):
 
 
 def test_local_time_long_and_short_flags_match(parse_cli):
-    assert parse_cli("txn", "-T").local_time is True
+    assert parse_cli("txn", "-T").receive_time is True
+    assert parse_cli("txn", "--receive-time").receive_time is True
+    assert parse_cli("txn", "-L").local_time is True
+    assert parse_cli("txn", "-LT").local_time is True
+    assert parse_cli("txn", "-LT").receive_time is True
     assert parse_cli("txn", "--local-time").local_time is True
 
 
@@ -194,3 +198,101 @@ def test_txn_soc_missing_and_single_sample(tmp_path):
     rows = format_transactions([missing, one]).splitlines()
     assert "- -" in rows[1]
     assert "- 62" in rows[2]
+
+
+def test_transaction_time_flags_are_independent(parse_cli, monkeypatch, tmp_path):
+    import os
+    import time
+    from ocpp_csms.transactions.formatting import format_transactions
+    from ocpp_csms.transactions.query import TransactionView
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        view = TransactionView(record={
+            "transaction_id": 1, "status": "open", "charge_point_id": "CP",
+            "start": {"timestamp": "2026-10-23T12:00:00Z"},
+            "updated_at": "2026-10-23T18:35:45Z",
+        }, path=tmp_path)
+        assert "2026-10-23T12:00Z" in format_transactions([view])
+        assert "2026-10-23T06:00-06:00" in format_transactions([view], display_local=True)
+        assert "2026-10-23T18:35Z" in format_transactions([view], local_time=True)
+        assert "2026-10-23T12:35-06:00" in format_transactions(
+            [view], local_time=True, display_local=True
+        )
+        flags = parse_cli("txn", "-LT")
+        assert flags.local_time and flags.receive_time
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+
+def test_local_time_flags_for_other_timeline_commands(cli_parser):
+    assert cli_parser.parse_args(["events", "-L"]).local_time is True
+    assert cli_parser.parse_args(["energy", "-L"]).local_time is True
+
+
+def test_energy_local_time_conversion(monkeypatch):
+    import time
+    from ocpp_csms.cli.energy import _display_sample_time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        assert _display_sample_time("2026-10-23T18:35:00Z", local_time=True) == "2026-10-23T12:35:00-06:00"
+        assert _display_sample_time("2026-10-23T18:35:00Z", local_time=False) == "2026-10-23T18:35:00Z"
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+
+def test_events_grouped_and_verbose_local_time(monkeypatch):
+    import time
+    from ocpp_csms.evidence.diagnostics import format_events
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        row = {
+            "occurred_at": "2026-10-23T18:35:00Z",
+            "charger_id": "CP1", "kind": "runtime", "direction": None,
+            "transaction_id": None, "id_tag": None, "action": "custom", "payload": None,
+        }
+        for verbose in (False, True):
+            output = format_events([row], verbose=verbose, local_time=True)
+            assert "2026-10-23T12:35:00-06:00" in output
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+
+def test_local_time_flags_across_diagnostics(cli_parser):
+    for command in ("events", "faults", "alerts", "energy"):
+        assert cli_parser.parse_args([command, "-L"]).local_time
+
+
+def test_fault_and_alert_local_time(monkeypatch):
+    import time
+    from ocpp_csms.evidence.diagnostics import format_faults
+    from ocpp_csms.evidence.alerts import format_alerts
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        faults = [{"received_at": "2026-10-23T18:35:00Z", "charger_id": "CP",
+                   "connector_id": 1, "error_code": "InternalError"}]
+        alerts = [{"at": "2026-10-23T18:35:00Z", "severity": "warning",
+                   "message": "check"}]
+        assert "2026-10-23T12:35:00-06:00" in format_faults(faults, local_time=True)
+        assert "2026-10-23T12:35:00-06:00" in format_alerts(alerts, local_time=True)
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()

@@ -15,7 +15,9 @@ def _timestamp(value: object | None) -> str:
     return value if isinstance(value, str) else "-"
 
 
-def _age_key(value: datetime) -> str:
+def _age_key(value: datetime, *, display_local: bool = False) -> str:
+    if display_local:
+        return value.astimezone().isoformat(timespec="minutes")
     return value.isoformat(timespec="minutes").replace("+00:00", "Z")
 
 
@@ -38,6 +40,13 @@ def _parse_time(value: object | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _display_timestamp(value: object | None, *, display_local: bool = False) -> str:
+    if not display_local:
+        return _timestamp(value)
+    parsed = _parse_time(value)
+    return parsed.astimezone().isoformat() if parsed is not None else _timestamp(value)
 
 
 def _duration(started: object | None, stopped: object | None) -> str | None:
@@ -206,13 +215,13 @@ def _meter_summary(record: dict[str, Any], *, local_time: bool = False) -> dict[
     return {"messages": len(payloads), "samples": sample_count, "first": min(timestamps) if timestamps else None, "last": max(timestamps) if timestamps else None, "latest_energy": latest_energy, "latest_power": latest_power}
 
 
-def format_transactions(views: Iterable[TransactionView], *, local_time: bool = False) -> str:
+def format_transactions(views: Iterable[TransactionView], *, local_time: bool = False, display_local: bool = False) -> str:
     rows = list(views)
     if not rows:
         return "No transactions."
     headers = ("TXN", "STATUS", "CHARGER", "C", "RFID", "KWH", "SoC %", "EVENT TIME")
     body = [
-        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_kwh(view), _transaction_soc(view), _age_key(view.event_time(local_time=local_time)))
+        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_kwh(view), _transaction_soc(view), _age_key(view.event_time(local_time=local_time), display_local=display_local))
         for view in rows
     ]
     widths = [max(len(headers[index]), *(len(row[index]) for row in body)) for index in range(len(headers))]
@@ -221,7 +230,7 @@ def format_transactions(views: Iterable[TransactionView], *, local_time: bool = 
     return "\n".join([line(headers), *(line(row) for row in body)])
 
 
-def format_transaction(view: TransactionView, *, local_time: bool = False) -> str:
+def format_transaction(view: TransactionView, *, local_time: bool = False, display_local: bool = False) -> str:
     record = view.record
     start = record.get("start") if isinstance(record.get("start"), dict) else {}
     stop = record.get("stop") if isinstance(record.get("stop"), dict) else {}
@@ -240,14 +249,14 @@ def format_transaction(view: TransactionView, *, local_time: bool = False) -> st
     lines = [
         f"Transaction {view.transaction_id}", f"Status:       {view.status or 'unknown'}", f"Origin:       {origin}",
         f"Charger:      {view.charge_point_id or '-'}", f"Connector:    {_text(view.connector_id, '?')}", f"RFID:         {_text(view.id_tag)}", "",
-        f"Started:      {_timestamp(started)}", f"Stopped:      {_timestamp(stopped)}",
+        f"Started:      {_display_timestamp(started, display_local=display_local)}", f"Stopped:      {_display_timestamp(stopped, display_local=display_local)}",
     ]
     if duration is not None:
         lines.append(f"Duration:     {duration}")
-    lines.extend((f"Event time:   {_age_key(view.event_time(local_time=local_time))}", f"Meter start:  {_text(start.get('meter_start'))}", f"Meter stop:   {_text(stop.get('meter_stop'))}"))
+    lines.extend((f"Event time:   {_age_key(view.event_time(local_time=local_time), display_local=display_local)}", f"Meter start:  {_text(start.get('meter_start'))}", f"Meter stop:   {_text(stop.get('meter_stop'))}"))
     if energy_wh is not None:
         lines.append(f"Energy:       {_format_energy(energy_wh)}" + (" (live)" if estimated else ""))
-    lines.extend(("", "MeterValues:", f"  messages:   {meter['messages']}", f"  samples:    {meter['samples']}", f"  first:      {_text(meter['first'])}", f"  last:       {_text(meter['last'])}"))
+    lines.extend(("", "MeterValues:", f"  messages:   {meter['messages']}", f"  samples:    {meter['samples']}", f"  first:      {_display_timestamp(meter['first'], display_local=display_local)}", f"  last:       {_display_timestamp(meter['last'], display_local=display_local)}"))
     if meter["latest_energy"] is not None:
         value, unit = meter["latest_energy"]
         lines.append(f"  latest energy: {value} {unit}")
