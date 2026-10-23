@@ -18,7 +18,11 @@ def test_c_alias_matches_connector_filter(parse_cli):
 
 
 def test_local_time_long_and_short_flags_match(parse_cli):
-    assert parse_cli("txn", "-T").local_time is True
+    assert parse_cli("txn", "-T").receive_time is True
+    assert parse_cli("txn", "--receive-time").receive_time is True
+    assert parse_cli("txn", "-L").local_time is True
+    assert parse_cli("txn", "-LT").local_time is True
+    assert parse_cli("txn", "-LT").receive_time is True
     assert parse_cli("txn", "--local-time").local_time is True
 
 
