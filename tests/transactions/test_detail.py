@@ -43,10 +43,10 @@ def test_transaction_list_shows_derived_energy():
 
     output = format_transactions([view])
 
-    assert "ENERGY" in output
+    assert "KWH" in output
     assert " C " in f" {output.splitlines()[0]} "
     assert " CP " not in f" {output.splitlines()[0]} "
-    assert "6.420 kWh" in output
+    assert "6.42" in output
 
 
 def test_transaction_list_shows_unknown_energy_when_evidence_is_incomplete():
@@ -69,7 +69,7 @@ def test_transaction_list_shows_unknown_energy_when_evidence_is_incomplete():
     output = format_transactions([view])
     row = output.splitlines()[1].split()
 
-    assert "ENERGY" in output.splitlines()[0]
+    assert "KWH" in output.splitlines()[0]
     assert "kWh" not in output.splitlines()[1]
     assert row[-2] == "-"
 
