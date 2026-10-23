@@ -227,3 +227,46 @@ def test_transaction_time_flags_are_independent(parse_cli, monkeypatch, tmp_path
     finally:
         monkeypatch.delenv("TZ", raising=False)
         time.tzset()
+
+
+def test_local_time_flags_for_other_timeline_commands(cli_parser):
+    assert cli_parser.parse_args(["events", "-L"]).local_time is True
+    assert cli_parser.parse_args(["energy", "-L"]).local_time is True
+
+
+def test_energy_local_time_conversion(monkeypatch):
+    import time
+    from ocpp_csms.cli.energy import _display_sample_time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        assert _display_sample_time("2026-10-23T18:35:00Z", local_time=True) == "2026-10-23T12:35:00-06:00"
+        assert _display_sample_time("2026-10-23T18:35:00Z", local_time=False) == "2026-10-23T18:35:00Z"
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+
+def test_events_grouped_and_verbose_local_time(monkeypatch):
+    import time
+    from ocpp_csms.evidence.diagnostics import format_events
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        row = {
+            "occurred_at": "2026-10-23T18:35:00Z",
+            "charger_id": "CP1", "kind": "runtime", "direction": None,
+            "transaction_id": None, "id_tag": None, "action": "custom", "payload": None,
+        }
+        for verbose in (False, True):
+            output = format_events([row], verbose=verbose, local_time=True)
+            assert "2026-10-23T12:35:00-06:00" in output
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
