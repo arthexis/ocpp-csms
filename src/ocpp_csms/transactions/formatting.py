@@ -136,7 +136,7 @@ def _transaction_kwh(view: TransactionView) -> str:
     energy_wh = transaction_energy_wh(view)
     if energy_wh is None:
         energy_wh = _live_energy_wh(view)
-    return f"{energy_wh / 1000:.3f}" if energy_wh is not None else "-"
+    return f"{energy_wh / 1000:.2f}" if energy_wh is not None else "-"
 
 
 def _transaction_soc(view: TransactionView) -> str:
@@ -161,8 +161,8 @@ def _transaction_soc(view: TransactionView) -> str:
                     continue
                 measurements.append(round(percent))
     if not measurements:
-        return "-"
-    return f"{measurements[0]} - {measurements[-1]}" if len(measurements) > 1 else f"- - {measurements[0]}"
+        return "- -"
+    return f"{measurements[0]} {measurements[-1]}" if len(measurements) > 1 else f"- {measurements[0]}"
 
 
 def _meter_summary(record: dict[str, Any], *, local_time: bool = False) -> dict[str, object]:
