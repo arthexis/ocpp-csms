@@ -36,13 +36,13 @@ def record(transaction_id, *, stopped=False, samples=None):
 def test_open_transaction_energy_uses_latest_cumulative_meter_value():
     view = TransactionView(record(2, samples=[(110, "Wh"), (0.15, "kWh")]), Path("2.json"))
     table = format_transactions([view])
-    assert "50 Wh" in table
+    assert "0.05" in table
     assert "Energy:       50 Wh (live)" in format_transaction(view)
 
 
 def test_stopped_energy_still_uses_meter_stop():
     view = TransactionView(record(1, stopped=True, samples=[(140, "Wh")]), Path("1.json"))
-    assert "150 Wh" in format_transactions([view])
+    assert "0.15" in format_transactions([view])
     assert "(live)" not in format_transaction(view)
 
 

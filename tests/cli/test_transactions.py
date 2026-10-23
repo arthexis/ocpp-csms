@@ -103,8 +103,8 @@ def test_local_time_changes_event_time_display_and_time_filter(parse_cli, tmp_pa
     default_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn"))
     local_output = run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "-T", "--since", "2026-10-06T12:05:00Z"))
     assert "EVENT TIME" in default_output
-    assert "2020-01-01T00:10:00Z" in default_output
-    assert "2026-10-06T12:10:00Z" in local_output
+    assert "2020-01-01T00:10Z" in default_output
+    assert "2026-10-06T12:10Z" in local_output
 
 
 def test_cp_and_charger_select_charge_point(parse_cli):
@@ -145,3 +145,52 @@ def test_unlimited_transaction_query_forwards_none(parse_cli, monkeypatch):
 def test_transaction_id_rejects_no_limit(parse_cli, tmp_path):
     with pytest.raises(ValueError):
         run_transactions(parse_cli("--data-dir", str(tmp_path), "txn", "1", "-N"))
+
+
+def test_txn_table_minute_energy_and_soc_formatting(tmp_path):
+    from ocpp_csms.transactions.formatting import format_transactions
+    from ocpp_csms.transactions.query import TransactionView
+
+    def sample(value):
+        return {"measurand": "SoC", "unit": "Percent", "value": str(value)}
+
+    view = TransactionView(record={
+        "transaction_id": 10, "status": "open", "charge_point_id": "cp-a",
+        "connector_id": 1, "id_tag": "RFID", "updated_at": "2026-10-23T14:35:27.123456Z",
+        "start": {"timestamp": "2026-10-23T14:00:00Z", "meter_start": 1000},
+        "stop": None,
+        "meter_values": [
+            {"meter_value": [{"timestamp": "2026-10-23T14:01:00Z", "sampled_value": [sample(41)]}]},
+            {"meter_value": [{"timestamp": "2026-10-23T14:35:27Z", "sampled_value": [
+                sample(80), {"measurand": "Energy.Active.Import.Register", "value": "5500", "unit": "Wh"}
+            ]}]},
+        ],
+    }, path=tmp_path / "csms.sqlite3")
+    output = format_transactions([view])
+    assert "KWH" in output and "SoC %" in output
+    assert "ENERGY" not in output and "kWh" not in output
+    assert "4.50" in output
+    assert "41 80" in output
+    assert "2026-10-23T14:35Z" in output
+    assert "14:35:27" not in output
+
+
+def test_txn_soc_missing_and_single_sample(tmp_path):
+    from ocpp_csms.transactions.formatting import format_transactions
+    from ocpp_csms.transactions.query import TransactionView
+
+    base = {
+        "transaction_id": 1, "status": "open", "charge_point_id": "cp",
+        "start": {"timestamp": "2026-10-23T01:00:00Z", "meter_start": 10},
+        "stop": None,
+    }
+    missing = TransactionView(record={**base, "meter_values": []}, path=tmp_path)
+    one = TransactionView(record={**base, "meter_values": [
+        {"meter_value": [{"sampled_value": [
+            {"measurand": "SoC", "value": "62", "unit": "Percent"},
+            {"measurand": "SoC", "value": "999", "unit": "Percent"},
+        ]}]}
+    ]}, path=tmp_path)
+    rows = format_transactions([missing, one]).splitlines()
+    assert "- -" in rows[1]
+    assert "- 62" in rows[2]

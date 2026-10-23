@@ -233,8 +233,8 @@ async def test_real_websocket_two_sessions_with_late_stop_and_export(tmp_path):
     assert second_view.record["stop"]["meter_stop"] == 240
     assert len(first_view.record["meter_values"]) == 1
     report = format_transactions([first_view, second_view])
-    assert "50 Wh" in report
-    assert "40 Wh" in report
+    assert "0.05" in report
+    assert "0.04" in report
 
     exported = export_contract(tmp_path, after=0, limit=100)["data"]
     with EventStore(tmp_path)._connect() as db:
