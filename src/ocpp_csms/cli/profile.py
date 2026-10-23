@@ -40,7 +40,7 @@ def add_profile_command(
     add(profile_composite, "-c", "--connector", dest="connector", type=int, default=0, help="Connector ID (default: %(default)s)")
     add(profile_composite, "--duration", type=int, default=3600, help="Schedule duration in seconds (default: %(default)s)")
     add(profile_composite, "-j", "--json", action="store_true", help="Print the OCPP response as JSON")
-    add(profile_composite, "-T", "--local-time", action="store_true", help="Display schedule timestamps in the CSMS host local timezone")
+    add(profile_composite, "-L", "--local-time", action="store_true", help="Display schedule timestamps in the CSMS host local timezone")
     profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
     add(profile_clear, "--cp", dest="charger", help="Explicit charge point ID when more than one charger is connected")
     add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
