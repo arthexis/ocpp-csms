@@ -16,7 +16,7 @@ def _timestamp(value: object | None) -> str:
 
 
 def _age_key(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return value.isoformat(timespec="minutes").replace("+00:00", "Z")
 
 
 def _archive_path(view: TransactionView) -> str:
@@ -132,6 +132,32 @@ def _transaction_energy(view: TransactionView) -> str:
     return _format_energy(energy_wh) if energy_wh is not None else "-"
 
 
+def _transaction_soc(view: TransactionView) -> str:
+    """First and latest measured state of charge, without inferred endpoints."""
+    measurements: list[int] = []
+    for payload in view.record.get("meter_values", []):
+        if not isinstance(payload, dict):
+            continue
+        for entry in payload.get("meter_value", []):
+            if not isinstance(entry, dict):
+                continue
+            for sample in entry.get("sampled_value", []):
+                if not isinstance(sample, dict) or sample.get("measurand") != "SoC":
+                    continue
+                if sample.get("unit", "Percent") != "Percent":
+                    continue
+                try:
+                    percent = float(sample["value"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not (0 <= percent <= 100):
+                    continue
+                measurements.append(round(percent))
+    if not measurements:
+        return "- - -"
+    return f"{measurements[0]} - {measurements[-1]}" if len(measurements) > 1 else f"- - {measurements[0]}"
+
+
 def _meter_summary(record: dict[str, Any], *, local_time: bool = False) -> dict[str, object]:
     payloads = record.get("meter_values")
     if not isinstance(payloads, list):
@@ -177,9 +203,9 @@ def format_transactions(views: Iterable[TransactionView], *, local_time: bool = 
     rows = list(views)
     if not rows:
         return "No transactions."
-    headers = ("TXN", "STATUS", "CHARGER", "C", "RFID", "ENERGY", "EVENT TIME")
+    headers = ("TXN", "STATUS", "CHARGER", "C", "RFID", "KWH", "SoC %", "EVENT TIME")
     body = [
-        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), _transaction_energy(view), _age_key(view.event_time(local_time=local_time)))
+        (str(view.transaction_id), view.status or "unknown", view.charge_point_id or "-", _text(view.connector_id, "?"), _text(view.id_tag), f"{energy_wh / 1000:.3f}" if (energy_wh := (transaction_energy_wh(view) if transaction_energy_wh(view) is not None else _live_energy_wh(view))) is not None else "-", _transaction_soc(view), _age_key(view.event_time(local_time=local_time)))
         for view in rows
     ]
     widths = [max(len(headers[index]), *(len(row[index]) for row in body)) for index in range(len(headers))]
