@@ -29,7 +29,8 @@ def add_transaction_parser(subcommands: argparse._SubParsersAction[argparse.Argu
     add(transactions, "--between", nargs=2, metavar=("START", "END"), help="Activity between two ISO-8601 or relative times")
     add(transactions, "--at", help="Activity on the UTC day containing this ISO-8601 or relative time")
     add(transactions, "--today", action="store_true", help="Activity during the current UTC day")
-    add(transactions, "-T", "--local-time", action="store_true", help="Use CSMS receive time for event display, filtering, and ordering")
+    add(transactions, "-T", "--receive-time", action="store_true", help="Use CSMS receive time for display, filtering, and ordering")
+    add(transactions, "-L", "--local-time", action="store_true", help="Display timestamps in the CSMS host local timezone")
     limits = transactions.add_mutually_exclusive_group()
     limits.add_argument("-n", "--limit", type=int, default=None, help="Maximum transactions to print (default: 20)")
     limits.add_argument("-N", "--no-limit", action="store_true", help="Show all matching transactions without the default 20-transaction cap")
@@ -94,7 +95,7 @@ def run_transactions(args: argparse.Namespace) -> str:
     if args.transaction_id is not None:
         if not views:
             return f"Transaction {args.transaction_id} not found."
-        detail = format_transaction(views[0], local_time=args.local_time)
+        detail = format_transaction(views[0], local_time=args.receive_time, display_local=args.local_time)
         if not args.events:
             return detail
         timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events")
@@ -109,7 +110,7 @@ def select_transaction_views(args: argparse.Namespace) -> list:
         view = query.get(args.transaction_id)
         return [view] if view is not None else []
     since, until = _time_filters(args)
-    filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": since, "until": until, "local_time": args.local_time}
+    filters = {"charger": args.charger, "connector": args.connector, "id_tag": args.id_tag, "since": since, "until": until, "local_time": args.receive_time}
     if args.active:
         return query.active(**filters)
     if args.last:
