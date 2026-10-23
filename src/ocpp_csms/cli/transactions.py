@@ -98,7 +98,7 @@ def run_transactions(args: argparse.Namespace) -> str:
         detail = format_transaction(views[0], local_time=args.receive_time, display_local=args.local_time)
         if not args.events:
             return detail
-        timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events")
+        timeline = format_events(transaction_events(args.data_dir, args.transaction_id), heading=f"Transaction {args.transaction_id} OCPP events", local_time=args.local_time)
         return f"{detail}\n\n{timeline}"
     return format_transactions(views, local_time=args.receive_time, display_local=args.local_time)
 
