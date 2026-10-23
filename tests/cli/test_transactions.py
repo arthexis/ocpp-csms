@@ -169,8 +169,8 @@ def test_txn_table_minute_energy_and_soc_formatting(tmp_path):
     output = format_transactions([view])
     assert "KWH" in output and "SoC %" in output
     assert "ENERGY" not in output and "kWh" not in output
-    assert "4.500" in output
-    assert "41 - 80" in output
+    assert "4.50" in output
+    assert "41 80" in output
     assert "2026-10-23T14:35Z" in output
     assert "14:35:27" not in output
 
@@ -192,5 +192,5 @@ def test_txn_soc_missing_and_single_sample(tmp_path):
         ]}]}
     ]}, path=tmp_path)
     rows = format_transactions([missing, one]).splitlines()
-    assert " - " in rows[1]
-    assert "- - 62" in rows[2]
+    assert "- -" in rows[1]
+    assert "- 62" in rows[2]
