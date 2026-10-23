@@ -270,3 +270,29 @@ def test_events_grouped_and_verbose_local_time(monkeypatch):
     finally:
         monkeypatch.delenv("TZ", raising=False)
         time.tzset()
+
+
+def test_local_time_flags_across_diagnostics(cli_parser):
+    for command in ("events", "faults", "alerts", "energy"):
+        assert cli_parser.parse_args([command, "-L"]).local_time
+
+
+def test_fault_and_alert_local_time(monkeypatch):
+    import time
+    from ocpp_csms.evidence.diagnostics import format_faults
+    from ocpp_csms.evidence.alerts import format_alerts
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("requires POSIX timezone support")
+    monkeypatch.setenv("TZ", "Etc/GMT+6")
+    time.tzset()
+    try:
+        faults = [{"received_at": "2026-10-23T18:35:00Z", "charger_id": "CP",
+                   "connector_id": 1, "error_code": "InternalError"}]
+        alerts = [{"at": "2026-10-23T18:35:00Z", "severity": "warning",
+                   "message": "check"}]
+        assert "2026-10-23T12:35:00-06:00" in format_faults(faults, local_time=True)
+        assert "2026-10-23T12:35:00-06:00" in format_alerts(alerts, local_time=True)
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
