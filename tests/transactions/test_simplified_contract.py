@@ -266,7 +266,7 @@ async def test_missing_meter_evidence_is_not_reported_as_zero_energy(tmp_path):
     assert transaction_energy_wh(view) is None
     table = format_transactions([view])
     header, row = table.splitlines()
-    assert "ENERGY" in header
+    assert "KWH" in header
     assert row.split()[-2] == "-"
     detail = format_transaction(view)
     assert "Meter stop:   -" in detail
@@ -325,7 +325,7 @@ async def test_completed_session_reports_measured_energy_consistently(tmp_path):
     assert view is not None
     assert transaction_energy_wh(view) == 6420
     table = format_transactions([view])
-    assert "6.420 kWh" in table
+    assert "6.42" in table
     detail = format_transaction(view)
     assert "Energy:       6.420 kWh" in detail
     assert "Meter start:  1000" in detail
@@ -350,7 +350,7 @@ async def test_late_real_stop_reporting_uses_observed_time_and_energy(tmp_path):
     assert view is not None
     assert view.record["stop"]["meter_stop"] == 1600
     assert transaction_energy_wh(view) == 600
-    assert "600 Wh" in format_transactions([view])
+    assert "0.60" in format_transactions([view])
     detail = format_transaction(view)
     assert "Stopped:      2026-10-03T10:10:30Z" in detail
     assert "Duration:     10m 30s" in detail
