@@ -117,13 +117,14 @@ def alerts_contract(alerts: list[dict[str, Any]]) -> dict[str, Any]:
     return json_command_result({"alerts": alerts}, schema=ALERT_SCHEMA)
 
 
-def format_alerts(alerts: list[dict[str, Any]]) -> str:
+def format_alerts(alerts: list[dict[str, Any]], *, local_time: bool = False) -> str:
     """Display each stored occurrence separately, including available details."""
     if not alerts:
         return "No matching alerts."
+    from ocpp_csms.evidence.diagnostics import _event_display_timestamp
     lines = []
     for alert in alerts:
-        header = (f"{alert['at']} {str(alert['severity']).upper()} "
+        header = (f"{_event_display_timestamp(str(alert['at']), local_time=local_time)} {str(alert['severity']).upper()} "
                   f"{alert.get('charger_id') or '-'} {alert['message']}")
         lines.append(header)
         context = []
