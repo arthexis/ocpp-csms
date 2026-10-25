@@ -205,10 +205,6 @@ class CSMSServer:
                     finally:
                         object.__setattr__(self, "_tls_listener", None)
                         await tls.stop()
-        finally:
-            self._record_runtime("server_stopped")
-            remove_pid(self.events.data_dir)
-
     async def accept(self, websocket: WebSocketServerProtocol) -> None:
         path = websocket.path
         charge_point_id = charge_point_id_from_path(path)
