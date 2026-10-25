@@ -15,6 +15,7 @@ from ocpp_csms.connector_query import physical_connector_ids
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.control import ControlServer, control_socket_path
 from ocpp_csms.evidence.store import EventStore
+from ocpp_csms.persistent_wal import persistent_wal
 from ocpp_csms.runtime import remove_pid, write_pid
 from ocpp_csms.session import ChargePointSession
 from ocpp_csms.transactions.query import TransactionQuery
@@ -169,7 +170,14 @@ class CSMSServer:
         auth = load_auth()
         socket_path = control_socket_path(self.events.data_dir)
         try:
-            async with ControlServer(self, socket_path):
+            with persistent_wal(self.events.data_dir):
+                await self._serve_listeners(socket_path, auth)
+        finally:
+            self._record_runtime("server_stopped")
+            remove_pid(self.events.data_dir)
+
+    async def _serve_listeners(self, socket_path, auth) -> None:
+        async with ControlServer(self, socket_path):
                 async with websockets.serve(
                     self.accept,
                     self.host,
