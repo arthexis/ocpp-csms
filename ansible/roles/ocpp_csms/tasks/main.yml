@@ -96,9 +96,8 @@
     - name: Explain administrator authentication failure
       ansible.builtin.fail:
         msg: >-
-          Ansible could not obtain sudo privileges. Run 'sudo -v' and retry
-          './deploy.sh', or invoke './deploy.sh -K' to enter the sudo password
-          through Ansible. Do not run deploy.sh as root.
+          Ansible could not obtain sudo privileges. Run 'sudo -v' to authenticate, then retry
+          './deploy.sh'. Do not run deploy.sh as root.
           Original error: {{ ansible_failed_result.msg | default('unknown error') }}
       when: >-
         'sudo: a password is required' in (ansible_failed_result.msg | default('')) or
