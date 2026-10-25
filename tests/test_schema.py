@@ -59,10 +59,20 @@ def test_existing_database_is_not_replaced(tmp_path):
     assert source_id(tmp_path) == identity
 
 
-def test_new_databases_have_distinct_source_ids(tmp_path):
-    assert source_id(create_current_schema(tmp_path / "a").path.parent) != source_id(
-        create_current_schema(tmp_path / "b").path.parent
-    )
+def test_new_databases_on_same_host_share_node_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
+    a = create_current_schema(tmp_path / "a").path.parent
+    b = create_current_schema(tmp_path / "b").path.parent
+    assert source_id(a) == source_id(b) == "gway-005"
+
+
+def test_new_databases_on_different_hosts_have_distinct_node_identities(tmp_path, monkeypatch):
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
+    a = create_current_schema(tmp_path / "a").path.parent
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-006")
+    b = create_current_schema(tmp_path / "b").path.parent
+    assert source_id(a) == "gway-005"
+    assert source_id(b) == "gway-006"
 
 
 def test_newer_schema_is_rejected_without_modification(tmp_path):

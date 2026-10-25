@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
-import uuid
+from ocpp_csms.node_identity import configured_node_id
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -235,7 +235,7 @@ def create_current_schema(data_dir: str | Path) -> SchemaInfo:
         connection.executescript(CURRENT_SCHEMA_SQL)
         connection.execute(
             "INSERT INTO appliance_metadata (key, value) VALUES ('source_id', ?)",
-            (str(uuid.uuid4()),),
+            (configured_node_id(),),
         )
         connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
     ensure_wal(data_dir)
