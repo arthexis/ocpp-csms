@@ -324,6 +324,12 @@ async def test_force_only_bypasses_send_advertisement_guard():
     assert invalid["error"] == "invalid_connector"
     bad_flag = await dispatch_control(registry, {"command": "set_charging_profile", "connector": 0, "profile": profile, "force": "yes"})
     assert bad_flag["error"] == "invalid_force"
-    for command in ("clear_charging_profile", "get_composite_schedule"):
-        response = await dispatch_control(registry, {"command": command, "connector": 0, "duration": 60, "force": True})
-        assert response["error"] == "smart_charging_not_advertised"
+    cleared = await dispatch_control(registry, {"command": "clear_charging_profile", "connector": 0, "force": True})
+    assert cleared["response"]["status"] == "Accepted"
+    assert session.calls[-1][0] == "clear"
+    invalid_clear = await dispatch_control(registry, {"command": "clear_charging_profile", "connector": -1, "force": True})
+    assert invalid_clear["error"] == "invalid_connector"
+    malformed_clear = await dispatch_control(registry, {"command": "clear_charging_profile", "force": "yes"})
+    assert malformed_clear["error"] == "invalid_force"
+    response = await dispatch_control(registry, {"command": "get_composite_schedule", "connector": 0, "duration": 60, "force": True})
+    assert response["error"] == "smart_charging_not_advertised"
