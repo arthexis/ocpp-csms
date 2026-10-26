@@ -82,3 +82,19 @@ def test_profile_send_composite_clear_workflow(monkeypatch, capsys, watts):
 
     assert run_profile(composite_args) == 1
     assert capsys.readouterr().out.strip() == "Rejected"
+
+
+def test_profile_send_force_is_explicit_and_send_only():
+    parser, _ = build_parser()
+    normal = parser.parse_args(["profile", "send", "max-power", "--watts", "1000"])
+    forced = parser.parse_args(["profile", "send", "max-power", "--watts", "1000", "--force"])
+    assert "force" not in profile_cli._profile_send_request(normal)
+    assert profile_cli._profile_send_request(forced)["force"] is True
+    clear_normal = parser.parse_args(["profile", "clear"])
+    clear_forced = parser.parse_args(["profile", "clear", "--force"])
+    assert "force" not in profile_cli._profile_clear_request(clear_normal)
+    assert profile_cli._profile_clear_request(clear_forced)["force"] is True
+    composite_normal = parser.parse_args(["profile", "composite"])
+    composite_forced = parser.parse_args(["profile", "composite", "--force"])
+    assert "force" not in profile_cli._profile_composite_request(composite_normal)
+    assert profile_cli._profile_composite_request(composite_forced)["force"] is True
