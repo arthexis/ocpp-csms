@@ -304,3 +304,26 @@ async def test_smart_charging_advertised_remains_allowed():
     })
     assert response["response"]["status"] == "Accepted"
     assert session.calls[0][0] == "set"
+
+
+@pytest.mark.asyncio
+async def test_force_only_bypasses_send_advertisement_guard():
+    session = ControlSession()
+    async def configuration(keys):
+        return SimpleNamespace(configuration_key=[{"key": "SupportedFeatureProfiles", "value": "Core,LocalAuthListManagement"}])
+    session.get_configuration = configuration
+    registry = Registry({"charger-a": session})
+    profile = {"chargingProfileId": 1}
+    blocked = await dispatch_control(registry, {"command": "set_charging_profile", "connector": 0, "profile": profile})
+    assert blocked["error"] == "smart_charging_not_advertised"
+    assert session.calls == []
+    forced = await dispatch_control(registry, {"command": "set_charging_profile", "connector": 0, "profile": profile, "force": True})
+    assert forced["response"]["status"] == "Accepted"
+    assert session.calls == [("set", 0, profile)]
+    invalid = await dispatch_control(registry, {"command": "set_charging_profile", "connector": -1, "profile": profile, "force": True})
+    assert invalid["error"] == "invalid_connector"
+    bad_flag = await dispatch_control(registry, {"command": "set_charging_profile", "connector": 0, "profile": profile, "force": "yes"})
+    assert bad_flag["error"] == "invalid_force"
+    for command in ("clear_charging_profile", "get_composite_schedule"):
+        response = await dispatch_control(registry, {"command": command, "connector": 0, "duration": 60, "force": True})
+        assert response["error"] == "smart_charging_not_advertised"
