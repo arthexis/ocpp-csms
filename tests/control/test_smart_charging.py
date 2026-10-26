@@ -331,5 +331,10 @@ async def test_force_only_bypasses_send_advertisement_guard():
     assert invalid_clear["error"] == "invalid_connector"
     malformed_clear = await dispatch_control(registry, {"command": "clear_charging_profile", "force": "yes"})
     assert malformed_clear["error"] == "invalid_force"
-    response = await dispatch_control(registry, {"command": "get_composite_schedule", "connector": 0, "duration": 60, "force": True})
-    assert response["error"] == "smart_charging_not_advertised"
+    composite = await dispatch_control(registry, {"command": "get_composite_schedule", "connector": 0, "duration": 60, "force": True})
+    assert composite["response"]["status"] == "Accepted"
+    assert session.calls[-1][0] == "composite"
+    invalid_composite = await dispatch_control(registry, {"command": "get_composite_schedule", "connector": 0, "duration": 0, "force": True})
+    assert invalid_composite["error"] == "invalid_duration"
+    malformed_composite = await dispatch_control(registry, {"command": "get_composite_schedule", "connector": 0, "duration": 60, "force": "yes"})
+    assert malformed_composite["error"] == "invalid_force"
