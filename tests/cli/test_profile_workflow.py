@@ -90,7 +90,9 @@ def test_profile_send_force_is_explicit_and_send_only():
     forced = parser.parse_args(["profile", "send", "max-power", "--watts", "1000", "--force"])
     assert "force" not in profile_cli._profile_send_request(normal)
     assert profile_cli._profile_send_request(forced)["force"] is True
-    with pytest.raises(SystemExit):
-        parser.parse_args(["profile", "clear", "--force"])
+    clear_normal = parser.parse_args(["profile", "clear"])
+    clear_forced = parser.parse_args(["profile", "clear", "--force"])
+    assert "force" not in profile_cli._profile_clear_request(clear_normal)
+    assert profile_cli._profile_clear_request(clear_forced)["force"] is True
     with pytest.raises(SystemExit):
         parser.parse_args(["profile", "composite", "--force"])
