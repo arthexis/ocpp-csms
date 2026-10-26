@@ -501,7 +501,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_duration"}
             if charging_rate_unit is not None and charging_rate_unit not in {"A", "W"}:
                 return {"error": "invalid_charging_rate_unit"}
-            if await _smart_charging_unsupported(session):
+            force = request.get("force", False)
+            if not isinstance(force, bool):
+                return {"error": "invalid_force"}
+            if not force and await _smart_charging_unsupported(session):
                 return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             return {
                 "ok": True,
