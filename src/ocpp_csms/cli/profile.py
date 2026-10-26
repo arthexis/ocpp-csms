@@ -44,6 +44,7 @@ def add_profile_command(
     add(profile_composite, "-L", "--local-time", action="store_true", help="Display schedule timestamps in the CSMS host local timezone")
     profile_clear = profile_subcommands.add_parser("clear", help="Clear Smart Charging profiles from the charger")
     add(profile_clear, "--cp", dest="charger", help="Explicit charge point ID when more than one charger is connected")
+    add(profile_clear, "--force", action="store_true", help="DANGEROUS: bypass only the SmartCharging feature advertisement check; may hang the charger")
     add(profile_clear, "--id", dest="profile_id", type=int, help="Clear one chargingProfileId")
     add(profile_clear, "-c", "--connector", dest="connector", type=int, help="Filter by connector ID")
     add(profile_clear, "--purpose", choices=PROFILE_PURPOSES, help="Filter by charging profile purpose")
@@ -80,6 +81,8 @@ def _profile_clear_request(args: argparse.Namespace) -> dict[str, object]:
     if args.stack_level is not None and args.stack_level < 0:
         raise ValueError("--stack-level must be zero or greater")
     request: dict[str, object] = {"command": "clear_charging_profile"}
+    if args.force:
+        request["force"] = True
     if args.charger is not None:
         request["charger"] = args.charger
     if args.profile_id is not None:
