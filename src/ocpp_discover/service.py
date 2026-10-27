@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import time
 from pathlib import Path
 
 from ocpp_discover import diagnosis, first_contact as discover, handoff, reconcile
@@ -13,6 +14,8 @@ _DEFAULT_RUNTIME_DIR = "/run/ocpp-discover"
 _DEFAULT_BOOT_TIMEOUT = 180.0
 _DEFAULT_DIAGNOSIS_SECONDS = 5.0
 _LOG = logging.getLogger("ocpp-discover")
+_DEFERRED_ARP_REASONS = frozenset({"no_unresolved_arp_candidate", "ambiguous_arp_candidates"})
+_MAX_PASSIVE_RETRY_SECONDS = 60.0
 
 
 def _validate(data_dir: str | Path, chargers: tuple[str, ...], *, timeout: float) -> tuple[str, ...]:
@@ -89,7 +92,23 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     if handoff.discovered_path(persistent_dir).exists():
         outcome = _observe_persistent(data_dir, persistent_dir, boot_timeout=boot_timeout, diagnosis_seconds=wait_interval, validation_timeout=connect_timeout)
     else:
-        outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
+        retry_seconds = max(1.0, wait_interval)
+        while True:
+            try:
+                outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
+                break
+            except ValueError as exc:
+                reason = str(exc)
+                if reason not in _DEFERRED_ARP_REASONS:
+                    raise
+                cycles += 1
+                # Expected, inconclusive evidence is not a service failure. Never
+                # adapt the network until a single endpoint has been proven.
+                if max_cycles is not None and cycles >= max_cycles:
+                    return {"status": "deferred", "reason": reason, "chargers": []}
+                _LOG.info("Discover deferred: %s; retry in %.0fs", reason, retry_seconds)
+                time.sleep(retry_seconds)
+                retry_seconds = min(retry_seconds * 2, _MAX_PASSIVE_RETRY_SECONDS)
 
     cycles += 1
     if max_cycles is not None and cycles >= max_cycles:
