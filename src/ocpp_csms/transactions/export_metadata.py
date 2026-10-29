@@ -37,17 +37,26 @@ def _live_energy(record: dict[str, Any]) -> dict[str, Any]:
         return result
     result["live_energy_reason"] = "missing_sample"
     latest: tuple[datetime, int] | None = None
-    for payload in record.get("meter_values", []):
+    payloads = record.get("meter_values")
+    if not isinstance(payloads, list):
+        return result
+    for payload in payloads:
         if not isinstance(payload, dict):
             continue
-        for entry in payload.get("meter_value", []):
+        entries = payload.get("meter_value")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
             if not isinstance(entry, dict):
                 continue
             timestamp = _utc(entry.get("timestamp"))
             if timestamp is None:
                 continue
             observed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            for sample in entry.get("sampled_value", []):
+            samples = entry.get("sampled_value")
+            if not isinstance(samples, list):
+                continue
+            for sample in samples:
                 if not isinstance(sample, dict):
                     continue
                 if sample.get("measurand") != "Energy.Active.Import.Register":
