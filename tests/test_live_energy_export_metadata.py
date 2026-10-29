@@ -40,3 +40,22 @@ def test_missing_and_final():
     finished = record([])
     finished["stop"] = {"meter_stop": 130000}
     assert "live_energy_wh" not in transaction_export_metadata(finished)
+
+
+def test_malformed_collections_do_not_fail_export():
+    valid = {"timestamp": "2026-10-29T12:05:00Z",
+             "sampled_value": [{"measurand": "Energy.Active.Import.Register",
+                                "unit": "Wh", "value": "134750"}]}
+    data = record([])
+    data["meter_values"] = [None, 3, {"meter_value": None},
+                            {"meter_value": 4},
+                            {"meter_value": [None, 5, {"sampled_value": None},
+                                             {"sampled_value": 9}, valid]}]
+    item = transaction_export_metadata(data)
+    assert item["live_energy_wh"] == 34750
+    assert item["live_energy_observed_at"] == "2026-10-29T12:05:00Z"
+    for invalid in (None, 17, {}, "invalid"):
+        data["meter_values"] = invalid
+        item = transaction_export_metadata(data)
+        assert item["live_energy_wh"] is None
+        assert item["live_energy_reason"] == "missing_sample"
