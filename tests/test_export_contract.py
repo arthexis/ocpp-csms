@@ -481,3 +481,24 @@ def test_export_transaction_timestamps_are_utc_or_null(tmp_path):
         assert value is None or datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is not None
         if value is not None:
             assert datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() == timezone.utc.utcoffset(None)
+
+
+def test_soc_export_metadata_uses_only_measured_valid_samples():
+    from ocpp_csms.transactions.export_metadata import transaction_export_metadata
+
+    def meter(*values):
+        return {"meter_value": [{"sampled_value": list(values)}]}
+
+    sample = lambda value, unit="Percent": {"measurand": "SoC", "unit": unit, "value": value}
+    record = {"status": "open", "start": None, "stop": None,
+              "meter_values": [meter(sample("23"), sample("-10"), sample("100", "kWh")),
+                               meter(sample("81.6"))]}
+    metadata = transaction_export_metadata(record)
+    assert metadata["soc_start"] == 23
+    assert metadata["soc_end"] == 82
+    assert metadata["quality"]["incomplete"] is True
+    assert transaction_export_metadata({"meter_values": [meter(sample("41"))]})["soc_start"] is None
+    assert transaction_export_metadata({"meter_values": [meter(sample("41"))]})["soc_end"] == 41
+    assert transaction_export_metadata({"meter_values": [meter(sample("NaN"), sample("inf"))]})["soc_end"] is None
+    assert transaction_export_metadata({"meter_values": []})["soc_start"] is None
+    assert transaction_export_metadata({"meter_values": []})["soc_end"] is None
