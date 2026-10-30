@@ -86,6 +86,34 @@ def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return samples
 
 
+
+def _attach_status_provenance(connection: sqlite3.Connection, status: dict[str, Any]) -> None:
+    """Annotate latest authoritative StatusNotification receipt, never export time."""
+    desired = {(str(charger.get("id")), connector.get("id")): connector
+               for charger in status.get("chargers", [])
+               for connector in charger.get("connectors", [])}
+    if not desired:
+        return
+    found = set()
+    for row in connection.execute(
+        "SELECT charger_id,received_at,payload_json FROM events "
+        "WHERE direction='in' AND action='StatusNotification' ORDER BY id DESC"
+    ):
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+            if not isinstance(payload, dict):
+                continue
+            key = (str(row["charger_id"]), payload.get("connector_id"))
+            if key not in desired or key in found:
+                continue
+            desired[key]["status_received_at"] = _utc_or_none(row["received_at"])
+            found.add(key)
+            if len(found) == len(desired):
+                break
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+
+
 def export_contract(
     data_dir: str | Path,
     *,
@@ -106,6 +134,7 @@ def export_contract(
             rows, more = _event_rows(connection, after=after, limit=limit)
             transactions = _transaction_snapshots(data_dir, rows, connection)
             status = status_contract(appliance_status(data_dir, connection=connection))["data"]
+            _attach_status_provenance(connection, status)
     else:
         rows, more, transactions = [], False, []
         status = status_contract(appliance_status(data_dir))["data"]
