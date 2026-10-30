@@ -28,10 +28,16 @@ def _soc_endpoints(record: dict[str, Any]) -> tuple[int | None, int | None]:
     for payload in payloads:
         if not isinstance(payload, dict):
             continue
-        for entry in payload.get("meter_value", []):
+        entries = payload.get("meter_value")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
             if not isinstance(entry, dict):
                 continue
-            for sample in entry.get("sampled_value", []):
+            sampled_values = entry.get("sampled_value")
+            if not isinstance(sampled_values, list):
+                continue
+            for sample in sampled_values:
                 if not isinstance(sample, dict):
                     continue
                 if sample.get("measurand") != "SoC" or sample.get("unit", "Percent") != "Percent":
