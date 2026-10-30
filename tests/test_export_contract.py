@@ -502,3 +502,6 @@ def test_soc_export_metadata_uses_only_measured_valid_samples():
     assert transaction_export_metadata({"meter_values": [meter(sample("NaN"), sample("inf"))]})["soc_end"] is None
     assert transaction_export_metadata({"meter_values": []})["soc_start"] is None
     assert transaction_export_metadata({"meter_values": []})["soc_end"] is None
+    assert transaction_export_metadata({"meter_values": [
+        {"meter_value": None}, {"meter_value": [{"sampled_value": None}]}
+    ]})["soc_end"] is None
