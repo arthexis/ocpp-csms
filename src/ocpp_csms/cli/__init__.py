@@ -25,6 +25,7 @@ from ocpp_csms.cli.report import add_report_command, run_report
 from ocpp_csms.cli.reservation import add_reservation_commands, run_reservation
 from ocpp_csms.cli.profile import add_profile_command, run_profile
 from ocpp_csms.cli.rfid import add_rfid_command, run_rfid, run_rfid_action, run_rfid_edit
+from ocpp_csms.cli.rating import add_rating_command, run_rating
 from ocpp_csms.cli.tls import add_tls_command, run_tls
 from ocpp_csms.cli.txn_explain import run_txn_explain
 from ocpp_csms.cli.transactions import TRANSACTION_COMMANDS, add_transaction_parser, build_txn_operations_parser, run_transactions
@@ -76,6 +77,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     commands["tls"] = add_tls_command(subcommands)
     commands["auth"] = add_auth_command(subcommands)
     commands["report"] = add_report_command(subcommands)
+    commands["rating"] = add_rating_command(subcommands)
     commands.update(add_diagnostic_commands(subcommands))
     transactions = add_transaction_parser(subcommands)
     transactions.add_argument("-j", "--json", action="store_true", help="Print the stable machine-readable transaction contract")
@@ -148,6 +150,7 @@ def main() -> int:
         if args.command == "tls": return run_tls(args)
         if args.command == "auth": return run_auth(args)
         if args.command == "report": return run_report(args)
+        if args.command == "rating": return run_rating(args)
         if args.command == "profile": return run_profile(args)
         if args.command == "energy": return run_energy(args)
         if args.command == "export": return run_export(args)
