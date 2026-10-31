@@ -16,6 +16,45 @@ def _utc(value: Any) -> str | None:
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+
+def _soc_endpoints(record: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Match txn CLI SoC semantics; never synthesize an unknown starting SoC."""
+    from math import isfinite
+
+    samples: list[int] = []
+    payloads = record.get("meter_values")
+    if not isinstance(payloads, list):
+        return None, None
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        entries = payload.get("meter_value")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            sampled_values = entry.get("sampled_value")
+            if not isinstance(sampled_values, list):
+                continue
+            for sample in sampled_values:
+                if not isinstance(sample, dict):
+                    continue
+                if sample.get("measurand") != "SoC" or sample.get("unit", "Percent") != "Percent":
+                    continue
+                try:
+                    number = float(sample["value"])
+                except (KeyError, ValueError, TypeError, OverflowError):
+                    continue
+                if isfinite(number) and 0 <= number <= 100:
+                    samples.append(round(number))
+    if not samples:
+        return None, None
+    if len(samples) == 1:
+        return None, samples[0]
+    return samples[0], samples[-1]
+
+
 def transaction_export_metadata(record: dict[str, Any]) -> dict[str, Any]:
     """Additive evidence metadata for export, without changing CLI transaction semantics."""
     start = record.get("start") if isinstance(record.get("start"), dict) else None
@@ -35,6 +74,7 @@ def transaction_export_metadata(record: dict[str, Any]) -> dict[str, Any]:
                         "event_at": _utc(entry.get("timestamp")) if isinstance(entry, dict) else None,
                         "received_at": _utc(received),
                     })
+    soc_start, soc_end = _soc_endpoints(record)
     status = record.get("status")
     missing_meter = start is None or stop is None or start.get("meter_start") is None or stop.get("meter_stop") is None
     return {
@@ -43,6 +83,8 @@ def transaction_export_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "stop_event_at": _utc(stop.get("timestamp")) if stop else None,
         "stop_received_at": _utc(record.get("stop_received_at")),
         "meter_sample_times": samples,
+        "soc_start": soc_start,
+        "soc_end": soc_end,
         "quality": {
             "active": status == "open" and stop is None,
             "incomplete": start is None or stop is None,

@@ -461,7 +461,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_connector"}
             if not isinstance(profile, dict):
                 return {"error": "invalid_profile"}
-            if await _smart_charging_unsupported(session):
+            force = request.get("force", False)
+            if not isinstance(force, bool):
+                return {"error": "invalid_force"}
+            if not force and await _smart_charging_unsupported(session):
                 return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             response = await session.set_charging_profile(connector, profile)
         elif command == "clear_charging_profile":
@@ -477,7 +480,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_purpose"}
             if stack_level is not None and not _non_negative_int(stack_level):
                 return {"error": "invalid_stack_level"}
-            if await _smart_charging_unsupported(session):
+            force = request.get("force", False)
+            if not isinstance(force, bool):
+                return {"error": "invalid_force"}
+            if not force and await _smart_charging_unsupported(session):
                 return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             response = await session.clear_charging_profile(
                 profile_id=profile_id,
@@ -495,7 +501,10 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
                 return {"error": "invalid_duration"}
             if charging_rate_unit is not None and charging_rate_unit not in {"A", "W"}:
                 return {"error": "invalid_charging_rate_unit"}
-            if await _smart_charging_unsupported(session):
+            force = request.get("force", False)
+            if not isinstance(force, bool):
+                return {"error": "invalid_force"}
+            if not force and await _smart_charging_unsupported(session):
                 return {"error": "smart_charging_not_advertised", "detail": "Charger does not advertise SmartCharging in SupportedFeatureProfiles"}
             return {
                 "ok": True,
