@@ -13,6 +13,7 @@ from ocpp_csms.output import json_command_result
 from ocpp_csms.schema import DATABASE_FILENAME, source_id
 from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
+from ocpp_csms.charger_ratings import attach_ratings
 from ocpp_csms.transactions.contracts import transaction_item
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.export_metadata import transaction_export_metadata
@@ -138,6 +139,9 @@ def export_contract(
     else:
         rows, more, transactions = [], False, []
         status = status_contract(appliance_status(data_dir))["data"]
+    # Nominal ratings are operator metadata, not OCPP meter readings. They
+    # accompany every export page, including an empty same-cursor refresh.
+    attach_ratings(status, data_dir)
     next_cursor = int(rows[-1]["id"]) if rows else after
 
     data = {
