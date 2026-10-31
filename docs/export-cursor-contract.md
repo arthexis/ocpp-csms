@@ -17,3 +17,20 @@ A delayed StopTransaction produces a new event ID; export must expose the result
 ## Cursor caveats
 
 A changed `source_id` is a new namespace. A copied or restored database may retain the same source ID, so same-source backup rollback cannot reliably be detected by `source_id` alone. A cursor beyond the highest event ID currently yields an empty page; explicit reset/high-watermark behavior is a separate design concern. Consumers advance cursors only after durable ingestion and deduplicate by `(source_id, event_id)`.
+
+## Operator-triggered historical SoC metadata (issue #124)
+
+`ocpp-csms transaction-soc --cp T175-IT1-0620-055 --transaction 247`
+returns a one-transaction, read-only `ocpp-csms/transaction-soc/v1`
+record: persisted `source_id`, exact charger and transaction identity,
+nullable `soc_start` / `soc_end`, and `ocpp-meter-values` provenance.
+The producer derives these fields exclusively from authoritative OCPP SoC
+samples; if there is only one measurement, starting SoC remains null.
+No RFID, customer history, raw meter frames, events, or mutable cursor
+are included. Wrong source/transaction identities fail closed.
+
+This is intentionally independent of the `export/v1` event cursor.
+Consumers must still verify source identity and a matching preexisting
+transaction projection before updating their own derived metadata.
+The producer never writes operational SQLite or changes charging state.
+
