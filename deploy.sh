@@ -3,6 +3,17 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
+# Read-only owner release inventory. Must not invoke Ansible, refresh APT or restart CSMS.
+if [ "${1:-}" = "--prune" ]; then
+    shift
+    if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--dry-run" ]; }; then
+        echo "Usage: ./deploy.sh --prune [--dry-run]" >&2
+        exit 2
+    fi
+    exec python3 "$ROOT/scripts/release_prune.py" --owner csms \
+        --root "$HOME/.local/share/ocpp-csms" --cli /usr/local/bin/ocpp-csms --dry-run
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
     printf 'Do not run deploy.sh as root or with sudo.\n' >&2
     exit 1
