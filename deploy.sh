@@ -8,6 +8,34 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
+# Serialize all canonical owner deployments and retention operations.
+# Keep the descriptor open while Ansible (or prune) runs; do not unlink the lock.
+state_dir="$HOME/.local/state/ocpp-csms"
+if [ -L "$HOME/.local/state" ] || [ -L "$state_dir" ]; then
+  echo "Unsafe deployment state directory" >&2; exit 2
+fi
+(umask 077; mkdir -p "$state_dir")
+if [ -L "$state_dir/deploy.lock" ]; then
+  echo "Unsafe deployment lock" >&2; exit 2
+fi
+(umask 077; : >> "$state_dir/deploy.lock")
+exec 9<>"$state_dir/deploy.lock"
+if ! flock -n 9; then
+  echo "Another ocpp-csms deployment/prune holds the owner lock" >&2; exit 3
+fi
+
+
+# Read-only owner release inventory. Must not invoke Ansible, refresh APT or restart CSMS.
+if [ "${1:-}" = "--prune" ]; then
+    shift
+    if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--dry-run" ]; }; then
+        echo "Usage: ./deploy.sh --prune [--dry-run]" >&2
+        exit 2
+    fi
+    exec python3 "$ROOT/scripts/release_prune.py" --owner csms \
+        --root "$HOME/.local/share/ocpp-csms" --cli /usr/local/bin/ocpp-csms --dry-run
+fi
+
 if ! command -v ansible-playbook >/dev/null 2>&1; then
     printf 'Missing required command: ansible-playbook\n' >&2
     exit 1
