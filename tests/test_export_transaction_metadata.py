@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from ocpp_csms.evidence.store import EventStore
 from ocpp_csms.export_contract import export_contract
 from ocpp_csms.transactions.export_metadata import transaction_export_metadata
@@ -66,13 +64,11 @@ def test_export_prefers_charger_event_time_over_delayed_receive_time(tmp_path):
     }, transaction_id=transaction_id)
 
     [transaction] = export_contract(tmp_path)["data"]["transactions"]
-    def instant(value):
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-    assert instant(transaction["started_at"]) == instant(start_at)
-    assert instant(transaction["stopped_at"]) == instant(stop_at)
-    assert instant(transaction["start_event_at"]) == instant(start_at)
-    assert instant(transaction["stop_event_at"]) == instant(stop_at)
+    assert transaction["started_at"] == start_at
+    assert transaction["stopped_at"] == stop_at
+    # Provenance fields preserve their own normalized precision.
+    assert transaction["start_event_at"].startswith("2026-10-08T18:59:18.928")
+    assert transaction["stop_event_at"].startswith("2026-10-08T19:44:10.086")
     assert transaction["energy_wh"] == 34062
     assert transaction["start_received_at"] is not None
     assert transaction["stop_received_at"] is not None
