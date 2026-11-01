@@ -57,3 +57,23 @@ def test_missing_samples_never_synthesize_initial_soc(tmp_path):
             "sampled_value": [{"measurand": "SoC", "unit": "Percent", "value": "900"}]}]},
         transaction_id=tid)
     assert transaction_soc(tmp_path, cp="charger-a", transaction=tid)["soc_end"] == 47
+
+
+def test_soc_lookup_filters_charge_point_before_loading_transaction(tmp_path):
+    """A mismatched CP must never load another charger's transaction evidence."""
+    from ocpp_csms.transactions.query import TransactionQuery
+
+    store = EventStore(tmp_path)
+    tid = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "PRIVATE",
+        "meter_start": 1000, "timestamp": "2026-10-29T21:00:00Z",
+    })
+    store.record_ocpp("charger-a", "MeterValues", _sample(32), transaction_id=tid)
+    store.record_ocpp("charger-a", "MeterValues", _sample(81), transaction_id=tid)
+    assert TransactionQuery(tmp_path).get(tid, charger="charger-b") is None
+    matching = TransactionQuery(tmp_path).get(tid, charger="charger-a")
+    assert matching is not None and matching.charge_point_id == "charger-a"
+    with pytest.raises(ValueError, match="not found"):
+        transaction_soc(tmp_path, cp="charger-b", transaction=tid)
+    correct = transaction_soc(tmp_path, cp="charger-a", transaction=tid)
+    assert (correct["soc_start"], correct["soc_end"]) == (32, 81)
