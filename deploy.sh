@@ -28,12 +28,22 @@ fi
 # Read-only owner release inventory. Must not invoke Ansible, refresh APT or restart CSMS.
 if [ "${1:-}" = "--prune" ]; then
     shift
-    if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--dry-run" ]; }; then
-        echo "Usage: ./deploy.sh --prune [--dry-run]" >&2
-        exit 2
+    format=""
+    if [ "$#" -eq 1 ]; then
+        case "$1" in
+            --dry-run) ;;
+            --json) format="--json" ;;
+            *) echo "Usage: ./deploy.sh --prune [--dry-run|--json]" >&2; exit 2 ;;
+        esac
+    elif [ "$#" -eq 2 ] && [ "$1" = "--dry-run" ] && [ "$2" = "--json" ]; then
+        format="--json"
+    elif [ "$#" -eq 2 ] && [ "$1" = "--json" ] && [ "$2" = "--dry-run" ]; then
+        format="--json"
+    elif [ "$#" -ne 0 ]; then
+        echo "Usage: ./deploy.sh --prune [--dry-run] [--json]" >&2; exit 2
     fi
     exec python3 "$ROOT/scripts/release_prune.py" --owner csms \
-        --root "$HOME/.local/share/ocpp-csms" --cli /usr/local/bin/ocpp-csms --dry-run
+        --root "$HOME/.local/share/ocpp-csms" --cli /usr/local/bin/ocpp-csms --dry-run ${format:+"$format"}
 fi
 
 if ! command -v ansible-playbook >/dev/null 2>&1; then
