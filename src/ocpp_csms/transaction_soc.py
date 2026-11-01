@@ -19,7 +19,7 @@ def transaction_soc(data_dir: str | Path, *, cp: str, transaction: int) -> dict:
         raise ValueError("Explicit --cp and positive --transaction are required")
     # Source identity is persisted by the authoritative operational database.
     identity = source_id(data_dir)
-    view = TransactionQuery(data_dir).get(transaction)
+    view = TransactionQuery(data_dir).get(transaction, charger=cp)
     if view is None or view.charge_point_id != cp:
         raise ValueError("Transaction not found for the selected charge point")
     start, end = _soc_endpoints(view.record)
