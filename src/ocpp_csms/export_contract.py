@@ -181,9 +181,13 @@ def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connec
     for transaction_id in transaction_ids:
         view = query.get(transaction_id)
         if view is not None:
-            item = transaction_item(view, local_time=True)
-            for field in ("started_at", "stopped_at", "last_activity_at"):
-                item[field] = _utc_or_none(item.get(field))
-            transactions.append({**item, **transaction_export_metadata(view.record)})
+            # Reporting boundaries describe when charging happened, not when
+            # historical OCPP frames happened to reach this CSMS.
+            item = transaction_item(view, local_time=False)
+            metadata = transaction_export_metadata(view.record)
+            item["started_at"] = metadata["start_event_at"]
+            item["stopped_at"] = metadata["stop_event_at"]
+            item["last_activity_at"] = _utc_or_none(item.get("last_activity_at"))
+            transactions.append({**item, **metadata})
 
     return transactions
