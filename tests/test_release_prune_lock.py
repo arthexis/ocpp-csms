@@ -11,6 +11,7 @@ OWNER = "ocpp-csms" if "csms" in str(ROOT) else "ocpp-reports"
 
 
 class PruneLockTests(unittest.TestCase):
+    @unittest.skipIf(os.geteuid() == 0, "canonical CSMS deployment intentionally rejects root")
     def test_canonical_prune_refuses_held_owner_lock(self):
         with tempfile.TemporaryDirectory() as home:
             lock_dir = Path(home) / ".local/state" / OWNER
