@@ -156,7 +156,7 @@ def export_contract(
     return json_command_result(data, schema=SCHEMA)
 
 
-def _utc_or_none(value: Any) -> str | None:
+def _utc_or_none(value: Any, *, timespec: str = "auto") -> str | None:
     if not isinstance(value, str):
         return None
     try:
@@ -165,7 +165,7 @@ def _utc_or_none(value: Any) -> str | None:
         return None
     if parsed.utcoffset() is None:
         return None
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc).isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
 def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connection: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -181,9 +181,13 @@ def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connec
     for transaction_id in transaction_ids:
         view = query.get(transaction_id)
         if view is not None:
-            item = transaction_item(view, local_time=True)
-            for field in ("started_at", "stopped_at", "last_activity_at"):
-                item[field] = _utc_or_none(item.get(field))
-            transactions.append({**item, **transaction_export_metadata(view.record)})
+            # Reporting boundaries describe when charging happened, not when
+            # historical OCPP frames happened to reach this CSMS.
+            item = transaction_item(view, local_time=False)
+            metadata = transaction_export_metadata(view.record)
+            item["started_at"] = _utc_or_none(item.get("started_at"), timespec="milliseconds")
+            item["stopped_at"] = _utc_or_none(item.get("stopped_at"), timespec="milliseconds")
+            item["last_activity_at"] = _utc_or_none(item.get("last_activity_at"))
+            transactions.append({**item, **metadata})
 
     return transactions
