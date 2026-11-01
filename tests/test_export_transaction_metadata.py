@@ -39,3 +39,54 @@ def test_export_transaction_metadata_follows_event_cursor(tmp_path):
     second = export_contract(tmp_path, after=cursor)["data"]
     assert len(second["transactions"]) == 1
     assert second["transactions"][0]["quality"]["active"] is False
+
+
+def test_export_prefers_charger_event_time_over_delayed_receive_time(tmp_path):
+    """Historical messages received together must retain real session duration."""
+    store = EventStore(tmp_path)
+    start_at = "2026-10-08T18:59:18.928Z"
+    stop_at = "2026-10-08T19:44:10.086Z"
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "NOA", "meter_start": 106014173,
+        "timestamp": start_at,
+    })
+    store.commit_transaction_evidence("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 106048235,
+        "timestamp": stop_at,
+    })
+    store.record_ocpp("charger-a", "StartTransaction", {
+        "connector_id": 1, "id_tag": "NOA", "meter_start": 106014173,
+        "timestamp": start_at,
+    }, transaction_id=transaction_id)
+    store.record_ocpp("charger-a", "StopTransaction", {
+        "transaction_id": transaction_id, "meter_stop": 106048235,
+        "timestamp": stop_at,
+    }, transaction_id=transaction_id)
+
+    [transaction] = export_contract(tmp_path)["data"]["transactions"]
+    assert transaction["started_at"] == start_at
+    assert transaction["stopped_at"] == stop_at
+    assert transaction["start_event_at"] == start_at
+    assert transaction["stop_event_at"] == stop_at
+    assert transaction["energy_wh"] == 34062
+    assert transaction["start_received_at"] is not None
+    assert transaction["stop_received_at"] is not None
+    assert transaction["start_received_at"] != start_at
+    assert transaction["stop_received_at"] != stop_at
+
+
+def test_export_invalid_event_date_does_not_fall_back_to_receive_time(tmp_path):
+    """Missing/invalid device time is unknown, not the replay or receipt time."""
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "not-a-date",
+    })
+    store.record_ocpp("charger-a", "StartTransaction", {
+        "connector_id": 1, "id_tag": "CARD-A", "meter_start": 100,
+        "timestamp": "not-a-date",
+    }, transaction_id=transaction_id)
+    [transaction] = export_contract(tmp_path)["data"]["transactions"]
+    assert transaction["started_at"] is None
+    assert transaction["start_event_at"] is None
+    assert transaction["start_received_at"] is not None
