@@ -3,6 +3,22 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
+# Serialize all canonical owner deployments and retention operations.
+# Keep the descriptor open while Ansible (or prune) runs; do not unlink the lock.
+state_dir="$HOME/.local/state/ocpp-csms"
+if [ -L "$HOME/.local/state" ] || [ -L "$state_dir" ]; then
+  echo "Unsafe deployment state directory" >&2; exit 2
+fi
+(umask 077; mkdir -p "$state_dir")
+if [ -L "$state_dir/deploy.lock" ]; then
+  echo "Unsafe deployment lock" >&2; exit 2
+fi
+(umask 077; : >> "$state_dir/deploy.lock")
+exec 9<>"$state_dir/deploy.lock"
+if ! flock -n 9; then
+  echo "Another ocpp-csms deployment/prune holds the owner lock" >&2; exit 3
+fi
+
 # Read-only owner release inventory. Must not invoke Ansible, refresh APT or restart CSMS.
 if [ "${1:-}" = "--prune" ]; then
     shift
