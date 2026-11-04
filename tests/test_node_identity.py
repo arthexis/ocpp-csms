@@ -7,8 +7,8 @@ from ocpp_csms.schema import create_current_schema, source_id
 
 
 def test_default_node_id_uses_hostname(tmp_path, monkeypatch):
-    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
-    assert configured_node_id(tmp_path / "missing.toml") == "gway-005"
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "test-node-001")
+    assert configured_node_id(tmp_path / "missing.toml") == "test-node-001"
 
 
 def test_node_override(tmp_path):
@@ -25,8 +25,8 @@ def test_reject_invalid_node_ids(tmp_path):
 
 
 def test_fresh_database_uses_host_and_existing_identity_is_preserved(tmp_path, monkeypatch):
-    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "test-node-001")
     create_current_schema(tmp_path)
-    assert source_id(tmp_path) == "gway-005"
+    assert source_id(tmp_path) == "test-node-001"
     monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "renamed-host")
-    assert source_id(tmp_path) == "gway-005"
+    assert source_id(tmp_path) == "test-node-001"
