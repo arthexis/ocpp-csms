@@ -20,7 +20,7 @@ A changed `source_id` is a new namespace. A copied or restored database may reta
 
 ## Operator-triggered historical SoC metadata (issue #124)
 
-`ocpp-csms transaction-soc --cp T175-IT1-0620-055 --transaction 247`
+`ocpp-csms transaction-soc --cp CHARGER-001 --transaction 247`
 returns a one-transaction, read-only `ocpp-csms/transaction-soc/v1`
 record: persisted `source_id`, exact charger and transaction identity,
 nullable `soc_start` / `soc_end`, and `ocpp-meter-values` provenance.
