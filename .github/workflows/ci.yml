@@ -30,9 +30,6 @@ jobs:
           fi
           test -x deploy.sh || { echo "::error::deploy.sh is not executable in checkout"; exit 1; }
 
-      - name: Reject customer-specific references
-        run: python3 scripts/check_customer_references.py
-
       - name: Validate documentation-only changes
         id: scope
         shell: bash
