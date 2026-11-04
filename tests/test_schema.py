@@ -60,19 +60,19 @@ def test_existing_database_is_not_replaced(tmp_path):
 
 
 def test_new_databases_on_same_host_share_node_identity(tmp_path, monkeypatch):
-    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "test-node-001")
     a = create_current_schema(tmp_path / "a").path.parent
     b = create_current_schema(tmp_path / "b").path.parent
-    assert source_id(a) == source_id(b) == "gway-005"
+    assert source_id(a) == source_id(b) == "test-node-001"
 
 
 def test_new_databases_on_different_hosts_have_distinct_node_identities(tmp_path, monkeypatch):
-    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-005")
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "test-node-001")
     a = create_current_schema(tmp_path / "a").path.parent
-    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "gway-006")
+    monkeypatch.setattr("ocpp_csms.node_identity.socket.gethostname", lambda: "test-node-002")
     b = create_current_schema(tmp_path / "b").path.parent
-    assert source_id(a) == "gway-005"
-    assert source_id(b) == "gway-006"
+    assert source_id(a) == "test-node-001"
+    assert source_id(b) == "test-node-002"
 
 
 def test_newer_schema_is_rejected_without_modification(tmp_path):
