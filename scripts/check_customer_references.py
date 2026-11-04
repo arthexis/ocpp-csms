@@ -18,9 +18,9 @@ def forbidden_patterns() -> tuple[re.Pattern[str], ...]:
     real_charger_id = "T175" + "-IT1-0620-055"
     field_node_id = "gway" + "-005"
     return (
-        re.compile(r"\\b(?:" + "|".join(names) + r")\\b", re.IGNORECASE),
+        re.compile(r"\b(?:" + "|".join(names) + r")\b", re.IGNORECASE),
         re.compile(re.escape(real_charger_id), re.IGNORECASE),
-        re.compile(r"\\b" + re.escape(field_node_id) + r"\\b", re.IGNORECASE),
+        re.compile(r"\b" + re.escape(field_node_id) + r"\b", re.IGNORECASE),
     )
 
 
@@ -28,7 +28,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     tracked = subprocess.check_output(
         ["git", "ls-files", "-z"], cwd=root
-    ).split(b"\\0")
+    ).split(b"\0")
     patterns = forbidden_patterns()
     violations: list[str] = []
 
@@ -37,7 +37,7 @@ def main() -> int:
             continue
         path = Path(raw_path.decode("utf-8", errors="surrogateescape"))
         data = (root / path).read_bytes()
-        if b"\\0" in data:
+        if b"\0" in data:
             continue
         text = data.decode("utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), start=1):
