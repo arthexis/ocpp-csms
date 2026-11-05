@@ -19,6 +19,8 @@ def test_query_uses_sqlite_without_archives_and_survives_restart(tmp_path):
     query = TransactionQuery(tmp_path)
     assert {v.transaction_id for v in query.list()} == {first, second}
     assert query.get(first).charge_point_id == "cp-a"
+    assert query.get(first, charger="cp-a").charge_point_id == "cp-a"
+    assert query.get(first, charger="cp-b") is None
     assert query.last(charger="cp-b", connector=2).transaction_id == second
     assert query.list(id_tag="alpha")[0].transaction_id == first
     assert {v.transaction_id for v in TransactionQuery(tmp_path).list()} == {first, second}

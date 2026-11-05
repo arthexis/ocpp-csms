@@ -13,6 +13,7 @@ from ocpp_csms.output import json_command_result
 from ocpp_csms.schema import DATABASE_FILENAME, source_id
 from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
+from ocpp_csms.charger_ratings import attach_ratings
 from ocpp_csms.transactions.contracts import transaction_item
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.export_metadata import transaction_export_metadata
@@ -86,6 +87,34 @@ def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return samples
 
 
+
+def _attach_status_provenance(connection: sqlite3.Connection, status: dict[str, Any]) -> None:
+    """Annotate latest authoritative StatusNotification receipt, never export time."""
+    desired = {(str(charger.get("id")), connector.get("id")): connector
+               for charger in status.get("chargers", [])
+               for connector in charger.get("connectors", [])}
+    if not desired:
+        return
+    found = set()
+    for row in connection.execute(
+        "SELECT charger_id,received_at,payload_json FROM events "
+        "WHERE direction='in' AND action='StatusNotification' ORDER BY id DESC"
+    ):
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+            if not isinstance(payload, dict):
+                continue
+            key = (str(row["charger_id"]), payload.get("connector_id"))
+            if key not in desired or key in found:
+                continue
+            desired[key]["status_received_at"] = _utc_or_none(row["received_at"])
+            found.add(key)
+            if len(found) == len(desired):
+                break
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+
+
 def export_contract(
     data_dir: str | Path,
     *,
@@ -106,9 +135,13 @@ def export_contract(
             rows, more = _event_rows(connection, after=after, limit=limit)
             transactions = _transaction_snapshots(data_dir, rows, connection)
             status = status_contract(appliance_status(data_dir, connection=connection))["data"]
+            _attach_status_provenance(connection, status)
     else:
         rows, more, transactions = [], False, []
         status = status_contract(appliance_status(data_dir))["data"]
+    # Nominal ratings are operator metadata, not OCPP meter readings. They
+    # accompany every export page, including an empty same-cursor refresh.
+    attach_ratings(status, data_dir)
     next_cursor = int(rows[-1]["id"]) if rows else after
 
     data = {
@@ -123,7 +156,7 @@ def export_contract(
     return json_command_result(data, schema=SCHEMA)
 
 
-def _utc_or_none(value: Any) -> str | None:
+def _utc_or_none(value: Any, *, timespec: str = "auto") -> str | None:
     if not isinstance(value, str):
         return None
     try:
@@ -132,7 +165,7 @@ def _utc_or_none(value: Any) -> str | None:
         return None
     if parsed.utcoffset() is None:
         return None
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc).isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
 def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connection: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -148,9 +181,13 @@ def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connec
     for transaction_id in transaction_ids:
         view = query.get(transaction_id)
         if view is not None:
-            item = transaction_item(view, local_time=True)
-            for field in ("started_at", "stopped_at", "last_activity_at"):
-                item[field] = _utc_or_none(item.get(field))
-            transactions.append({**item, **transaction_export_metadata(view.record)})
+            # Reporting boundaries describe when charging happened, not when
+            # historical OCPP frames happened to reach this CSMS.
+            item = transaction_item(view, local_time=False)
+            metadata = transaction_export_metadata(view.record)
+            item["started_at"] = _utc_or_none(item.get("started_at"), timespec="milliseconds")
+            item["stopped_at"] = _utc_or_none(item.get("stopped_at"), timespec="milliseconds")
+            item["last_activity_at"] = _utc_or_none(item.get("last_activity_at"))
+            transactions.append({**item, **metadata})
 
     return transactions

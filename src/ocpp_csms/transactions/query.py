@@ -142,8 +142,8 @@ class TransactionQuery:
         self.data_dir = Path(data_dir).expanduser() if data_dir else default_data_dir()
         self._connection = connection
 
-    def get(self, transaction_id: int) -> TransactionView | None:
-        views = self._views(transaction_id=transaction_id)
+    def get(self, transaction_id: int, *, charger: str | None = None) -> TransactionView | None:
+        views = self._views(transaction_id=transaction_id, charger=charger)
         return views[0] if views else None
 
     def list(self, *, charger: str | None = None, connector: int | None = None, id_tag: str | None = None, since: datetime | str | None = None, until: datetime | str | None = None, active: bool | None = None, limit: int | None = None, local_time: bool = False) -> list[TransactionView]:

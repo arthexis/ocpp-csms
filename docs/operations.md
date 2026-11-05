@@ -1,3 +1,34 @@
+## Configure nominal charger power (metadata only)
+
+Use `rating` to configure nominal power without changing the charger's
+OCPP settings, current limit or Smart Charging profiles. This metadata is
+separate from live `Power.Active.Import` samples and does not alter charging.
+
+```sh
+# With one known charger, omit --cp. Omitted --connector sets a charger-wide default.
+ocpp-csms rating set --power-kw 50
+# Explicit per-outlet rating:
+ocpp-csms rating set --cp CP001 --connector 1 --power-kw 22
+# Apply explicitly to every *currently observed* physical outlet:
+ocpp-csms rating set --cp CP001 --connector all --power-kw 22
+ocpp-csms rating show --cp CP001 --json
+ocpp-csms rating list
+ocpp-csms rating clear --cp CP001 --connector 1
+```
+
+Connector 0 is the station-wide aggregate, **not** a separate physical outlet.
+A charger-wide default is shared capacity, not an independently summable
+per-connector capability. A connector override takes precedence over the
+default; clearing it restores the inherited default. If more than one charger
+is known, `--cp` is required. `--connector all` requires observed physical
+outlets (IDs greater than zero); it cannot guess unreported connectors.
+
+Values persist under the CSMS data directory in `charger-ratings.json` and
+appear as additive `rated_power_w` / `rating_scope` status-export metadata,
+including same-cursor exports with no new transactions. Reports can display
+them as `nominal` if measured power is unavailable or stale. No CSMS database
+schema migration, restart, or OCPP control message is required.
+
 # Operations
 
 Operational procedures for the installed OCPP 1.6J CSMS. **Inspect actual CLI help and the installed service before acting**: examples may lag the current executable. A command acknowledgement does not prove a charger physically complied.
