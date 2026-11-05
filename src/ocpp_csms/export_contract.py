@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -188,6 +189,9 @@ def _transaction_snapshots(data_dir: str | Path, rows: list[sqlite3.Row], connec
             item["started_at"] = _utc_or_none(item.get("started_at"), timespec="milliseconds")
             item["stopped_at"] = _utc_or_none(item.get("stopped_at"), timespec="milliseconds")
             item["last_activity_at"] = _utc_or_none(item.get("last_activity_at"))
-            transactions.append({**item, **metadata})
+            snapshot = {**item, **metadata}
+            canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+            snapshot["revision_fingerprint"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            transactions.append(snapshot)
 
     return transactions
