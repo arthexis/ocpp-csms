@@ -8,6 +8,20 @@
         path: /sys/class/net/eth0
       register: ocpp_eth0
 
+    # Package work must complete before CSMS release preparation or handoff.
+    - name: Preflight all appliance runtime packages before CSMS cutover
+      become: true
+      ansible.builtin.apt:
+        name: "{{ ['python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump'] + (['nftables'] if ocpp_eth0.stat.exists else []) }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+        lock_timeout: 60
+      register: ocpp_apt_preflight
+      until: ocpp_apt_preflight is succeeded
+      retries: 3
+      delay: 5
+
     - name: Deploy OCPP CSMS
       ansible.builtin.include_role:
         name: ocpp_csms

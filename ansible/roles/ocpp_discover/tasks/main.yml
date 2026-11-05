@@ -98,13 +98,6 @@
     fail_msg: >-
       Stable OCPP Discover command does not resolve to the active current release.
 
-- name: Install OCPP Discover runtime packages
-  become: true
-  ansible.builtin.apt:
-    name: "{{ ocpp_discover_packages }}"
-    state: present
-    update_cache: true
-
 - name: Ensure OCPP Discover persistent state directory exists
   become: true
   ansible.builtin.file:
