@@ -282,3 +282,12 @@ def test_unlinked_legacy_event_cannot_prove_session(tmp_path):
     store.record_session("observed", "CP-1", "192.168.129.182", 39812)
     store.record_ocpp("CP-1", "Heartbeat", {})
     assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+
+
+def test_reused_source_port_is_ambiguous_even_with_fresh_ocpp(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("old", "CP-1", "192.168.129.182", 39812)
+    store.record_session("replacement", "CP-1", "192.168.129.182", 39812)
+    store.record_ocpp("CP-1", "Heartbeat", {}, session_id="replacement")
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
