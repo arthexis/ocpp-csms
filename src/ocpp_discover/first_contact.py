@@ -68,6 +68,15 @@ def _session_proven(data_dir: str | Path, charger_id: str, source_ip: str,
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
         try:
+            # A reused TCP peer tuple is ambiguous without TCP sequence/epoch proof.
+            # Fail closed rather than attributing a later connection to the capture.
+            duplicates = connection.execute(
+                """SELECT COUNT(*) FROM discovery_sessions
+                   WHERE charger_id = ? AND remote_ip = ? AND remote_port IN (%s)""" % ",".join("?" for _ in source_ports),
+                (charger_id, source_ip, *sorted(source_ports)),
+            ).fetchone()[0]
+            if duplicates != 1:
+                return False
             row = connection.execute(
                 """SELECT 1 FROM events AS e
                    JOIN discovery_event_sessions AS x ON x.event_id = e.id
