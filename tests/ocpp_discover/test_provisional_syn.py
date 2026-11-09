@@ -78,7 +78,7 @@ def test_local_syn_requires_websocket_and_csms_proof(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: pytest.fail("proven redirect must remain live"))
     monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: receipt)
-    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *args, **kwargs: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *args, **kwargs: ["GSCSC082022110005X01"])
     monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ())
 
     result = first_contact.run_discovery(
@@ -144,7 +144,7 @@ def test_proof_is_scoped_to_exact_source_and_destination(monkeypatch):
         assert kwargs["destination_filter"] == {candidate.destination_ip}
         return field_receipt()
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", parser)
-    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a, **k: ["GSCSC082022110005X01"])
     monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ())
     result = first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
     assert result.charger_id == "GSCSC082022110005X01"
@@ -157,9 +157,9 @@ def test_other_connected_charger_does_not_prove_endpoint(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
     monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
-    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "OTHER-CHARGER")
-    with pytest.raises(RuntimeError, match="charger_identity_mismatch"):
-        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a, **k: ["OTHER-CHARGER"])
+    with pytest.raises(RuntimeError, match="charger_connection_timeout"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
     assert removed == [True]
 
 
@@ -191,4 +191,52 @@ def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
     monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ("GSCSC082022110005X01",))
     with pytest.raises(RuntimeError, match="fresh_ocpp_timeout"):
         first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert removed == [True]
+
+
+def test_failed_nft_apply_removes_partial_table(monkeypatch):
+    calls = []
+    existing = [False]
+    monkeypatch.setattr(provisional.redirect, "require_root", lambda: None)
+    monkeypatch.setattr(provisional.redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(provisional.redirect, "table_exists", lambda: existing[0])
+    def nft(command, input_text=None):
+        calls.append(command)
+        if command == ["nft", "-f", "-"]:
+            existing[0] = True
+            return SimpleNamespace(returncode=1, stderr="partial failure")
+        if command[:3] == ["nft", "delete", "table"]:
+            existing[0] = False
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
+    with pytest.raises(Exception, match="nft_apply_failed"):
+        provisional.apply(field_candidate())
+    assert not existing[0]
+    assert ["nft", "delete", "table", "ip", "ocpp_field_redirect"] in calls
+
+
+def test_failed_nft_apply_does_not_delete_uncreated_table(monkeypatch):
+    calls = []
+    monkeypatch.setattr(provisional.redirect, "require_root", lambda: None)
+    monkeypatch.setattr(provisional.redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(provisional.redirect, "table_exists", lambda: False)
+    def nft(command, input_text=None):
+        calls.append(command)
+        return SimpleNamespace(returncode=1 if command == ["nft", "-f", "-"] else 0, stderr="failure")
+    monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
+    with pytest.raises(Exception, match="nft_apply_failed"):
+        provisional.apply(field_candidate())
+    assert not any("delete" in command for command in calls)
+
+
+def test_unrelated_connected_charger_does_not_prove_target(monkeypatch):
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a: ["OTHER-CHARGER"])
+    with pytest.raises(RuntimeError, match="charger_connection_timeout"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
     assert removed == [True]
