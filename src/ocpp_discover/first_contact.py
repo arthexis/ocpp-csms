@@ -42,6 +42,47 @@ def _event_watermark(data_dir: str | Path) -> int:
         return int(row[0]) if row else 0
 
 
+def _captured_source_ports(capture: str, source_ip: str, charger_id: str) -> set[int]:
+    """Only ports carrying a matching plaintext WebSocket upgrade qualify."""
+    from ocpp_discover.websocket import _tcp_blocks, _GET, _UPGRADE, _CONNECTION
+    ports: set[int] = set()
+    for packet, payload in _tcp_blocks(capture):
+        if packet.group("src") != source_ip:
+            continue
+        get = _GET.search(payload)
+        connection = _CONNECTION.search(payload)
+        if not (get and _UPGRADE.search(payload) and connection):
+            continue
+        if "upgrade" not in {part.strip().lower() for part in connection.group("value").split(",")}:
+            continue
+        if get.group("path").split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] == charger_id:
+            ports.add(int(packet.group("src_port")))
+    return ports
+
+
+def _session_proven(data_dir: str | Path, charger_id: str, source_ip: str,
+                    source_ports: set[int], watermark: int) -> bool:
+    """Require inbound evidence linked to the exact observed TCP peer session."""
+    if not source_ports:
+        return False
+    database = Path(data_dir).expanduser() / DATABASE_FILENAME
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        try:
+            row = connection.execute(
+                """SELECT 1 FROM events AS e
+                   JOIN discovery_event_sessions AS x ON x.event_id = e.id
+                   JOIN discovery_sessions AS s ON s.session_id = x.session_id
+                   WHERE e.id > ? AND e.direction = 'in'
+                     AND e.charger_id = ? AND s.charger_id = ?
+                     AND s.remote_ip = ? AND s.remote_port IN (%s)
+                   LIMIT 1""" % ",".join("?" for _ in source_ports),
+                (watermark, charger_id, charger_id, source_ip, *sorted(source_ports)),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False  # Legacy databases cannot prove session identity.
+    return row is not None
+
+
 def _run_local_syn_discovery(*, initial_evidence: str, candidate: provisional.LocalSynCandidate, **kwargs):
     """Redirect one bounded SYN scope and require matching WebSocket and CSMS proof."""
     data_dir = kwargs["data_dir"]
@@ -94,11 +135,12 @@ def _run_local_syn_discovery(*, initial_evidence: str, candidate: provisional.Lo
             if __import__("time").monotonic() >= deadline:
                 raise RuntimeError("charger_connection_timeout")
             __import__("time").sleep(min(poll_interval, max(0.0, deadline - __import__("time").monotonic())))
-        missing = handoff.wait_for_fresh_ocpp(
-            data_dir, {charger_id: event_watermark}, timeout=connect_timeout, interval=poll_interval,
-        )
-        if missing:
-            raise RuntimeError("fresh_ocpp_timeout")
+        source_ports = _captured_source_ports(capture, candidate.source_ip, charger_id)
+        deadline = time.monotonic() + connect_timeout
+        while not _session_proven(data_dir, charger_id, candidate.source_ip, source_ports, event_watermark):
+            if time.monotonic() >= deadline:
+                raise RuntimeError("websocket_session_unproven")
+            time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
 
         result = core.DiscoveryResult("connected", charger_id, None, receipt)
         return ProvenDiscoveryResult(charger_id, receipt, result)
