@@ -79,7 +79,7 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 if expected is None:
                     port = int(tcp.group("dst_port"))
                     destination = tcp.group("dst")
-                    supported = (port == 8888 and provisional.local_probe_enabled()) if destination in local_addresses else port == 80
+                    supported = (port == 8888 and provisional.local_probe_enabled()) if destination in local_addresses else (port == 80 and provisional.routed_http_enabled())
                     if not supported or tcp.group("src") in local_addresses:
                         captured.pop()
                         continue
