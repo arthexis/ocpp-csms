@@ -36,13 +36,13 @@ before_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
 before_unit="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
 # The retry fixture exercises the real Ansible until/retries policy without
 # changing host APT sources, cache, packages, or service configuration.
-if ! (cd "$fixture" && ./deploy.sh) >"$log" 2>&1; then
+if ! (cd "$fixture" && ./deploy.sh -- -vvv) >"$log" 2>&1; then
   cat "$log"; echo "::error::APT retry fixture failed" >&2; exit 1
 fi
 test "$(cat "$fixture/apt_retry_probe.count")" = 3
-grep -F 'APT_REFRESH_TRANSIENT_284 attempt=1' "$log" >/dev/null
-grep -F 'APT_REFRESH_TRANSIENT_284 attempt=2' "$log" >/dev/null
-grep -F 'APT_REFRESH_RECOVERED_284 attempt=3' "$log" >/dev/null
+grep -F 'APT_REFRESH_TRANSIENT_284 attempt=1' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
+grep -F 'APT_REFRESH_TRANSIENT_284 attempt=2' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
+grep -F 'APT_REFRESH_RECOVERED_284 attempt=3' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
 test "$(readlink -f "$HOME/.local/share/ocpp-csms/current")" = "$before_release"
 test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$before_pid"
 test "$(sudo systemctl show ocpp-csms.service -p ExecStart --value)" = "$before_unit"
