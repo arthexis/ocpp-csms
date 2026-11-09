@@ -6,6 +6,7 @@ import signal
 import sqlite3
 from pathlib import Path
 import threading
+import time
 from typing import Any
 
 from ocpp_discover import discover as core
@@ -82,13 +83,17 @@ def _run_local_syn_discovery(*, initial_evidence: str, candidate: provisional.Lo
         if not provisional.matches(candidate, receipt):
             raise RuntimeError("provisional_redirect_evidence_mismatch")
 
-        charger_id = core.wait_for_charger(data_dir, connect_timeout, poll_interval)
-        if not charger_id:
-            raise RuntimeError("charger_connection_timeout")
-        # A different already-connected charger cannot prove this endpoint.
+        # Never select the first connected charger: an unrelated existing
+        # connection must not hide the identity actually observed on the wire.
         expected_ids = {request.path.rstrip("/").rsplit("/", 1)[-1] for request in receipt.requests}
-        if charger_id not in expected_ids:
-            raise RuntimeError("charger_identity_mismatch")
+        if len(expected_ids) != 1 or not all(expected_ids):
+            raise RuntimeError("ambiguous_charger_identity")
+        charger_id = next(iter(expected_ids))
+        deadline = time.monotonic() + connect_timeout
+        while charger_id not in core.connected_chargers(data_dir):
+            if __import__("time").monotonic() >= deadline:
+                raise RuntimeError("charger_connection_timeout")
+            __import__("time").sleep(min(poll_interval, max(0.0, deadline - __import__("time").monotonic())))
         missing = handoff.wait_for_fresh_ocpp(
             data_dir, {charger_id: event_watermark}, timeout=connect_timeout, interval=poll_interval,
         )
