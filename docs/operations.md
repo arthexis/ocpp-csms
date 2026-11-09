@@ -936,3 +936,23 @@ passwords. `--revoke` disables that CP's grant and removes only published copies
 not the diagnostic uploads. Grants do **not** expire automatically; operators must
 revoke them explicitly. The published set is a snapshot at grant time: repeat
 `serve` to include newly arrived files (the password will rotate).
+
+
+### Provisional WebSocket session evidence (PR #328)
+
+The CSMS records a random per-WebSocket `session_id` and the observed remote TCP
+IP/port in `discovery_sessions`. Every inbound OCPP event, including atomic
+StartTransaction, StopTransaction and MeterValues writes, is linked through
+`discovery_event_sessions`. These tables are created idempotently alongside
+the existing schema v8 without changing `PRAGMA user_version` or modifying
+historical event rows. Historical events remain unlinked and **cannot** prove
+a new discovery session. Discover requires a matching plaintext WebSocket
+upgrade's source TCP port and an inbound event linked to the same recorded
+session and peer IP/port, after its event watermark. Concurrent chargers with
+the same path identity but different TCP source ports cannot cross-prove.
+
+This proves the observed source peer tuple only when the CSMS sees the same
+source IP and port (no intermediate source-NAT/proxy rewriting). If the path
+passes through a proxy or NAT changing the peer tuple, discovery must fail
+closed; do not bypass the check. TCP port reuse and captures lacking a
+complete plaintext upgrade require additional operational validation.
