@@ -42,6 +42,11 @@ def test_restart_orphan_retry_and_export_cursor(tmp_path):
     assert _query(tmp_path, "SELECT last_id FROM transaction_allocator") == [(0,)]
     first = export_contract(tmp_path, after=0, limit=2)["data"]
     assert [item["action"] for item in first["events"]] == ["MeterValues", "MeterValues"]
+    cursor = first["cursor"]["next"]
+    second = export_contract(tmp_path, after=cursor, limit=2)["data"]
+    assert [item["action"] for item in second["events"]] == ["StopTransaction"]
+    assert second["cursor"]["more"] is False
+    assert export_contract(tmp_path, after=second["cursor"]["next"], limit=2)["data"]["events"] == []
     all_events = export_contract(tmp_path, after=0, limit=10)["data"]["events"]
     assert [item["action"] for item in all_events] == ["MeterValues", "MeterValues", "StopTransaction"]
     assert EventStore(tmp_path).commit_start("charger-a", _start(0)) == 1
@@ -57,3 +62,18 @@ def test_sqlite_rejection_preserves_allocator_and_events(tmp_path):
         store.commit_start("charger-a", _start(0))
     assert _query(tmp_path, "SELECT last_id FROM transaction_allocator") == before
     assert _query(tmp_path, "SELECT transaction_id FROM transactions") == []
+
+
+def test_matching_stop_and_retry_after_restart_preserve_first_state(tmp_path):
+    store = EventStore(tmp_path)
+    transaction_id = store.commit_start("charger-a", _start(0))
+    stop = {"transaction_id": transaction_id, "meter_stop": 120,
+            "timestamp": "2026-10-03T10:01:00Z"}
+    store.commit_transaction_evidence("charger-a", "StopTransaction", stop)
+    EventStore(tmp_path).commit_transaction_evidence("charger-a", "StopTransaction",
+                                                     dict(stop, meter_stop=999))
+    assert _query(tmp_path, "SELECT state, meter_stop FROM transactions") == [("stopped", 120)]
+    assert _query(tmp_path, "SELECT last_id FROM transaction_allocator") == [(1,)]
+    assert [event["action"] for event in export_contract(tmp_path, after=0, limit=10)["data"]["events"]].count("StopTransaction") == 2
+    assert EventStore(tmp_path).commit_start("charger-a", _start(0)) == transaction_id
+    assert _query(tmp_path, "SELECT last_id FROM transaction_allocator") == [(1,)]
