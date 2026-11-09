@@ -79,7 +79,8 @@ def test_local_syn_requires_websocket_and_csms_proof(monkeypatch):
     monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: receipt)
     monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *args, **kwargs: ["GSCSC082022110005X01"])
-    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ())
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: True)
 
     result = first_contact.run_discovery(
         initial_evidence=FIELD_SYN,
@@ -146,7 +147,8 @@ def test_proof_is_scoped_to_exact_source_and_destination(monkeypatch):
         return field_receipt()
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", parser)
     monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a, **k: ["GSCSC082022110005X01"])
-    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ())
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: True)
     result = first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
     assert result.charger_id == "GSCSC082022110005X01"
 
@@ -190,8 +192,9 @@ def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
     monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
     monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "GSCSC082022110005X01")
-    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ("GSCSC082022110005X01",))
-    with pytest.raises(RuntimeError, match="fresh_ocpp_timeout"):
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: False)
+    with pytest.raises(RuntimeError, match="websocket_session_unproven"):
         first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
     assert removed == [True]
 
@@ -256,3 +259,26 @@ def test_routed_http_opt_in_requires_exact_value(monkeypatch):
     assert not provisional.routed_http_enabled()
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
     assert provisional.routed_http_enabled()
+
+
+def test_same_charger_other_session_cannot_prove_capture(tmp_path):
+    import sqlite3
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("observed", "CP-1", "192.168.129.182", 39812)
+    store.record_session("other", "CP-1", "192.168.129.182", 39813)
+    store.record_ocpp("CP-1", "Heartbeat", {}, session_id="other")
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+    assert first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39813}, 0)
+    store.record_ocpp("CP-1", "BootNotification", {}, session_id="observed")
+    assert first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.183", {39812}, 0)
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 2)
+
+
+def test_unlinked_legacy_event_cannot_prove_session(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("observed", "CP-1", "192.168.129.182", 39812)
+    store.record_ocpp("CP-1", "Heartbeat", {})
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
