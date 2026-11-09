@@ -537,7 +537,9 @@ The persistent nftables fragment contains the exact narrow redirect that should 
 
 When no proven adaptation exists, Discover waits for qualifying first-contact evidence.
 
-If a fresh TCP SYN identifies a charger source and a **host-local** destination address/port that does not reach the CSMS listener, Discover can construct a provisional exact-match redirect from that tuple. The SYN alone does not authorize persistence: the redirect is temporary until a subsequent plaintext WebSocket/OCPP connection proves it.
+For first contact, Discover ignores local SSH, HTTPS and other local service probes. Two matching SYN attempts within 30 seconds to a non-local IPv4 destination on TCP/80 can trigger a **temporary**, exact-source-and-destination redirect. The Ethernet connection must deliver the packets to this host (for example, the charger must use it as its gateway). A SYN does not identify OCPP; ordinary HTTP can also trigger a temporary redirect, so use a dedicated charger-facing interface. The redirect is removed if a matching plaintext WebSocket request and CSMS charger identity are not proven.
+
+The earlier provisional redirect for a host-local TCP/8888 endpoint is disabled by default because unrelated local probes can select it. An operator who has isolated that network and confirmed the endpoint can explicitly set `OCPP_DISCOVER_ALLOW_LOCAL_8888=1` in the Discover service environment. This does not enable local port 80, SSH or TLS interception. Existing proven persistent adaptations remain governed by their own validation and recovery flow.
 
 If no usable TCP destination exists, discovery may fall back to repeated unresolved ARP evidence and temporarily claim only the required address as an additive `/32` while diagnosing the endpoint.
 

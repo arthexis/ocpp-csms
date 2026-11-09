@@ -46,5 +46,5 @@ def capture_tcp(candidate: DiscoveryCandidate, seconds: float) -> str:
 def capture_passive_tcp(interface: str, seconds: float) -> str:
     if not _INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
-    return _bounded_tcpdump(["tcpdump", "-i", interface, "-l", "-nn", "-s0", "-A", "tcp"], seconds)
+    return _bounded_tcpdump(["tcpdump", "-p", "-i", interface, "-l", "-nn", "-s0", "-A", "tcp"], seconds)
 

@@ -3,12 +3,13 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from ocpp_discover import discover, persistence, redirect
+from ocpp_discover import discover, persistence, provisional, redirect
 from ocpp_discover.redirect import RedirectReceipt
 
 
@@ -49,8 +50,8 @@ def inspect_configuration(
 def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None) -> DiscoveryEvidence:
     """Block until positive charger-side evidence appears, without mutating the host.
 
-    A single new outbound TCP connection attempt (SYN without ACK) is sufficient
-    to begin diagnosis and its capture is returned to the caller. ARP is a
+    First contact requires two matching plaintext SYN attempts within 30 seconds;
+    known adaptations still wake on a single SYN. ARP is a
     fallback: it must show the same non-self unresolved request at least twice.
     Established TCP traffic is excluded by BPF before Python sees it.
     """
@@ -59,20 +60,43 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
     if shutil.which("tcpdump") is None:
         raise RuntimeError("tcpdump_not_found")
 
+    local_addresses = discover.host_addresses() if expected is None else set()
     packet_filter = "arp or (tcp[tcpflags] & (tcp-syn|tcp-ack) == tcp-syn)"
-    command = ["tcpdump", "-i", interface, "-l", "-nn", packet_filter]
+    command = ["tcpdump", "-p", "-i", interface, "-l", "-nn", packet_filter]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     assert process.stdout is not None
     captured: list[str] = []
     arp_counts: Counter[tuple[str, str]] = Counter()
     answered: set[str] = set()
+    syn_seen: dict[tuple[str, str, int], tuple[float, str]] = {}
     try:
         for line in process.stdout:
             captured.append(line)
             tcp = discover._TCP_PACKET.search(line)
             if tcp is not None:
+                # First contact only wakes for supported plaintext candidates.
+                # Existing adaptations continue to observe replacement traffic.
+                if expected is None:
+                    port = int(tcp.group("dst_port"))
+                    destination = tcp.group("dst")
+                    supported = (port == 8888 and provisional.local_probe_enabled()) if destination in local_addresses else port == 80
+                    if not supported or tcp.group("src") in local_addresses:
+                        captured.pop()
+                        continue
                 source = tcp.group("src")
-                kind = "expected" if expected is not None and source == expected.source_ip else "candidate"
+                if expected is None:
+                    now = time.monotonic()
+                    syn_seen = {key: value for key, value in syn_seen.items() if now - value[0] <= 30}
+                    key = (source, tcp.group("dst"), int(tcp.group("dst_port")))
+                    first = syn_seen.get(key)
+                    if first is None:
+                        if len(syn_seen) >= 256:
+                            syn_seen.clear()
+                        syn_seen[key] = (now, line)
+                        captured.pop()
+                        continue
+                    return DiscoveryEvidence("candidate", first[1] + line)
+                kind = "expected" if source == expected.source_ip else "candidate"
                 return DiscoveryEvidence(kind, "".join(captured))
 
             reply = _ARP_REPLY.search(line)

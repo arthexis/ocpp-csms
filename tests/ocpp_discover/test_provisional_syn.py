@@ -35,6 +35,7 @@ def field_receipt():
 
 
 def test_field_syn_to_host_local_port_becomes_exact_candidate(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", "1")
     monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.10", "10.42.0.1", "192.168.1.114"})
 
     assert provisional.local_syn_candidate(FIELD_SYN, interface="eth0", listen_port=9000) == field_candidate()
@@ -75,8 +76,10 @@ def test_local_syn_requires_websocket_and_csms_proof(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *args, **kwargs: candidate)
     monkeypatch.setattr(first_contact.provisional, "apply", lambda value: applied.append(value))
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: pytest.fail("proven redirect must remain live"))
-    monkeypatch.setattr(first_contact.core, "discover_existing_endpoint", lambda **kwargs: receipt)
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: receipt)
     monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *args, **kwargs: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *args, **kwargs: ())
 
     result = first_contact.run_discovery(
         initial_evidence=FIELD_SYN,
@@ -100,7 +103,8 @@ def test_unproven_local_syn_redirect_is_removed(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *args, **kwargs: candidate)
     monkeypatch.setattr(first_contact.provisional, "apply", lambda value: None)
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
-    monkeypatch.setattr(first_contact.core, "discover_existing_endpoint", lambda **kwargs: None)
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("no_plaintext_websocket_upgrade")))
 
     with pytest.raises(RuntimeError, match="provisional_redirect_unproven"):
         first_contact.run_discovery(
@@ -113,4 +117,78 @@ def test_unproven_local_syn_redirect_is_removed(monkeypatch):
             connect_timeout=2,
         )
 
+    assert removed == [True]
+
+@pytest.mark.parametrize("port", [22, 80, 443, 9000, 5432])
+def test_unrelated_ports_never_become_provisional_candidates(monkeypatch, port):
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = f"12:00:00.000000 IP 192.168.129.184.50000 > 192.168.129.1.{port}: Flags [S], seq 1\n"
+    assert provisional.local_syn_candidate(line, interface="eth0", listen_port=9000) is None
+
+
+def test_external_plaintext_syn_becomes_exact_scoped_candidate(monkeypatch):
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
+    candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000)
+    assert candidate.destination_ip == "198.18.0.1"
+    assert "ip daddr 198.18.0.1 tcp dport 80 redirect to :9000" in provisional._ruleset(candidate)
+
+
+def test_proof_is_scoped_to_exact_source_and_destination(monkeypatch):
+    candidate = field_candidate()
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: candidate)
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    def parser(capture, **kwargs):
+        assert kwargs["source_ip"] == candidate.source_ip
+        assert kwargs["destination_filter"] == {candidate.destination_ip}
+        return field_receipt()
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", parser)
+    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ())
+    result = first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert result.charger_id == "GSCSC082022110005X01"
+
+
+def test_other_connected_charger_does_not_prove_endpoint(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "OTHER-CHARGER")
+    with pytest.raises(RuntimeError, match="charger_identity_mismatch"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert removed == [True]
+
+
+def test_local_8888_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", raising=False)
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"10.42.0.1"})
+    assert provisional.local_syn_candidate(FIELD_SYN, interface="eth0", listen_port=9000) is None
+
+
+def test_termination_removes_temporary_redirect(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: (_ for _ in ()).throw(SystemExit(143)))
+    with pytest.raises(SystemExit):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert removed == [True]
+
+
+def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.handoff, "wait_for_fresh_ocpp", lambda *a, **k: ("GSCSC082022110005X01",))
+    with pytest.raises(RuntimeError, match="fresh_ocpp_timeout"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
     assert removed == [True]
