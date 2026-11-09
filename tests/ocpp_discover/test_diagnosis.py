@@ -159,6 +159,7 @@ def test_tcp_ack_and_payload_are_excluded_before_python(monkeypatch):
 
 
 def test_first_contact_skips_ssh_and_tls_but_accepts_http(monkeypatch):
+    monkeypatch.setenv('OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80', '1')
     ssh = "12:00:00.000000 IP 192.168.129.184.50001 > 192.168.129.1.22: Flags [S], seq 1\n"
     tls = "12:00:01.000000 IP 192.168.129.184.50002 > 192.168.129.1.443: Flags [S], seq 1\n"
     http = "12:00:02.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
