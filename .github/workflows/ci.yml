@@ -210,6 +210,10 @@ jobs:
         shell: bash
         run: bash tests/deployment/apt_failure_acceptance.sh
 
+      - name: Verify bounded transient APT retries and error receipts
+        shell: bash
+        run: bash tests/deployment/apt_retry_acceptance.sh
+
       - name: Show service logs on failure
         if: failure()
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
