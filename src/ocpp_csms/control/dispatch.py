@@ -383,7 +383,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
             connector = request.get("connector")
             if not isinstance(id_tag, str) or not id_tag:
                 return {"error": "missing_id_tag"}
-            if connector is not None and not _non_negative_int(connector):
+            if connector is not None and not _positive_int(connector):
                 return {"error": "invalid_connector"}
             response = await session.remote_start(id_tag=id_tag, connector_id=connector)
         elif command == "stop":
