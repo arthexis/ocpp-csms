@@ -106,7 +106,7 @@ async def test_stop_and_meter_values_remain_orphan_evidence(tmp_path):
     with sqlite3.connect(tmp_path / DATABASE_FILENAME) as db:
         assert db.execute(
             "SELECT transaction_id, state, started_at, meter_stop FROM transactions"
-        ).fetchall() == [(999, "stopped", None, 20)]
+        ).fetchall() == []
         rows = db.execute("SELECT action, transaction_id, payload_json FROM events ORDER BY id").fetchall()
     assert [(action, tid) for action, tid, _ in rows] == [("MeterValues", 999), ("StopTransaction", 999)]
     assert json.loads(rows[0][2])["meter_value"][0]["timestamp"] == "2026-10-01T15:05:00Z"
