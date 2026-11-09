@@ -99,7 +99,15 @@ def apply(candidate: LocalSynCandidate) -> str:
         raise redirect._nft_error(checked, "nft_validation_failed")
     applied = redirect._run_nft(["nft", "-f", "-"], input_text=ruleset)
     if applied.returncode != 0:
-        raise redirect._nft_error(applied, "nft_apply_failed")
+        original = redirect._nft_error(applied, "nft_apply_failed")
+        # Preflight confirmed the table did not exist before this invocation.
+        # An nft failure may nevertheless leave a partially installed table.
+        if redirect.table_exists():
+            try:
+                remove()
+            except Exception as cleanup_error:
+                raise RuntimeError(f"{original}; provisional_cleanup_failed: {cleanup_error}") from original
+        raise original
     return ruleset
 
 
