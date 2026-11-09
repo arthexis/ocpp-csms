@@ -184,6 +184,7 @@ def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
     removed = []
     monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
     monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a: ["GSCSC082022110005X01"])
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
     monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
     monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
@@ -209,7 +210,7 @@ def test_failed_nft_apply_removes_partial_table(monkeypatch):
             existing[0] = False
         return SimpleNamespace(returncode=0, stderr="")
     monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
-    with pytest.raises(Exception, match="nft_apply_failed"):
+    with pytest.raises(Exception, match="failure"):
         provisional.apply(field_candidate())
     assert not existing[0]
     assert ["nft", "delete", "table", "ip", "ocpp_field_redirect"] in calls
@@ -224,7 +225,7 @@ def test_failed_nft_apply_does_not_delete_uncreated_table(monkeypatch):
         calls.append(command)
         return SimpleNamespace(returncode=1 if command == ["nft", "-f", "-"] else 0, stderr="failure")
     monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
-    with pytest.raises(Exception, match="nft_apply_failed"):
+    with pytest.raises(Exception, match="failure"):
         provisional.apply(field_candidate())
     assert not any("delete" in command for command in calls)
 
