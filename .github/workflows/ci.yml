@@ -206,6 +206,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash tests/deployment/integration.sh
 
+      - name: Verify injected APT failure preserves active release
+        shell: bash
+        run: bash tests/deployment/apt_failure_acceptance.sh
+
       - name: Show service logs on failure
         if: failure()
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
