@@ -195,7 +195,7 @@ def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
     monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
     monkeypatch.setattr(first_contact, "_session_proven", lambda *a: False)
     with pytest.raises(RuntimeError, match="websocket_session_unproven"):
-        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
     assert removed == [True]
 
 
