@@ -41,6 +41,7 @@ before_release="$(readlink -f "$release_path")"
 before_pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
 before_unit="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
 before_inode="$(stat -c '%d:%i' "$db")"
+before_hash="$(sha256sum "$db" | cut -d' ' -f1)"
 [[ "$before_pid" =~ ^[1-9][0-9]*$ ]]
 sudo systemctl is-active --quiet ocpp-csms.service
 
@@ -61,6 +62,7 @@ test "$(readlink -f "$release_path")" = "$before_release"
 test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$before_pid"
 test "$(sudo systemctl show ocpp-csms.service -p ExecStart --value)" = "$before_unit"
 test "$(stat -c '%d:%i' "$db")" = "$before_inode"
+test "$(sha256sum "$db" | cut -d' ' -f1)" = "$before_hash"
 sudo systemctl is-active --quiet ocpp-csms.service
 /usr/local/bin/ocpp-csms status >/dev/null
-echo "PASS: injected APT failure before cutover; current, PID, unit, DB inode and health preserved"
+echo "PASS: injected APT failure before cutover; current, PID, unit, DB inode/hash and health preserved"
