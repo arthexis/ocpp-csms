@@ -16,6 +16,11 @@ class LocalSynCandidate:
     listen_port: int
 
 
+def routed_http_enabled() -> bool:
+    """Routed HTTP interception is unsafe on shared networks; opt in explicitly."""
+    return os.environ.get("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80") == "1"
+
+
 def local_probe_enabled() -> bool:
     """Local port 8888 interception requires an explicit operator opt-in."""
     return os.environ.get("OCPP_DISCOVER_ALLOW_LOCAL_8888") == "1"
@@ -50,7 +55,7 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
         if destination in local_addresses:
             if destination_port != 8888 or not local_probe_enabled():
                 continue
-        elif destination_port != 80:
+        elif destination_port != 80 or not routed_http_enabled():
             continue
         if destination_port == listen_port:
             continue
