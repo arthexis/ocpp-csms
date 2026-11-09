@@ -152,6 +152,7 @@ async def test_disconnected_explicit_charger_is_not_queued():
         ({"command": "start", "charger": ""}, "invalid_charger"),
         ({"command": "start", "charger": "charger-a"}, "missing_id_tag"),
         ({"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": -1}, "invalid_connector"),
+        ({"command": "start", "charger": "charger-a", "id_tag": "REMOTE", "connector": 0}, "invalid_connector"),
         ({"command": "stop", "charger": "charger-a"}, "invalid_transaction"),
         ({"command": "reset", "charger": "charger-a", "type": "Warm"}, "invalid_reset_type"),
         ({"command": "config", "charger": "charger-a", "keys": "HeartbeatInterval"}, "invalid_keys"),
