@@ -127,6 +127,7 @@ def test_unrelated_ports_never_become_provisional_candidates(monkeypatch, port):
 
 
 def test_external_plaintext_syn_becomes_exact_scoped_candidate(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
     monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
     line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
     candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000)
@@ -241,3 +242,17 @@ def test_unrelated_connected_charger_does_not_prove_target(monkeypatch):
     with pytest.raises(RuntimeError, match="charger_connection_timeout"):
         first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
     assert removed == [True]
+
+
+def test_external_http_is_never_intercepted_by_default(monkeypatch):
+    monkeypatch.delenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", raising=False)
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\\n"
+    assert provisional.local_syn_candidate(line * 2, interface="eth0", listen_port=9000) is None
+
+
+def test_routed_http_opt_in_requires_exact_value(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "true")
+    assert not provisional.routed_http_enabled()
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    assert provisional.routed_http_enabled()
