@@ -75,8 +75,10 @@ def test_same_endpoint_is_not_a_contradiction(monkeypatch):
 
 def _run_observer(monkeypatch, lines, *, expected=None):
     process = FakeProcess(lines)
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", "1")
     commands = []
     monkeypatch.setattr(diagnosis.shutil, "which", lambda name: "/usr/bin/tcpdump")
+    monkeypatch.setattr(diagnosis.discover, "host_addresses", lambda: {"192.168.129.1", "192.168.50.1", "172.16.5.1"})
     monkeypatch.setattr(diagnosis.subprocess, "Popen", lambda command, **kwargs: commands.append(command) or process)
     evidence = diagnosis.wait_for_discovery_evidence("enp7s0", expected=expected)
     return evidence, commands[0], process
@@ -91,12 +93,13 @@ def test_passive_observer_uses_one_syn_as_immediate_evidence(monkeypatch):
     assert process.terminated
 
 
-def test_single_syn_is_preserved_without_requiring_retry(monkeypatch):
-    """The only TCP attempt may be the useful first-contact evidence."""
+def test_first_contact_requires_repeated_matching_syn(monkeypatch):
     line = "12:00:00.000000 IP 192.168.50.20.50000 > 192.168.50.1.8888: Flags [S], seq 1\n"
-    evidence, _, process = _run_observer(monkeypatch, [line])
+    with pytest.raises(RuntimeError, match="passive_observer_stopped"):
+        _run_observer(monkeypatch, [line])
+    evidence, _, process = _run_observer(monkeypatch, [line, line])
     assert evidence.kind == "candidate"
-    assert evidence.capture == line
+    assert evidence.capture == line + line
     assert process.terminated
 
 
@@ -147,9 +150,19 @@ def test_passive_observer_does_not_accept_answered_arp_but_can_accept_other_targ
 
 def test_tcp_ack_and_payload_are_excluded_before_python(monkeypatch):
     """The BPF expression, rather than Python parsing, excludes established traffic."""
-    line = "12:00:00.000000 IP 172.16.5.40.50000 > 172.16.5.1.8080: Flags [S], seq 1\n"
-    _, command, _ = _run_observer(monkeypatch, [line])
+    line = "12:00:00.000000 IP 172.16.5.40.50000 > 172.16.5.1.8888: Flags [S], seq 1\n"
+    _, command, _ = _run_observer(monkeypatch, [line, line])
     packet_filter = command[-1]
     assert "tcp-syn|tcp-ack" in packet_filter
     assert "== tcp-syn" in packet_filter
     assert packet_filter != "tcp or arp"
+
+
+def test_first_contact_skips_ssh_and_tls_but_accepts_http(monkeypatch):
+    monkeypatch.setenv('OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80', '1')
+    ssh = "12:00:00.000000 IP 192.168.129.184.50001 > 192.168.129.1.22: Flags [S], seq 1\n"
+    tls = "12:00:01.000000 IP 192.168.129.184.50002 > 192.168.129.1.443: Flags [S], seq 1\n"
+    http = "12:00:02.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
+    evidence, command, _ = _run_observer(monkeypatch, [ssh, tls, http, http])
+    assert evidence.capture == http + http
+    assert "-p" in command

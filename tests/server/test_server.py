@@ -10,6 +10,10 @@ from ocpp_csms.server import CSMSServer, OCPP_16_SUBPROTOCOL
 class RuntimeEvents:
     def __init__(self):
         self.rows = []
+        self.sessions = []
+
+    def record_session(self, session_id, charger_id, remote_ip, remote_port):
+        self.sessions.append((session_id, charger_id, remote_ip, remote_port))
 
     def record_runtime(self, event, *, charger_id=None, details=None):
         self.rows.append((event, charger_id, details))
@@ -20,6 +24,7 @@ class WebSocket:
         self.path = path
         self.subprotocol = subprotocol
         self.closed = asyncio.Event()
+        self.remote_address = ("192.0.2.10", 43210)
 
     async def close(self, *, code, reason):
         self.closed.set()
@@ -27,7 +32,7 @@ class WebSocket:
 
 def install_waiting_session(monkeypatch, started=None, sessions=None):
     class Session:
-        def __init__(self, charge_point_id, connection, transactions, events):
+        def __init__(self, charge_point_id, connection, transactions, events, *, session_id=None):
             self.charge_point_id = charge_point_id
             self.connection = connection
             if sessions is not None:
@@ -108,15 +113,13 @@ async def test_connection_records_path_identity_and_subprotocol(monkeypatch, sub
     task = asyncio.create_task(server.accept(websocket))
     await asyncio.sleep(0)
 
-    assert events.rows[0] == (
-        "charger_connected",
-        "charger-a",
-        {
-            "path": "/ocpp/charger-a",
-            "charge_point_id": "charger-a",
-            "subprotocol": expected,
-        },
-    )
+    assert events.rows[0][0:2] == ("charger_connected", "charger-a")
+    details = events.rows[0][2]
+    assert details["path"] == "/ocpp/charger-a"
+    assert details["charge_point_id"] == "charger-a"
+    assert details["subprotocol"] == expected
+    assert details["session_id"] == events.sessions[0][0]
+    assert details["remote"] == "192.0.2.10:43210"
 
     websocket.closed.set()
     await task

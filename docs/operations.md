@@ -537,7 +537,11 @@ The persistent nftables fragment contains the exact narrow redirect that should 
 
 When no proven adaptation exists, Discover waits for qualifying first-contact evidence.
 
-If a fresh TCP SYN identifies a charger source and a **host-local** destination address/port that does not reach the CSMS listener, Discover can construct a provisional exact-match redirect from that tuple. The SYN alone does not authorize persistence: the redirect is temporary until a subsequent plaintext WebSocket/OCPP connection proves it.
+For first contact, Discover ignores local SSH, HTTPS and other local service probes. Two matching SYN attempts within 30 seconds to a non-local IPv4 destination on TCP/80 can trigger a **temporary**, exact-source-and-destination redirect. The Ethernet connection must deliver the packets to this host (for example, the charger must use it as its gateway). A SYN does not identify OCPP; ordinary HTTP can also trigger a temporary redirect, so use a dedicated charger-facing interface. Two SYNs are only a rate/consistency filter, not an application-layer proof. Do not enable this first-contact mode on a shared general-purpose HTTP uplink: the first redirected HTTP request may be disrupted before WebSocket validation rejects it. A matching charger ID plus a fresh inbound OCPP event is identity-level evidence, not proof that the event originated on the exact observed TCP/WebSocket session; simultaneous connections using the same ID remain an unresolved ambiguity. Treat this mode as provisional and require session-level correlation before claiming cryptographic or transport-session attribution. The redirect is removed if a matching plaintext WebSocket request and CSMS charger identity are not proven.
+
+Routed external TCP/80 interception is now **disabled by default**. Only on an operator-verified dedicated charger-facing network may it be explicitly enabled with `OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80=1`. This is a manual trust assertion, not automatic detection or a guarantee against unrelated HTTP; do not enable on shared interfaces. No session-level OCPP/WebSocket proof is currently available from the event schema, so a same-ID concurrent session remains a merge blocker for deployments requiring exact-session attribution.
+
+The earlier provisional redirect for a host-local TCP/8888 endpoint is disabled by default because unrelated local probes can select it. An operator who has isolated that network and confirmed the endpoint can explicitly set `OCPP_DISCOVER_ALLOW_LOCAL_8888=1` in the Discover service environment. This does not enable local port 80, SSH or TLS interception. Existing proven persistent adaptations remain governed by their own validation and recovery flow.
 
 If no usable TCP destination exists, discovery may fall back to repeated unresolved ARP evidence and temporarily claim only the required address as an additive `/32` while diagnosing the endpoint.
 
@@ -932,3 +936,23 @@ passwords. `--revoke` disables that CP's grant and removes only published copies
 not the diagnostic uploads. Grants do **not** expire automatically; operators must
 revoke them explicitly. The published set is a snapshot at grant time: repeat
 `serve` to include newly arrived files (the password will rotate).
+
+
+### Provisional WebSocket session evidence (PR #328)
+
+The CSMS records a random per-WebSocket `session_id` and the observed remote TCP
+IP/port in `discovery_sessions`. Every inbound OCPP event, including atomic
+StartTransaction, StopTransaction and MeterValues writes, is linked through
+`discovery_event_sessions`. These tables are created idempotently alongside
+the existing schema v8 without changing `PRAGMA user_version` or modifying
+historical event rows. Historical events remain unlinked and **cannot** prove
+a new discovery session. Discover requires a matching plaintext WebSocket
+upgrade's source TCP port and an inbound event linked to the same recorded
+session and peer IP/port, after its event watermark. Concurrent chargers with
+the same path identity but different TCP source ports cannot cross-prove.
+
+This proves the observed source peer tuple only when the CSMS sees the same
+source IP and port (no intermediate source-NAT/proxy rewriting). If the path
+passes through a proxy or NAT changing the peer tuple, discovery must fail
+closed; do not bypass the check. TCP port reuse and captures lacking a
+complete plaintext upgrade require additional operational validation.

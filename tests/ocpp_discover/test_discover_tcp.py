@@ -125,7 +125,7 @@ def test_capture_passive_tcp_is_bounded_to_interface(monkeypatch):
     calls = {}
     monkeypatch.setattr(capture, "_bounded_tcpdump", lambda command, seconds: calls.update(command=command, seconds=seconds) or "capture")
     assert discover.capture_passive_tcp("eth0", 4) == "capture"
-    assert calls == {"command": ["tcpdump", "-i", "eth0", "-l", "-nn", "-s0", "-A", "tcp"], "seconds": 4}
+    assert calls == {"command": ["tcpdump", "-p", "-i", "eth0", "-l", "-nn", "-s0", "-A", "tcp"], "seconds": 4}
 
 
 def test_discover_existing_endpoint_returns_none_when_destination_is_not_host_local(monkeypatch):

@@ -41,9 +41,40 @@ class EventStore:
         schema = inspect_schema(self.data_dir)
         if not schema.exists:
             create_current_schema(self.data_dir)
+            self._ensure_session_evidence()
             return
         require_supported_schema(schema)
         ensure_wal(self.data_dir)
+        self._ensure_session_evidence()
+
+    def _ensure_session_evidence(self) -> None:
+        """Additive, idempotent v8-compatible migration; historical events stay unlinked."""
+        with self._connect() as connection:
+            connection.execute("""CREATE TABLE IF NOT EXISTS discovery_sessions (
+                session_id TEXT PRIMARY KEY, charger_id TEXT NOT NULL,
+                remote_ip TEXT NOT NULL, remote_port INTEGER NOT NULL,
+                connected_at TEXT NOT NULL
+            )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS discovery_event_sessions (
+                event_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL,
+                FOREIGN KEY(event_id) REFERENCES events(id)
+            )""")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_discovery_event_session ON discovery_event_sessions(session_id)")
+
+    def record_session(self, session_id: str, charger_id: str, remote_ip: str, remote_port: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO discovery_sessions VALUES (?, ?, ?, ?, ?)",
+                (session_id, charger_id, remote_ip, remote_port, utc_now_iso()),
+            )
+
+    @staticmethod
+    def _link_event(connection: sqlite3.Connection, event_id: int, session_id: str | None) -> None:
+        if session_id is not None:
+            connection.execute(
+                "INSERT INTO discovery_event_sessions(event_id, session_id) VALUES (?, ?)",
+                (event_id, session_id),
+            )
 
     def record_ocpp(
         self,
@@ -53,6 +84,7 @@ class EventStore:
         *,
         direction: str = "in",
         transaction_id: int | None = None,
+        session_id: str | None = None,
     ) -> None:
         if transaction_id is None:
             try:
@@ -62,7 +94,7 @@ class EventStore:
         id_tag = payload.get("id_tag")
         charger_timestamp = payload.get("timestamp")
         with closing(self._connect()) as connection, connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO events (
                     received_at, charger_id, action, direction,
@@ -76,8 +108,9 @@ class EventStore:
                     json.dumps(payload, sort_keys=True, ensure_ascii=False),
                 ),
             )
+            self._link_event(connection, int(cursor.lastrowid), session_id)
 
-    def commit_start(self, charger_id: str, payload: dict[str, Any]) -> int:
+    def commit_start(self, charger_id: str, payload: dict[str, Any], *, session_id: str | None = None) -> int:
         """Commit exact retry identity and every received StartTransaction atomically."""
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         now = utc_now_iso()
@@ -116,7 +149,7 @@ class EventStore:
                 transaction_id = next_id
             else:
                 transaction_id = int(row[0])
-            connection.execute(
+            cursor = connection.execute(
                 """INSERT INTO events (
                     received_at, charger_id, action, direction, transaction_id,
                     id_tag, charger_timestamp, payload_json
@@ -124,10 +157,11 @@ class EventStore:
                 (now, charger_id, transaction_id, str(payload["id_tag"]),
                  str(payload["timestamp"]), json.dumps(payload, sort_keys=True, ensure_ascii=False)),
             )
+            self._link_event(connection, int(cursor.lastrowid), session_id)
         return transaction_id
 
     def commit_transaction_evidence(
-        self, charger_id: str, action: str, payload: dict[str, Any]
+        self, charger_id: str, action: str, payload: dict[str, Any], *, session_id: str | None = None
     ) -> None:
         """Persist incoming evidence before acknowledgment, without inventing starts."""
         if action not in {"MeterValues", "StopTransaction"}:
@@ -136,7 +170,7 @@ class EventStore:
         now = utc_now_iso()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            cursor = connection.execute(
                 """INSERT INTO events (
                     received_at, charger_id, action, direction, transaction_id,
                     id_tag, charger_timestamp, payload_json
@@ -146,6 +180,7 @@ class EventStore:
                  str(payload["timestamp"]) if payload.get("timestamp") is not None else None,
                  json.dumps(payload, sort_keys=True, ensure_ascii=False)),
             )
+            self._link_event(connection, int(cursor.lastrowid), session_id)
             if transaction_id is None:
                 return
             # Orphan frames remain durable events, not transaction identities.

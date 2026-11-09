@@ -64,7 +64,7 @@ class SessionHandlers:
 
         # The event, exact-retry identity, and allocation commit together.
         # Never acknowledge an uncommitted transaction or allocate from JSON.
-        transaction_id = self.events.commit_start(self.id, payload)
+        transaction_id = self.events.commit_start(self.id, payload, session_id=getattr(self, "session_id", None))
         try:
             await self.transactions.diagnostic_start(self.id, payload, transaction_id)
         except Exception:
@@ -76,12 +76,12 @@ class SessionHandlers:
 
     @on("StopTransaction")
     async def on_stop_transaction(self, **payload: Any) -> call_result.StopTransactionPayload:
-        self.events.commit_transaction_evidence(self.id, "StopTransaction", payload)
+        self.events.commit_transaction_evidence(self.id, "StopTransaction", payload, session_id=getattr(self, "session_id", None))
         return call_result.StopTransactionPayload()
 
     @on("MeterValues")
     async def on_meter_values(self, **payload: Any) -> call_result.MeterValuesPayload:
-        self.events.commit_transaction_evidence(self.id, "MeterValues", payload)
+        self.events.commit_transaction_evidence(self.id, "MeterValues", payload, session_id=getattr(self, "session_id", None))
         return call_result.MeterValuesPayload()
 
     @on("DiagnosticsStatusNotification")

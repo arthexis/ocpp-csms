@@ -401,3 +401,54 @@ def test_unknown_stop_from_other_charger_does_not_mutate_existing_transaction(tm
         tmp_path, "SELECT charger_id, state, meter_stop FROM transactions WHERE transaction_id = 1",
     ) == ("charger-a", "open", None)
     assert fetchone(tmp_path, "SELECT COUNT(*) FROM events WHERE charger_id = 'charger-b'") == (1,)
+
+
+def test_session_tables_upgrade_v8_idempotently_preserve_history(tmp_path):
+    from ocpp_csms.schema import create_current_schema
+    create_current_schema(tmp_path)
+    with sqlite3.connect(database(tmp_path)) as connection:
+        connection.execute(
+            """INSERT INTO events (received_at, charger_id, action, direction, payload_json)
+               VALUES ('2026-10-01T00:00:00Z', 'CP-1', 'Heartbeat', 'in', '{}')"""
+        )
+    first = EventStore(tmp_path)
+    first.record_session("session-a", "CP-1", "192.0.2.10", 41234)
+    first.record_ocpp("CP-1", "Heartbeat", {}, session_id="session-a")
+    EventStore(tmp_path)
+    with sqlite3.connect(database(tmp_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
+        assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM discovery_sessions").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM discovery_event_sessions").fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT session_id FROM discovery_event_sessions WHERE event_id = 1"
+        ).fetchone() is None
+
+
+def test_session_link_covers_atomic_start_meter_stop_and_retry(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_session("session-a", "CP-1", "192.0.2.10", 41234)
+    start = {
+        "connector_id": 1, "id_tag": "card-a", "meter_start": 100,
+        "timestamp": "2026-10-01T15:00:00Z",
+    }
+    transaction_id = store.commit_start("CP-1", start, session_id="session-a")
+    assert store.commit_start("CP-1", start, session_id="session-a") == transaction_id
+    store.commit_transaction_evidence(
+        "CP-1", "MeterValues", {"transaction_id": transaction_id}, session_id="session-a"
+    )
+    store.commit_transaction_evidence(
+        "CP-1", "StopTransaction",
+        {"transaction_id": transaction_id, "meter_stop": 150, "timestamp": "2026-10-01T15:10:00Z"},
+        session_id="session-a",
+    )
+    with sqlite3.connect(database(tmp_path)) as connection:
+        rows = connection.execute(
+            """SELECT e.action, s.session_id FROM events e
+               JOIN discovery_event_sessions s ON s.event_id = e.id
+               ORDER BY e.id"""
+        ).fetchall()
+        assert rows == [
+            ("StartTransaction", "session-a"), ("StartTransaction", "session-a"),
+            ("MeterValues", "session-a"), ("StopTransaction", "session-a"),
+        ]

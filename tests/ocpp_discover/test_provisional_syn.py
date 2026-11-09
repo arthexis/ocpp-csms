@@ -35,6 +35,7 @@ def field_receipt():
 
 
 def test_field_syn_to_host_local_port_becomes_exact_candidate(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", "1")
     monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.10", "10.42.0.1", "192.168.1.114"})
 
     assert provisional.local_syn_candidate(FIELD_SYN, interface="eth0", listen_port=9000) == field_candidate()
@@ -75,8 +76,11 @@ def test_local_syn_requires_websocket_and_csms_proof(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *args, **kwargs: candidate)
     monkeypatch.setattr(first_contact.provisional, "apply", lambda value: applied.append(value))
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: pytest.fail("proven redirect must remain live"))
-    monkeypatch.setattr(first_contact.core, "discover_existing_endpoint", lambda **kwargs: receipt)
-    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *args, **kwargs: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: receipt)
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *args, **kwargs: ["GSCSC082022110005X01"])
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: True)
 
     result = first_contact.run_discovery(
         initial_evidence=FIELD_SYN,
@@ -100,7 +104,8 @@ def test_unproven_local_syn_redirect_is_removed(monkeypatch):
     monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *args, **kwargs: candidate)
     monkeypatch.setattr(first_contact.provisional, "apply", lambda value: None)
     monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
-    monkeypatch.setattr(first_contact.core, "discover_existing_endpoint", lambda **kwargs: None)
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("no_plaintext_websocket_upgrade")))
 
     with pytest.raises(RuntimeError, match="provisional_redirect_unproven"):
         first_contact.run_discovery(
@@ -114,3 +119,175 @@ def test_unproven_local_syn_redirect_is_removed(monkeypatch):
         )
 
     assert removed == [True]
+
+@pytest.mark.parametrize("port", [22, 80, 443, 9000, 5432])
+def test_unrelated_ports_never_become_provisional_candidates(monkeypatch, port):
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = f"12:00:00.000000 IP 192.168.129.184.50000 > 192.168.129.1.{port}: Flags [S], seq 1\n"
+    assert provisional.local_syn_candidate(line, interface="eth0", listen_port=9000) is None
+
+
+def test_external_plaintext_syn_becomes_exact_scoped_candidate(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
+    candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000)
+    assert candidate.destination_ip == "198.18.0.1"
+    assert "ip daddr 198.18.0.1 tcp dport 80 redirect to :9000" in provisional._ruleset(candidate)
+
+
+def test_proof_is_scoped_to_exact_source_and_destination(monkeypatch):
+    candidate = field_candidate()
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: candidate)
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *args: "capture")
+    def parser(capture, **kwargs):
+        assert kwargs["source_ip"] == candidate.source_ip
+        assert kwargs["destination_filter"] == {candidate.destination_ip}
+        return field_receipt()
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", parser)
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a, **k: ["GSCSC082022110005X01"])
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: True)
+    result = first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert result.charger_id == "GSCSC082022110005X01"
+
+
+def test_other_connected_charger_does_not_prove_endpoint(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a, **k: ["OTHER-CHARGER"])
+    with pytest.raises(RuntimeError, match="charger_connection_timeout"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
+    assert removed == [True]
+
+
+def test_local_8888_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", raising=False)
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"10.42.0.1"})
+    assert provisional.local_syn_candidate(FIELD_SYN, interface="eth0", listen_port=9000) is None
+
+
+def test_termination_removes_temporary_redirect(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: (_ for _ in ()).throw(SystemExit(143)))
+    with pytest.raises(SystemExit):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data")
+    assert removed == [True]
+
+
+def test_connection_without_fresh_ocpp_is_not_proven(monkeypatch):
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a: ["GSCSC082022110005X01"])
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "wait_for_charger", lambda *a, **k: "GSCSC082022110005X01")
+    monkeypatch.setattr(first_contact, "_captured_source_ports", lambda *a: {39812})
+    monkeypatch.setattr(first_contact, "_session_proven", lambda *a: False)
+    with pytest.raises(RuntimeError, match="websocket_session_unproven"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
+    assert removed == [True]
+
+
+def test_failed_nft_apply_removes_partial_table(monkeypatch):
+    calls = []
+    existing = [False]
+    monkeypatch.setattr(provisional.redirect, "require_root", lambda: None)
+    monkeypatch.setattr(provisional.redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(provisional.redirect, "table_exists", lambda: existing[0])
+    def nft(command, input_text=None):
+        calls.append(command)
+        if command == ["nft", "-f", "-"]:
+            existing[0] = True
+            return SimpleNamespace(returncode=1, stderr="partial failure")
+        if command[:3] == ["nft", "delete", "table"]:
+            existing[0] = False
+        return SimpleNamespace(returncode=0, stderr="")
+    monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
+    with pytest.raises(Exception, match="failure"):
+        provisional.apply(field_candidate())
+    assert not existing[0]
+    assert ["nft", "delete", "table", "ip", "ocpp_field_redirect"] in calls
+
+
+def test_failed_nft_apply_does_not_delete_uncreated_table(monkeypatch):
+    calls = []
+    monkeypatch.setattr(provisional.redirect, "require_root", lambda: None)
+    monkeypatch.setattr(provisional.redirect, "listener_available", lambda port: True)
+    monkeypatch.setattr(provisional.redirect, "table_exists", lambda: False)
+    def nft(command, input_text=None):
+        calls.append(command)
+        return SimpleNamespace(returncode=1 if command == ["nft", "-f", "-"] else 0, stderr="failure")
+    monkeypatch.setattr(provisional.redirect, "_run_nft", nft)
+    with pytest.raises(Exception, match="failure"):
+        provisional.apply(field_candidate())
+    assert not any("delete" in command for command in calls)
+
+
+def test_unrelated_connected_charger_does_not_prove_target(monkeypatch):
+    monkeypatch.setattr(first_contact.provisional, "local_syn_candidate", lambda *a, **k: field_candidate())
+    monkeypatch.setattr(first_contact.provisional, "apply", lambda c: None)
+    removed = []
+    monkeypatch.setattr(first_contact.provisional, "remove", lambda: removed.append(True))
+    monkeypatch.setattr(first_contact.core, "capture_passive_tcp", lambda *a: "capture")
+    monkeypatch.setattr(first_contact.core, "_websocket_receipt", lambda *a, **k: field_receipt())
+    monkeypatch.setattr(first_contact.core, "connected_chargers", lambda *a: ["OTHER-CHARGER"])
+    with pytest.raises(RuntimeError, match="charger_connection_timeout"):
+        first_contact.run_discovery(initial_evidence=FIELD_SYN, data_dir="data", connect_timeout=0)
+    assert removed == [True]
+
+
+def test_external_http_is_never_intercepted_by_default(monkeypatch):
+    monkeypatch.delenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", raising=False)
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\\n"
+    assert provisional.local_syn_candidate(line * 2, interface="eth0", listen_port=9000) is None
+
+
+def test_routed_http_opt_in_requires_exact_value(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "true")
+    assert not provisional.routed_http_enabled()
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    assert provisional.routed_http_enabled()
+
+
+def test_same_charger_other_session_cannot_prove_capture(tmp_path):
+    import sqlite3
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("observed", "CP-1", "192.168.129.182", 39812)
+    store.record_session("other", "CP-1", "192.168.129.182", 39813)
+    store.record_ocpp("CP-1", "Heartbeat", {}, session_id="other")
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+    assert first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39813}, 0)
+    store.record_ocpp("CP-1", "BootNotification", {}, session_id="observed")
+    assert first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.183", {39812}, 0)
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 2)
+
+
+def test_unlinked_legacy_event_cannot_prove_session(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("observed", "CP-1", "192.168.129.182", 39812)
+    store.record_ocpp("CP-1", "Heartbeat", {})
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+
+
+def test_reused_source_port_is_ambiguous_even_with_fresh_ocpp(tmp_path):
+    from ocpp_csms.evidence.store import EventStore
+    store = EventStore(tmp_path)
+    store.record_session("old", "CP-1", "192.168.129.182", 39812)
+    store.record_session("replacement", "CP-1", "192.168.129.182", 39812)
+    store.record_ocpp("CP-1", "Heartbeat", {}, session_id="replacement")
+    assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)

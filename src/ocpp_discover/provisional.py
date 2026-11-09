@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from dataclasses import dataclass
 
 from ocpp_discover import discover, redirect
@@ -15,8 +16,18 @@ class LocalSynCandidate:
     listen_port: int
 
 
+def routed_http_enabled() -> bool:
+    """Routed HTTP interception is unsafe on shared networks; opt in explicitly."""
+    return os.environ.get("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80") == "1"
+
+
+def local_probe_enabled() -> bool:
+    """Local port 8888 interception requires an explicit operator opt-in."""
+    return os.environ.get("OCPP_DISCOVER_ALLOW_LOCAL_8888") == "1"
+
+
 def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> LocalSynCandidate | None:
-    """Return one unambiguous SYN to a host-local non-listener endpoint."""
+    """Return one unambiguous supported plaintext endpoint, local or routed."""
     if not discover._INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
     if not 1 <= listen_port <= 65535:
@@ -37,7 +48,14 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
         source = packet.group("src")
         destination = packet.group("dst")
         destination_port = int(packet.group("dst_port"))
-        if destination not in local_addresses or source in local_addresses:
+        if source in local_addresses:
+            continue
+        # Host-local probing is opt-in; routed traffic is limited to plaintext
+        # HTTP. Never redirect SSH, TLS or arbitrary service ports.
+        if destination in local_addresses:
+            if destination_port != 8888 or not local_probe_enabled():
+                continue
+        elif destination_port != 80 or not routed_http_enabled():
             continue
         if destination_port == listen_port:
             continue
@@ -51,7 +69,10 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
     source, destination, destination_port = next(iter(candidates))
     source_address = ipaddress.ip_address(source)
     destination_address = ipaddress.ip_address(destination)
-    if source_address.version != 4 or destination_address.version != 4:
+    if (source_address.version != 4 or destination_address.version != 4
+            or source_address.is_multicast or source_address.is_unspecified
+            or destination_address.is_multicast or destination_address.is_unspecified
+            or destination_address.is_loopback or destination_address.is_link_local):
         raise ValueError("local_syn_requires_ipv4")
     return LocalSynCandidate(interface, source, destination, destination_port, listen_port)
 
@@ -83,7 +104,15 @@ def apply(candidate: LocalSynCandidate) -> str:
         raise redirect._nft_error(checked, "nft_validation_failed")
     applied = redirect._run_nft(["nft", "-f", "-"], input_text=ruleset)
     if applied.returncode != 0:
-        raise redirect._nft_error(applied, "nft_apply_failed")
+        original = redirect._nft_error(applied, "nft_apply_failed")
+        # Preflight confirmed the table did not exist before this invocation.
+        # An nft failure may nevertheless leave a partially installed table.
+        if redirect.table_exists():
+            try:
+                remove()
+            except Exception as cleanup_error:
+                raise RuntimeError(f"{original}; provisional_cleanup_failed: {cleanup_error}") from original
+        raise original
     return ruleset
 
 

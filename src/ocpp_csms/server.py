@@ -5,6 +5,7 @@ import ipaddress
 import logging
 import os
 import sqlite3
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -222,12 +223,20 @@ class CSMSServer:
                 OCPP_16_SUBPROTOCOL,
             )
 
+        remote = getattr(websocket, "remote_address", None)
+        session_id = uuid.uuid4().hex
+        # Fail closed: a connection cannot generate uncorrelated evidence.
+        if not isinstance(remote, tuple) or len(remote) < 2:
+            await websocket.close(code=1011, reason="Missing peer identity")
+            return
+        self.events.record_session(session_id, charge_point_id, str(remote[0]), int(remote[1]))
         connection = RecordedWebSocket(websocket)
         session = ChargePointSession(
             charge_point_id,
             connection,
             self.transactions,
             self.events,
+            session_id=session_id,
         )
         previous = self._active_sessions.get(charge_point_id)
         self._active_sessions[charge_point_id] = session
@@ -237,8 +246,8 @@ class CSMSServer:
         # Persist only allowlisted, non-credential handshake diagnostics.
         # Do not persist the entire request headers (Authorization/cookies).
         headers = getattr(websocket, "request_headers", None)
-        remote = getattr(websocket, "remote_address", None)
         details = {
+            "session_id": session_id,
             "path": path.split("?", 1)[0],
             "charge_point_id": charge_point_id,
             "subprotocol": websocket.subprotocol,

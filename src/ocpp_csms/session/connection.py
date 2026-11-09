@@ -24,10 +24,12 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
         connection: Any,
         transactions: TransactionArchive,
         events: EventStore,
+        session_id: str | None = None,
     ) -> None:
         super().__init__(charge_point_id, connection)
         self.transactions = transactions
         self.events = events
+        self.session_id = session_id
         self.connection = connection
         # Live occupancy belongs to this connection, never to archival evidence.
         self.connector_statuses: dict[int, str] = {}
@@ -47,6 +49,7 @@ class ChargePointSession(SessionCommands, SessionHandlers, OcppChargePoint):
                 payload,
                 direction=direction,
                 transaction_id=transaction_id,
+                session_id=self.session_id,
             )
         except Exception:
             LOGGER.exception("frame %s", self.connection.last_frame)
