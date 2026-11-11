@@ -240,38 +240,57 @@ class CSMSServer:
         )
         previous = self._active_sessions.get(charge_point_id)
         self._active_sessions[charge_point_id] = session
-        if previous is not None:
-            await previous.connection.close(code=1001, reason="Superseded connection")
-        LOGGER.info("Charge point connected: %s", charge_point_id)
-        # Persist only allowlisted, non-credential handshake diagnostics.
-        # Do not persist the entire request headers (Authorization/cookies).
-        headers = getattr(websocket, "request_headers", None)
-        details = {
-            "session_id": session_id,
-            "path": path.split("?", 1)[0],
-            "charge_point_id": charge_point_id,
-            "subprotocol": websocket.subprotocol,
-        }
-        if isinstance(remote, tuple) and len(remote) >= 2:
-            details["remote"] = f"{remote[0]}:{remote[1]}"
-        if headers is not None:
-            user_agent = headers.get("User-Agent")
-            requested = headers.get("Sec-WebSocket-Protocol")
-            if user_agent:
-                details["user_agent"] = user_agent[:256]
-            if requested:
-                details["requested_subprotocols"] = requested[:256]
-        self._record_runtime(
-            "charger_connected",
-            charger_id=charge_point_id,
-            details=details,
-        )
+        connected = False
         try:
+            if previous is not None:
+                await previous.connection.close(code=1001, reason="Superseded connection")
+            LOGGER.info("Charge point connected: %s", charge_point_id)
+            # Persist only allowlisted, non-credential handshake diagnostics.
+            # Do not persist the entire request headers (Authorization/cookies).
+            headers = getattr(websocket, "request_headers", None)
+            details = {
+                "session_id": session_id,
+                "path": path.split("?", 1)[0],
+                "charge_point_id": charge_point_id,
+                "subprotocol": websocket.subprotocol,
+            }
+            if isinstance(remote, tuple) and len(remote) >= 2:
+                details["remote"] = f"{remote[0]}:{remote[1]}"
+            if headers is not None:
+                user_agent = headers.get("User-Agent")
+                requested = headers.get("Sec-WebSocket-Protocol")
+                if user_agent:
+                    details["user_agent"] = user_agent[:256]
+                if requested:
+                    details["requested_subprotocols"] = requested[:256]
+            self._record_runtime(
+                "charger_connected",
+                charger_id=charge_point_id,
+                details=details,
+            )
+            connected = True
             await session.start()
         finally:
             if self._active_sessions.get(charge_point_id) is session:
-                del self._active_sessions[charge_point_id]
-                LOGGER.info("Charge point disconnected: %s", charge_point_id)
-                self._record_runtime("charger_disconnected", charger_id=charge_point_id)
+                # If the old close failed before shutting down the old socket,
+                # preserve its live owner. Never resurrect a closed connection.
+                old_closed = getattr(previous.connection, "closed", None) if previous is not None else None
+                if hasattr(old_closed, "is_set"):
+                    old_closed = old_closed.is_set()
+                if not connected and old_closed is False:
+                    self._active_sessions[charge_point_id] = previous
+                    LOGGER.warning("Restored live previous charge point session: %s", charge_point_id)
+                else:
+                    del self._active_sessions[charge_point_id]
+                if connected:
+                    LOGGER.info("Charge point disconnected: %s", charge_point_id)
+                    self._record_runtime("charger_disconnected", charger_id=charge_point_id)
             else:
                 LOGGER.info("Superseded charge point connection closed: %s", charge_point_id)
+            if not connected:
+                # This replacement never entered its receive loop. Do not
+                # leave its websocket open after a failed/cancelled handoff.
+                try:
+                    await websocket.close(code=1011, reason="Connection handoff failed")
+                except Exception:
+                    LOGGER.exception("Could not close aborted charge point connection %s", charge_point_id)

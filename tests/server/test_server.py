@@ -140,3 +140,160 @@ async def test_websocket_keeps_exact_latest_frame():
     assert await websocket.recv() == raw
     assert websocket.last_frame == raw
 
+
+
+@pytest.mark.asyncio
+async def test_failed_superseded_close_cleans_new_session_registry(monkeypatch):
+    """A failed close must not leave a connection registered without a handler."""
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+
+    class BrokenPrevious:
+        async def close(self, **kwargs):
+            raise OSError("close failed")
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=BrokenPrevious()
+    )
+    with pytest.raises(OSError, match="close failed"):
+        await server.accept(WebSocket(path="/charger-a"))
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_superseded_close_cleans_new_session(monkeypatch):
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+    entered = asyncio.Event()
+
+    class WaitingPrevious:
+        async def close(self, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=WaitingPrevious()
+    )
+    pending = asyncio.create_task(server.accept(WebSocket(path="/charger-a")))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_superseded_close_never_erases_newer_session(monkeypatch):
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+    entered = asyncio.Event()
+
+    class WaitingPrevious:
+        async def close(self, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=WaitingPrevious()
+    )
+    second = WebSocket(path="/charger-a")
+    second_task = asyncio.create_task(server.accept(second))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    third = WebSocket(path="/charger-a")
+    third_task = asyncio.create_task(server.accept(third))
+    await asyncio.sleep(0)
+    newest = server.session("charger-a")
+    assert newest is not None
+    second_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second_task
+    assert server.session("charger-a") is newest
+    third.closed.set()
+    await asyncio.wait_for(third_task, timeout=2)
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_failed_old_close_preserves_still_live_previous_owner(monkeypatch):
+    """A failed handoff must not abandon a socket that is still serving OCPP."""
+    install_waiting_session(monkeypatch)
+    server = make_server(RuntimeEvents())
+    first = WebSocket(path="/charger-a")
+    first_task = asyncio.create_task(server.accept(first))
+    await asyncio.sleep(0)
+    owner = server.session("charger-a")
+    assert owner is not None
+
+    async def failed_close(**kwargs):
+        raise OSError("old socket still open")
+
+    first.close = failed_close
+    replacement = WebSocket(path="/charger-a")
+    try:
+        with pytest.raises(OSError, match="old socket still open"):
+            await server.accept(replacement)
+        assert not first.closed.is_set()
+        assert server.session("charger-a") is owner
+        assert replacement.closed.is_set()
+    finally:
+        first.closed.set()
+        await asyncio.wait_for(first_task, timeout=2)
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_failed_old_close_does_not_restore_already_closed_owner(monkeypatch):
+    """A close that raises after shutting down must not resurrect the old owner."""
+    install_waiting_session(monkeypatch)
+    server = make_server(RuntimeEvents())
+    first = WebSocket(path="/charger-a")
+    first_task = asyncio.create_task(server.accept(first))
+    await asyncio.sleep(0)
+    assert server.session("charger-a") is not None
+
+    async def closed_then_failed(**kwargs):
+        first.closed.set()
+        await asyncio.sleep(0)
+        raise OSError("closed then failed")
+
+    first.close = closed_then_failed
+    replacement = WebSocket(path="/charger-a")
+    with pytest.raises(OSError, match="closed then failed"):
+        await server.accept(replacement)
+    await asyncio.wait_for(first_task, timeout=2)
+    assert server.session("charger-a") is None
+    assert replacement.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_handoff_keeps_open_previous_owned(monkeypatch):
+    """Cancellation of the handoff should not orphan the existing live session."""
+    install_waiting_session(monkeypatch)
+    server = make_server(RuntimeEvents())
+    first = WebSocket(path="/charger-a")
+    first_task = asyncio.create_task(server.accept(first))
+    await asyncio.sleep(0)
+    owner = server.session("charger-a")
+    entered = asyncio.Event()
+
+    async def never_closed(**kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    first.close = never_closed
+    replacement = WebSocket(path="/charger-a")
+    task = asyncio.create_task(server.accept(replacement))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    try:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert server.session("charger-a") is owner
+        assert replacement.closed.is_set()
+    finally:
+        first.closed.set()
+        await asyncio.wait_for(first_task, timeout=2)
+    assert server.session("charger-a") is None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME
@@ -13,7 +14,10 @@ def physical_connector_ids(data_dir: str | Path, charger_id: str) -> list[int]:
     is deliberately excluded from compatibility fan-out candidates.
     """
     database = Path(data_dir).expanduser() / DATABASE_FILENAME
-    with sqlite3.connect(database) as connection:
+    # A diagnostic query must not create a missing database or leave an open
+    # handle. as_uri() escapes path characters that would otherwise change
+    # SQLite's URI query parameters.
+    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
         rows = connection.execute(
             """
             SELECT connector_id

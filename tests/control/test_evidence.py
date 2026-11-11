@@ -77,3 +77,37 @@ async def test_reset_request_and_confirmation_are_preserved_as_evidence(charge_p
     assert [row[0] for row in rows] == ["out", "in"]
     assert reset_type in rows[0][1]
     assert "Accepted" in rows[1][1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    [
+        ("remote_start", {"id_tag": "CARD", "connector_id": 1}),
+        ("remote_stop", {"transaction_id": 17}),
+        ("reset", {"reset_type": "Soft"}),
+        ("change_availability", {"connector_id": 1, "availability_type": "Inoperative"}),
+        ("unlock_connector", {"connector_id": 1}),
+    ],
+)
+async def test_outbound_record_failure_currently_does_not_block_physical_command(
+    charge_point_session, monkeypatch, operation, arguments, caplog
+):
+    """Document current B4 behavior; deliberately do not change the policy."""
+    sent = []
+
+    def unavailable(*args, **kwargs):
+        raise OSError("evidence store unavailable")
+
+    async def send(request):
+        sent.append(request)
+        return SimpleNamespace(status="Accepted")
+
+    session = charge_point_session
+    monkeypatch.setattr(session.events, "record_ocpp", unavailable)
+    monkeypatch.setattr(session, "call", send)
+    with caplog.at_level("ERROR", logger="ocpp_csms.session"):
+        response = await getattr(session, operation)(**arguments)
+    assert response.status == "Accepted"
+    assert len(sent) == 1
+    assert "evidence store unavailable" in caplog.text
