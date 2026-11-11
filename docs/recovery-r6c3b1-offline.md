@@ -31,3 +31,11 @@ Stale Start/Meter/Stop; concurrent writer and new owner claim; unknown Stop; ide
 No authenticated source/tenant mapping, no real session fencing or handler modification, no distributed lease, no transport pre-send binding, no complete post-fence certificate, no revision-guarded activation, and no rollback proof. A restored SQLite database could rewind its own epoch and revision; real recovery requires an external monotonic witness or explicit post-restore invalidation.
 
 **Future separately authorized R6C-3B2:** investigate a Go transport adapter that durably allocates/records a per-attempt UID *before* enqueue/send, and a pinned python-ocpp receiver capture test. Maintain simulator PR #20 Draft, BeforeAvailable Quarantined, R6 unchecked. Do not implement production owner state until both sides prove correlation and security.
+
+
+## Verification and CI status
+
+- A local independent executable mirror of this disposable SQLite model passed **11 pytest cases** (python -m pytest -q, 11 passed). This is supporting prototype evidence, **not an assertion that the exact GitHub branch file was executed**.
+- The repository's normal .github/workflows/ci.yml runs on pull_request and push to main, not a feature-branch push. R6C-3B1 intentionally opens no PR and changes no main; **no GitHub Actions check ran on the R6C-3B1 HEAD**. Do not cite the existing SUCCESS on CSMS main as test coverage for this prototype.
+- The opt-in remote-simulator.yml requires manual workflow_dispatch and a trusted non-Draft PR; it was not invoked.
+- Therefore acceptance is limited to an offline reference model and a negative API-feasibility conclusion. Exact-head CI, pinned Python receiver tests and Go pre-send UID integration remain blockers. Never promote this model to CleanVerified.
