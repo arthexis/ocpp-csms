@@ -240,38 +240,41 @@ class CSMSServer:
         )
         previous = self._active_sessions.get(charge_point_id)
         self._active_sessions[charge_point_id] = session
-        if previous is not None:
-            await previous.connection.close(code=1001, reason="Superseded connection")
-        LOGGER.info("Charge point connected: %s", charge_point_id)
-        # Persist only allowlisted, non-credential handshake diagnostics.
-        # Do not persist the entire request headers (Authorization/cookies).
-        headers = getattr(websocket, "request_headers", None)
-        details = {
-            "session_id": session_id,
-            "path": path.split("?", 1)[0],
-            "charge_point_id": charge_point_id,
-            "subprotocol": websocket.subprotocol,
-        }
-        if isinstance(remote, tuple) and len(remote) >= 2:
-            details["remote"] = f"{remote[0]}:{remote[1]}"
-        if headers is not None:
-            user_agent = headers.get("User-Agent")
-            requested = headers.get("Sec-WebSocket-Protocol")
-            if user_agent:
-                details["user_agent"] = user_agent[:256]
-            if requested:
-                details["requested_subprotocols"] = requested[:256]
-        self._record_runtime(
-            "charger_connected",
-            charger_id=charge_point_id,
-            details=details,
-        )
+        connected = False
         try:
+            if previous is not None:
+                await previous.connection.close(code=1001, reason="Superseded connection")
+            LOGGER.info("Charge point connected: %s", charge_point_id)
+            # Persist only allowlisted, non-credential handshake diagnostics.
+            # Do not persist the entire request headers (Authorization/cookies).
+            headers = getattr(websocket, "request_headers", None)
+            details = {
+                "session_id": session_id,
+                "path": path.split("?", 1)[0],
+                "charge_point_id": charge_point_id,
+                "subprotocol": websocket.subprotocol,
+            }
+            if isinstance(remote, tuple) and len(remote) >= 2:
+                details["remote"] = f"{remote[0]}:{remote[1]}"
+            if headers is not None:
+                user_agent = headers.get("User-Agent")
+                requested = headers.get("Sec-WebSocket-Protocol")
+                if user_agent:
+                    details["user_agent"] = user_agent[:256]
+                if requested:
+                    details["requested_subprotocols"] = requested[:256]
+            self._record_runtime(
+                "charger_connected",
+                charger_id=charge_point_id,
+                details=details,
+            )
+            connected = True
             await session.start()
         finally:
             if self._active_sessions.get(charge_point_id) is session:
                 del self._active_sessions[charge_point_id]
                 LOGGER.info("Charge point disconnected: %s", charge_point_id)
-                self._record_runtime("charger_disconnected", charger_id=charge_point_id)
+                if connected:
+                    self._record_runtime("charger_disconnected", charger_id=charge_point_id)
             else:
                 LOGGER.info("Superseded charge point connection closed: %s", charge_point_id)
