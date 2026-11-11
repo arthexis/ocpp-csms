@@ -76,12 +76,36 @@ if [[ "$action" == reuse ]]; then
   grep -F CI_PHASE_C_PREWRITER_FAULT "$tmp/prewriter.log" >/dev/null || {
     cat "$tmp/prewriter.log"; echo "::error::C3 failed for unrelated reason" >&2; exit 1;
   }
-  test "$(readlink -f "$owner/current")" = "$current"
-  test "$(sudo systemctl show ocpp-csms.service -p ExecStart --value)" = "$before_unit"
-  test "$(stat -c '%d:%i' "$db")" = "$db_id"
-  sudo systemctl is-active --quiet ocpp-csms.service
-  /usr/local/bin/ocpp-csms status >/dev/null
-  echo "PASS C3: pre-writer failure restores old unit and release"
+  current_after="$(readlink -f "$owner/current")"
+  unit_after="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
+  db_id_after="$(stat -c '%d:%i' "$db")"
+  if [[ "$current_after" != "$current" ]]; then
+    echo "::error::C3 current pointer changed: expected=$current actual=$current_after" >&2; exit 1
+  fi
+  if [[ "$unit_after" != "$before_unit" ]]; then
+    echo "::error::C3 unit mismatch: expected=$before_unit actual=$unit_after" >&2; exit 1
+  fi
+  if [[ "$db_id_after" != "$db_id" ]]; then
+    echo "::error::C3 SQLite identity changed: expected=$db_id actual=$db_id_after" >&2; exit 1
+  fi
+  sudo systemctl is-active --quiet ocpp-csms.service || {
+    sudo systemctl status ocpp-csms.service --no-pager >&2; exit 1;
+  }
+  # systemd may report active before the restored control socket is ready.
+  healthy=0
+  for attempt in $(seq 1 25); do
+    if /usr/local/bin/ocpp-csms status >/dev/null 2>&1; then
+      healthy=1
+      break
+    fi
+    sleep 0.2
+  done
+  [[ "$healthy" == 1 ]] || {
+    echo "::error::C3 prior service did not regain application status" >&2
+    /usr/local/bin/ocpp-csms status >&2 || true
+    exit 1
+  }
+  echo "PASS C3: pre-writer failure restores old unit, release, SQLite and health"
 fi
 
 fixture postwriter
