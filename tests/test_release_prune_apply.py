@@ -37,6 +37,39 @@ class PruneApplyTests(unittest.TestCase):
         active.write_text("app")
         self.cli.symlink_to(active)
 
+    def test_unpromoted_running_candidate_is_never_pruned(self):
+        # A post-start C4 failure leaves systemd on the candidate while
+        # current and the CLI still reference the earlier release.
+        candidate = self.root / "releases" / self.old
+        installed = candidate / "dependencies" / "runtime" / "venv" / "lib"
+        installed.mkdir(parents=True)
+        (installed / "ocpp.marker").write_text("active candidate")
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({self.old: {"service"}}, []),
+        ) as observed:
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        observed.assert_called()
+        self.assertNotIn(self.old, receipt["deleted"])
+        self.assertTrue((installed / "ocpp.marker").is_file())
+        self.assertTrue(candidate.is_dir())
+
+    def test_prune_removes_unreferenced_nested_dependencies_together(self):
+        release = self.root / "releases" / self.old
+        deps = release / "dependencies" / "runtime" / "venv" / "lib"
+        deps.mkdir(parents=True)
+        (deps / "ocpp.marker").write_text("stale")
+        shared = self.root / "dependencies" / "legacy-runtime" / "venv"
+        shared.mkdir(parents=True)
+        (shared / "keep").write_text("shared")
+        with patch.object(prune, "_runtime_references", return_value=({}, [])):
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        self.assertEqual(receipt["deleted"], [self.old])
+        self.assertFalse(release.exists())
+        self.assertTrue((shared / "keep").is_file())
+        self.assertTrue((self.root / "releases" / self.current).is_dir())
+        self.assertTrue((self.root / "releases" / self.previous).is_dir())
+
     def test_apply_deletes_only_old_release_and_is_idempotent(self):
         receipt = prune.apply_prune(self.root, self.owner, self.cli)
         self.assertEqual(receipt["status"], "completed")
