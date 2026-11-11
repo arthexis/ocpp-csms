@@ -88,3 +88,61 @@ def test_independent_upload_notification_without_callresult(tmp_path, monkeypatc
         data_dir=tmp_path, since=None, until=None, retries=None, retry_interval=None, json=False)
     assert charger_diagnostics.run_https_diagnostics(args) == 0
     assert "Uploading" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_concurrent_diagnostics_and_control_do_not_share_timeout():
+    """Each outgoing CALL observes its own timeout even while another CALL waits."""
+    class WaitingSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def call(self, request):
+            self.during.append(self._response_timeout)
+            if len(self.during) == 1:
+                self.entered.set()
+                await self.release.wait()
+            return SimpleNamespace(file_name="logs.zip", status="Accepted")
+
+    session = WaitingSession()
+    first = asyncio.create_task(
+        session.get_diagnostics("https://example.com/private", response_timeout=12)
+    )
+    await asyncio.wait_for(session.entered.wait(), timeout=2)
+    second = asyncio.create_task(
+        session.get_diagnostics("https://example.com/other", response_timeout=19)
+    )
+    control = asyncio.create_task(session.remote_stop(42))
+    try:
+        await asyncio.sleep(0)
+        assert session._response_timeout == 12
+        assert session.during == [12]
+    finally:
+        session.release.set()
+        await asyncio.gather(first, second, control, return_exceptions=True)
+    assert session.during == [12, 19, 30]
+    assert session._response_timeout == 30
+
+
+@pytest.mark.asyncio
+async def test_cancelled_diagnostics_restores_default_timeout():
+    class WaitingSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+
+        async def call(self, request):
+            self.entered.set()
+            await asyncio.Event().wait()
+
+    session = WaitingSession()
+    pending = asyncio.create_task(
+        session.get_diagnostics("https://example.com/private", response_timeout=11)
+    )
+    await asyncio.wait_for(session.entered.wait(), timeout=2)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert session._response_timeout == 30

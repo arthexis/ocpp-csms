@@ -140,3 +140,77 @@ async def test_websocket_keeps_exact_latest_frame():
     assert await websocket.recv() == raw
     assert websocket.last_frame == raw
 
+
+
+@pytest.mark.asyncio
+async def test_failed_superseded_close_cleans_new_session_registry(monkeypatch):
+    """A failed close must not leave a connection registered without a handler."""
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+
+    class BrokenPrevious:
+        async def close(self, **kwargs):
+            raise OSError("close failed")
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=BrokenPrevious()
+    )
+    with pytest.raises(OSError, match="close failed"):
+        await server.accept(WebSocket(path="/charger-a"))
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_superseded_close_cleans_new_session(monkeypatch):
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+    entered = asyncio.Event()
+
+    class WaitingPrevious:
+        async def close(self, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=WaitingPrevious()
+    )
+    pending = asyncio.create_task(server.accept(WebSocket(path="/charger-a")))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert server.session("charger-a") is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_superseded_close_never_erases_newer_session(monkeypatch):
+    install_waiting_session(monkeypatch)
+    events = RuntimeEvents()
+    server = make_server(events)
+    entered = asyncio.Event()
+
+    class WaitingPrevious:
+        async def close(self, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()
+
+    server._active_sessions["charger-a"] = SimpleNamespace(
+        connection=WaitingPrevious()
+    )
+    second = WebSocket(path="/charger-a")
+    second_task = asyncio.create_task(server.accept(second))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    third = WebSocket(path="/charger-a")
+    third_task = asyncio.create_task(server.accept(third))
+    await asyncio.sleep(0)
+    newest = server.session("charger-a")
+    assert newest is not None
+    second_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second_task
+    assert server.session("charger-a") is newest
+    third.closed.set()
+    await asyncio.wait_for(third_task, timeout=2)
+    assert server.session("charger-a") is None
