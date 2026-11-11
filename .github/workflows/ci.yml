@@ -214,6 +214,10 @@ jobs:
         shell: bash
         run: bash tests/deployment/apt_retry_acceptance.sh
 
+      - name: Phase C pre-writer and reused-storage post-start fault tests
+        shell: bash
+        run: bash tests/deployment/phase_c_cutover.sh reuse
+
       - name: Show service logs on failure
         if: failure()
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
@@ -272,6 +276,10 @@ jobs:
           git -C /tmp/ocpp-csms-schema-advance add src/ocpp_csms/schema.py
           git -C /tmp/ocpp-csms-schema-advance -c user.name='CI Schema Fixture' -c user.email='ci@example.invalid' commit -m 'test fixture: advance schema'
           (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/integration.sh)
+
+      - name: Phase C new-schema post-start fault test
+        shell: bash
+        run: (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/phase_c_cutover.sh create)
 
       - name: Show service logs on failure
         if: failure()
