@@ -331,7 +331,8 @@ def main(argv=None):
             parser.error(str(exc))
         report = apply_prune(args.root, args.owner, args.cli)
     else:
-        report = preview(args.root, args.owner, args.cli, inspect_runtime=False)
+        # Show the same live service/process protections used by --apply.
+        report = preview(args.root, args.owner, args.cli, inspect_runtime=True)
     print(json.dumps(report, indent=2, sort_keys=True) if args.json else format_report(report))
     return 0 if not report["errors"] else 1
 
