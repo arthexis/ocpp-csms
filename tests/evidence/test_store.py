@@ -452,3 +452,102 @@ def test_session_link_covers_atomic_start_meter_stop_and_retry(tmp_path):
             ("StartTransaction", "session-a"), ("StartTransaction", "session-a"),
             ("MeterValues", "session-a"), ("StopTransaction", "session-a"),
         ]
+
+
+def test_event_store_closes_connections_after_success(tmp_path, monkeypatch):
+    """The transaction context commits but does not close sqlite3 connections."""
+    store = EventStore(tmp_path)
+    original_connect = store._connect
+    opened = []
+
+    def tracked_connect():
+        connection = original_connect()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", tracked_connect)
+    store._ensure_session_evidence()
+    store.record_session("session-a", "charger-a", "192.0.2.5", 40000)
+    store.record_ocpp("charger-a", "Heartbeat", {}, session_id="session-a")
+    start = {
+        "connector_id": 1,
+        "id_tag": "card-a",
+        "meter_start": 100,
+        "timestamp": "2026-10-01T15:10:00Z",
+    }
+    transaction_id = store.commit_start("charger-a", start, session_id="session-a")
+    store.commit_transaction_evidence(
+        "charger-a", "MeterValues",
+        {"transaction_id": transaction_id, "connector_id": 1, "meter_value": []},
+        session_id="session-a",
+    )
+    assert store.record_connector_status(
+        "charger-a",
+        {"connector_id": 1, "status": "Available", "timestamp": "2026-10-01T15:11:00Z"},
+    )
+    assert store.latest_rfid_list_version("charger-a") is None
+    store.record_rfid_list(
+        "charger-a", list_version=1, entries=[], source_file=None,
+        list_hash="fixture", verified_version=None,
+    )
+    store.record_runtime("charger_connected", charger_id="charger-a")
+
+    assert len(opened) == 9
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("SELECT 1")
+
+
+def test_event_store_closes_connection_and_rolls_back_failed_start(tmp_path, monkeypatch):
+    store = EventStore(tmp_path)
+    original_connect = store._connect
+    opened = []
+
+    def tracked_connect():
+        connection = original_connect()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", tracked_connect)
+    # Validation fails after BEGIN IMMEDIATE and allocator update.
+    with pytest.raises(KeyError, match="timestamp"):
+        store.commit_start(
+            "charger-a", {"connector_id": 1, "id_tag": "card-a", "meter_start": 100}
+        )
+
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        opened[0].execute("SELECT 1")
+    assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator") == (0,)
+    assert fetchone(tmp_path, "SELECT COUNT(*) FROM transactions") == (0,)
+    assert fetchone(tmp_path, "SELECT COUNT(*) FROM events") == (0,)
+
+
+@pytest.mark.parametrize(
+    "failed_pragma",
+    ["PRAGMA busy_timeout = 5000", "PRAGMA synchronous = FULL"],
+)
+def test_connect_closes_sqlite_handle_if_pragma_fails(tmp_path, monkeypatch, failed_pragma):
+    """A failed connection setup must not leave a live SQLite handle."""
+    store = EventStore(tmp_path)
+    real_connect = sqlite3.connect
+    opened = []
+
+    class FailingPragmaConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == failed_pragma:
+                raise sqlite3.OperationalError("injected PRAGMA failure")
+            return super().execute(sql, *args, **kwargs)
+
+    def connect_with_injected_failure(*args, **kwargs):
+        connection = real_connect(*args, factory=FailingPragmaConnection, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect_with_injected_failure)
+    with pytest.raises(sqlite3.OperationalError, match="injected PRAGMA failure"):
+        store._connect()
+
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        opened[0].execute("SELECT 1")

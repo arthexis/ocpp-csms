@@ -33,8 +33,12 @@ class EventStore:
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
-        connection.execute("PRAGMA busy_timeout = 5000")
-        connection.execute("PRAGMA synchronous = FULL")
+        try:
+            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA synchronous = FULL")
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     def _initialize(self) -> None:
@@ -49,7 +53,7 @@ class EventStore:
 
     def _ensure_session_evidence(self) -> None:
         """Additive, idempotent v8-compatible migration; historical events stay unlinked."""
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("""CREATE TABLE IF NOT EXISTS discovery_sessions (
                 session_id TEXT PRIMARY KEY, charger_id TEXT NOT NULL,
                 remote_ip TEXT NOT NULL, remote_port INTEGER NOT NULL,
@@ -62,7 +66,7 @@ class EventStore:
             connection.execute("CREATE INDEX IF NOT EXISTS idx_discovery_event_session ON discovery_event_sessions(session_id)")
 
     def record_session(self, session_id: str, charger_id: str, remote_ip: str, remote_port: int) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "INSERT INTO discovery_sessions VALUES (?, ?, ?, ?, ?)",
                 (session_id, charger_id, remote_ip, remote_port, utc_now_iso()),
@@ -114,7 +118,7 @@ class EventStore:
         """Commit exact retry identity and every received StartTransaction atomically."""
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         now = utc_now_iso()
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT transaction_id FROM start_identities WHERE charger_id = ? AND payload_json = ?",
@@ -168,7 +172,7 @@ class EventStore:
             raise ValueError("unsupported transaction evidence")
         transaction_id = int(payload["transaction_id"]) if payload.get("transaction_id") is not None else None
         now = utc_now_iso()
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 """INSERT INTO events (
@@ -212,7 +216,7 @@ class EventStore:
         charger_timestamp = payload.get("timestamp")
         event_timestamp = str(charger_timestamp or received_at)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT event_timestamp FROM connector_status WHERE charger_id = ? AND connector_id = ?",
                 (charger_id, connector_id),
@@ -246,7 +250,7 @@ class EventStore:
 
 
     def latest_rfid_list_version(self, charger_id: str) -> int | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 """
                 SELECT MAX(list_version)
@@ -270,7 +274,7 @@ class EventStore:
         verified_version: int | None,
     ) -> int:
         """Persist an RFID list only after the charger accepted SendLocalList."""
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 """
                 INSERT INTO rfid_lists (
@@ -311,7 +315,7 @@ class EventStore:
         charger_id: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO runtime_events (occurred_at, event, charger_id, details_json)

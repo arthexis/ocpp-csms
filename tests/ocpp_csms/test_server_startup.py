@@ -54,3 +54,35 @@ async def test_server_stays_alive_after_listener_startup(tmp_path, monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await task
     assert server._tls_listener is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_auth_cleans_pid_without_opening_listener(tmp_path, monkeypatch):
+    """An invalid auth configuration must not leave an apparently live server."""
+    import sqlite3
+    from contextlib import closing
+
+    import ocpp_csms.server as module
+    from ocpp_csms.runtime import PID_FILENAME
+
+    def reject_auth():
+        raise ValueError("auth rejected")
+
+    async def unexpected_listener(self, socket_path, auth):
+        raise AssertionError("failed auth must never open listeners")
+
+    monkeypatch.setattr(module, "load_auth", reject_auth)
+    monkeypatch.setattr(module.CSMSServer, "_serve_listeners", unexpected_listener)
+    server = CSMSServer(
+        "127.0.0.1", 0, TransactionArchive(tmp_path), EventStore(tmp_path)
+    )
+
+    with pytest.raises(ValueError, match="auth rejected"):
+        await server.serve_forever()
+
+    assert not (tmp_path / PID_FILENAME).exists()
+    with closing(sqlite3.connect(tmp_path / "ocpp-csms.sqlite3")) as db:
+        events = db.execute(
+            "SELECT event FROM runtime_events WHERE event LIKE 'server_%' ORDER BY id"
+        ).fetchall()
+    assert events == [("server_started",), ("server_stopped",)]
