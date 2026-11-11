@@ -36,6 +36,11 @@ class PruneApplyTests(unittest.TestCase):
         active.parent.mkdir(parents=True)
         active.write_text("app")
         self.cli.symlink_to(active)
+        # All deletion tests use synthetic runtime inventories, never host
+        # systemd or /proc. Individual cases override this deterministic default.
+        runtime = patch.object(prune, "_runtime_references", return_value=({}, []))
+        runtime.start()
+        self.addCleanup(runtime.stop)
 
     def test_unpromoted_running_candidate_is_never_pruned(self):
         # A post-start C4 failure leaves systemd on the candidate while
@@ -53,6 +58,18 @@ class PruneApplyTests(unittest.TestCase):
         self.assertNotIn(self.old, receipt["deleted"])
         self.assertTrue((installed / "ocpp.marker").is_file())
         self.assertTrue(candidate.is_dir())
+
+    def test_inaccessible_runtime_inventory_fails_closed(self):
+        candidate = self.root / "releases" / self.old
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({}, ["managed service inventory unavailable"]),
+        ):
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertEqual(receipt["deleted"], [])
+        self.assertTrue(candidate.exists())
+        self.assertTrue(any("inventory unavailable" in error for error in receipt["errors"]))
 
     def test_prune_removes_unreferenced_nested_dependencies_together(self):
         release = self.root / "releases" / self.old

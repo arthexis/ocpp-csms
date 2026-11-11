@@ -210,7 +210,9 @@ def preview(root: Path, owner: str, cli: Path | None = None,
 
 def apply_prune(root: Path, owner: str, cli: Path | None, *, limit: int = 64) -> dict:
     """Remove only pointer-free owner releases; caller must hold deploy.sh lock."""
-    plan = preview(root, owner, cli)
+    # A post-start cutover fault may leave a live candidate outside the
+    # current/previous/CLI pointers. Process and systemd refs are mandatory.
+    plan = preview(root, owner, cli, inspect_runtime=True)
     receipt = {
         "schema": "ocpp/owner-prune-receipt/v1",
         "owner": owner, "root": str(Path(root).absolute()),
@@ -229,7 +231,7 @@ def apply_prune(root: Path, owner: str, cli: Path | None, *, limit: int = 64) ->
         return receipt
     for candidate in candidates:
         name = candidate["name"]
-        fresh = preview(root, owner, cli)
+        fresh = preview(root, owner, cli, inspect_runtime=True)
         if fresh["status"] != "candidates_ready" or fresh["errors"]:
             receipt["errors"].extend(fresh["errors"] or ["inventory changed"])
             receipt["skipped"].append({"name": name, "reason": "inventory changed"})
