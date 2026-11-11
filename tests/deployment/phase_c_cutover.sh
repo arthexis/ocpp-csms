@@ -39,7 +39,7 @@ import sys
 root, kind, action = Path(sys.argv[1]),sys.argv[2],sys.argv[3]
 file = root / "ansible/roles/ocpp_csms/tasks/cutover.yml"
 s = file.read_text()
-needle = ("    - name: Enable and start candidate OCPP CSMS service\n"
+needle = ("    - name: Verify OCPP CSMS storage access as systemd service user\n"
           if kind == "prewriter"
           else "    - name: Wait for OCPP CSMS listener\n")
 assert s.count(needle) == 1

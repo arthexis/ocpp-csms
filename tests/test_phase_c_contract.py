@@ -30,9 +30,9 @@ def test_installation_checks_wheel_requirements_before_cutover():
 def test_any_candidate_writer_start_blocks_automatic_rollback():
     source = (ROLE / "tasks/cutover.yml").read_text()
     mark = source.split(
-        "- name: Mark reused database as potentially written before candidate starts",
+        "- name: Mark candidate writer as potentially started before service start",
         1,
     )[1].split("- name: Enable and start candidate OCPP CSMS service", 1)[0]
-    assert "ocpp_csms_storage_selection.action == 'reuse'" not in mark, (
-        "C4: new-schema candidate may write before rollback reactivates old data"
-    )
+    assert "ocpp_csms_candidate_writer_may_have_started: true" in mark
+    assert "when:" not in mark
+    assert "not (ocpp_csms_candidate_writer_may_have_started" in source
