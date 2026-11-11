@@ -59,6 +59,29 @@ class PruneApplyTests(unittest.TestCase):
         self.assertTrue((installed / "ocpp.marker").is_file())
         self.assertTrue(candidate.is_dir())
 
+    def test_dry_run_reflects_runtime_protection_before_apply(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        output = io.StringIO()
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({self.old: {"service"}}, []),
+        ) as observed:
+            with redirect_stdout(output):
+                rc = prune.main([
+                    "--owner", self.owner,
+                    "--root", str(self.root),
+                    "--cli", str(self.cli),
+                    "--dry-run", "--json",
+                ])
+        observed.assert_called()
+        self.assertEqual(rc, 0)
+        report = json.loads(output.getvalue())
+        self.assertNotIn(self.old, [row["name"] for row in report["candidates"]])
+        self.assertIn(self.old, [row["name"] for row in report["protected"]])
+
     def test_inaccessible_runtime_inventory_fails_closed(self):
         candidate = self.root / "releases" / self.old
         with patch.object(

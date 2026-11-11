@@ -67,9 +67,19 @@ if (cd "$scratch/incompatible" && ./deploy.sh --stage-only) >"$scratch/stage.log
   echo "::error::C2: incompatible wheel accepted during staging" >&2
   exit 1
 fi
-grep -i websockets "$scratch/stage.log" >/dev/null || {
-  cat "$scratch/stage.log"; echo "::error::C2 failed for unrelated reason" >&2; exit 1;
-}
+python3 - "$scratch/stage.log" <<'PY'
+from pathlib import Path
+import sys
+
+log = Path(sys.argv[1]).read_text()
+marker = "TASK [ocpp_csms : Verify release wheel dependency compatibility before service cutover]"
+assert marker in log, "C2: wheel dependency verification task never ran"
+# Require the *exact* pip check task to fail, not a prior APT/pip/network error.
+task = log.split(marker, 1)[1].split("\nTASK [", 1)[0]
+assert "FAILED!" in task and "websockets" in task and "pip" in task and "check" in task, (
+    "C2: incompatible wheel was not rejected by python -m pip check"
+)
+PY
 test "$(readlink -f "$owner/current")" = "$before"
 test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$pid"
 test "$(stat -c '%d:%i' "$db")" = "$inode"
