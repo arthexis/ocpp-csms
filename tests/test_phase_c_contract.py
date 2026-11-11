@@ -22,7 +22,7 @@ def test_installation_checks_wheel_requirements_before_cutover():
     source = (ROLE / "tasks/main.yml").read_text()
     checked = source.split("- name: Install OCPP CSMS application wheel", 1)[1]
     checked = checked.split("- name: Perform controlled OCPP CSMS handoff", 1)[0]
-    assert "pip" in checked and "check" in checked, (
+    assert "- -m\n      - pip\n      - check" in checked, (
         "C2: --no-deps wheel may activate with incompatible requirements"
     )
 

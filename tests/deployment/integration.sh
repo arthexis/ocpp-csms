@@ -155,4 +155,4 @@ sudo systemctl is-enabled --quiet ocpp-csms.service
 # Expected: no release switch, service restart or database replacement.
 # Regression: destructive same-revision deployment or unsafe staging.
 bash tests/deployment/acceptance.sh
-
+bash tests/deployment/phase_c_acceptance.sh
