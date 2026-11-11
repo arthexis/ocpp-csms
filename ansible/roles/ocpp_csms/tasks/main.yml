@@ -354,6 +354,15 @@
   when:
     - not ocpp_csms_release_ready.stat.exists
 
+- name: Verify release wheel dependency compatibility before service cutover
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - pip
+      - check
+  changed_when: false
+
 - name: Verify immutable release command
   ansible.builtin.command:
     cmd: "{{ ocpp_csms_release_command }} --help"

@@ -160,10 +160,11 @@
           - "{{ ocpp_csms_transactions_dir }}"
       changed_when: false
 
-    - name: Mark reused database as potentially written before candidate starts
+    # A candidate can commit OCPP evidence even with newly prepared storage.
+    # This guard is deliberately set before invoking the writer service.
+    - name: Mark candidate writer as potentially started before service start
       ansible.builtin.set_fact:
-        ocpp_csms_reused_writer_started: true
-      when: ocpp_csms_storage_selection.action == 'reuse'
+        ocpp_csms_candidate_writer_may_have_started: true
 
     - name: Enable and start candidate OCPP CSMS service
       become: true
@@ -225,7 +226,7 @@
     - name: Refuse automatic rollback after activation or writer start
       ansible.builtin.assert:
         that:
-          - not (ocpp_csms_reused_writer_started | default(false) | bool)
+          - not (ocpp_csms_candidate_writer_may_have_started | default(false) | bool)
         fail_msg: Candidate writer started; preserve database and release for forward repair.
 
     - name: Restore previous systemd unit before candidate start

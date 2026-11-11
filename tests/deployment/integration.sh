@@ -133,7 +133,20 @@ with sqlite3.connect(sys.argv[1]) as db:
     db.execute("""INSERT INTO transactions
         (transaction_id, charger_id, connector_id, id_tag, state, last_activity_at)
         VALUES (314159, 'CI001', 1, 'CI-TAG', 'stopped', '2026-01-01T00:00:00Z')""")
+    db.execute("""INSERT INTO events
+        (received_at, charger_id, action, direction, payload_json)
+        VALUES ('2026-01-01T00:00:00Z', 'CI001', 'BootNotification', 'in', '{}')""")
 PY
+# Export/v1 evidence is immutable over a same-schema application upgrade.
+snapshot_before="$("$old_release/venv/bin/python" - "$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA" <<'PY'
+import json
+import sys
+from ocpp_csms.export_contract import export_contract
+page = export_contract(sys.argv[1], after=0, limit=500)["data"]
+assert page["events"] and page["cursor"]["next"] > 0
+print(json.dumps({k: page[k] for k in ("source_id", "cursor", "events")}, sort_keys=True))
+PY
+)"
 ./deploy.sh
 test "$(stat -c '%d:%i' "$db")" = "$old_inode"
 new_release="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
@@ -145,7 +158,22 @@ with sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True) as db:
     assert db.execute("SELECT last_id FROM transaction_allocator").fetchone() == (314159,)
     assert db.execute("SELECT charger_id FROM transactions WHERE transaction_id=314159").fetchone() == ('CI001',)
     assert db.execute("SELECT event FROM runtime_events WHERE event='ci-upgrade-probe'").fetchone() == ('ci-upgrade-probe',)
+    assert db.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+    assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 PY
+snapshot_after="$("$new_release/venv/bin/python" - "$HOME/ocpp-csms-data/schemas/$TEST_SCHEMA" <<'PY'
+import json
+import sys
+from ocpp_csms.export_contract import export_contract
+page = export_contract(sys.argv[1], after=0, limit=500)["data"]
+print(json.dumps({k: page[k] for k in ("source_id", "cursor", "events")}, sort_keys=True))
+PY
+)"
+test "$snapshot_before" = "$snapshot_after" || {
+  echo "::error::C5 export/v1 source_id, cursor, or durable events changed across cutover" >&2
+  exit 1
+}
+echo "PASS C5: SQLite WAL/integrity, allocator, transactions, source_id, cursor and events"
 sudo systemctl is-active --quiet ocpp-csms.service
 sudo systemctl is-enabled --quiet ocpp-csms.service
 /usr/local/bin/ocpp-csms --help >/dev/null
@@ -155,4 +183,4 @@ sudo systemctl is-enabled --quiet ocpp-csms.service
 # Expected: no release switch, service restart or database replacement.
 # Regression: destructive same-revision deployment or unsafe staging.
 bash tests/deployment/acceptance.sh
-
+bash tests/deployment/phase_c_acceptance.sh

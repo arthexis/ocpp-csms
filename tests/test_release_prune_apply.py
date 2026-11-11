@@ -36,6 +36,79 @@ class PruneApplyTests(unittest.TestCase):
         active.parent.mkdir(parents=True)
         active.write_text("app")
         self.cli.symlink_to(active)
+        # All deletion tests use synthetic runtime inventories, never host
+        # systemd or /proc. Individual cases override this deterministic default.
+        runtime = patch.object(prune, "_runtime_references", return_value=({}, []))
+        runtime.start()
+        self.addCleanup(runtime.stop)
+
+    def test_unpromoted_running_candidate_is_never_pruned(self):
+        # A post-start C4 failure leaves systemd on the candidate while
+        # current and the CLI still reference the earlier release.
+        candidate = self.root / "releases" / self.old
+        installed = candidate / "dependencies" / "runtime" / "venv" / "lib"
+        installed.mkdir(parents=True)
+        (installed / "ocpp.marker").write_text("active candidate")
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({self.old: {"service"}}, []),
+        ) as observed:
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        observed.assert_called()
+        self.assertNotIn(self.old, receipt["deleted"])
+        self.assertTrue((installed / "ocpp.marker").is_file())
+        self.assertTrue(candidate.is_dir())
+
+    def test_dry_run_reflects_runtime_protection_before_apply(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        output = io.StringIO()
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({self.old: {"service"}}, []),
+        ) as observed:
+            with redirect_stdout(output):
+                rc = prune.main([
+                    "--owner", self.owner,
+                    "--root", str(self.root),
+                    "--cli", str(self.cli),
+                    "--dry-run", "--json",
+                ])
+        observed.assert_called()
+        self.assertEqual(rc, 0)
+        report = json.loads(output.getvalue())
+        self.assertNotIn(self.old, [row["name"] for row in report["candidates"]])
+        self.assertIn(self.old, [row["name"] for row in report["protected"]])
+
+    def test_inaccessible_runtime_inventory_fails_closed(self):
+        candidate = self.root / "releases" / self.old
+        with patch.object(
+            prune, "_runtime_references",
+            return_value=({}, ["managed service inventory unavailable"]),
+        ):
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertEqual(receipt["deleted"], [])
+        self.assertTrue(candidate.exists())
+        self.assertTrue(any("inventory unavailable" in error for error in receipt["errors"]))
+
+    def test_prune_removes_unreferenced_nested_dependencies_together(self):
+        release = self.root / "releases" / self.old
+        deps = release / "dependencies" / "runtime" / "venv" / "lib"
+        deps.mkdir(parents=True)
+        (deps / "ocpp.marker").write_text("stale")
+        shared = self.root / "dependencies" / "legacy-runtime" / "venv"
+        shared.mkdir(parents=True)
+        (shared / "keep").write_text("shared")
+        with patch.object(prune, "_runtime_references", return_value=({}, [])):
+            receipt = prune.apply_prune(self.root, self.owner, self.cli)
+        self.assertEqual(receipt["deleted"], [self.old])
+        self.assertFalse(release.exists())
+        self.assertTrue((shared / "keep").is_file())
+        self.assertTrue((self.root / "releases" / self.current).is_dir())
+        self.assertTrue((self.root / "releases" / self.previous).is_dir())
 
     def test_apply_deletes_only_old_release_and_is_idempotent(self):
         receipt = prune.apply_prune(self.root, self.owner, self.cli)
