@@ -35,6 +35,9 @@ class OfflineAuthority:
 
     def __init__(self, path):
         self.path = path
+        # Reopen an existing disposable fixture without resetting its owner.
+        if self.path.exists():
+            return
         with self._db() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
@@ -350,3 +353,16 @@ def test_empty_identity_invalid_uid_and_stale_epoch_fail_closed(fixture):
             model.bind_synthetic_uid(scope, "ws-1", epoch, "attempt", uid)
     with pytest.raises(FenceDenied):
         model.bind_synthetic_uid(scope, "ws-1", epoch+1, "attempt", "uid")
+
+
+def test_owner_epoch_and_revision_survive_disposable_db_reopen(fixture):
+    model, scope = fixture
+    old, revision = model.claim(scope, "old-ws")
+    reopened = OfflineAuthority(model.path)
+    assert reopened.snapshot(scope)["epoch"] == old
+    assert reopened.snapshot(scope)["revision"] == revision
+    new, _ = reopened.claim(scope, "new-ws")
+    second_reopen = OfflineAuthority(model.path)
+    assert second_reopen.snapshot(scope)["epoch"] == new
+    with pytest.raises(FenceDenied, match="stale"):
+        second_reopen.write(scope, "old-ws", old, "MeterValues", transaction_id=123)
