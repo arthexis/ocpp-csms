@@ -272,9 +272,25 @@ class CSMSServer:
             await session.start()
         finally:
             if self._active_sessions.get(charge_point_id) is session:
-                del self._active_sessions[charge_point_id]
-                LOGGER.info("Charge point disconnected: %s", charge_point_id)
+                # If the old close failed before shutting down the old socket,
+                # preserve its live owner. Never resurrect a closed connection.
+                old_closed = getattr(previous.connection, "closed", None) if previous is not None else None
+                if hasattr(old_closed, "is_set"):
+                    old_closed = old_closed.is_set()
+                if not connected and old_closed is False:
+                    self._active_sessions[charge_point_id] = previous
+                    LOGGER.warning("Restored live previous charge point session: %s", charge_point_id)
+                else:
+                    del self._active_sessions[charge_point_id]
                 if connected:
+                    LOGGER.info("Charge point disconnected: %s", charge_point_id)
                     self._record_runtime("charger_disconnected", charger_id=charge_point_id)
             else:
                 LOGGER.info("Superseded charge point connection closed: %s", charge_point_id)
+            if not connected:
+                # This replacement never entered its receive loop. Do not
+                # leave its websocket open after a failed/cancelled handoff.
+                try:
+                    await websocket.close(code=1011, reason="Connection handoff failed")
+                except Exception:
+                    LOGGER.exception("Could not close aborted charge point connection %s", charge_point_id)
