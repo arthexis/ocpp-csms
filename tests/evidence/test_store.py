@@ -521,3 +521,33 @@ def test_event_store_closes_connection_and_rolls_back_failed_start(tmp_path, mon
     assert fetchone(tmp_path, "SELECT last_id FROM transaction_allocator") == (0,)
     assert fetchone(tmp_path, "SELECT COUNT(*) FROM transactions") == (0,)
     assert fetchone(tmp_path, "SELECT COUNT(*) FROM events") == (0,)
+
+
+@pytest.mark.parametrize(
+    "failed_pragma",
+    ["PRAGMA busy_timeout = 5000", "PRAGMA synchronous = FULL"],
+)
+def test_connect_closes_sqlite_handle_if_pragma_fails(tmp_path, monkeypatch, failed_pragma):
+    """A failed connection setup must not leave a live SQLite handle."""
+    store = EventStore(tmp_path)
+    real_connect = sqlite3.connect
+    opened = []
+
+    class FailingPragmaConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql == failed_pragma:
+                raise sqlite3.OperationalError("injected PRAGMA failure")
+            return super().execute(sql, *args, **kwargs)
+
+    def connect_with_injected_failure(*args, **kwargs):
+        connection = real_connect(*args, factory=FailingPragmaConnection, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect_with_injected_failure)
+    with pytest.raises(sqlite3.OperationalError, match="injected PRAGMA failure"):
+        store._connect()
+
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        opened[0].execute("SELECT 1")
