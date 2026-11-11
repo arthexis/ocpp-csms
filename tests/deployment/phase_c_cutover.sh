@@ -7,7 +7,7 @@ action="$1"
 repo="$(git rev-parse --show-toplevel)"
 owner="$HOME/.local/share/ocpp-csms"
 current="$(readlink -f "$owner/current")"
-before_unit="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
+before_unit="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' ' -f1)"
 schema="$(python3 - src/ocpp_csms/schema.py <<'PY'
 import ast,sys
 for node in ast.parse(open(sys.argv[1]).read()).body:
@@ -77,7 +77,7 @@ if [[ "$action" == reuse ]]; then
     cat "$tmp/prewriter.log"; echo "::error::C3 failed for unrelated reason" >&2; exit 1;
   }
   current_after="$(readlink -f "$owner/current")"
-  unit_after="$(sudo systemctl show ocpp-csms.service -p ExecStart --value)"
+  unit_after="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' ' -f1)"
   db_id_after="$(stat -c '%d:%i' "$db")"
   if [[ "$current_after" != "$current" ]]; then
     echo "::error::C3 current pointer changed: expected=$current actual=$current_after" >&2; exit 1
@@ -85,6 +85,9 @@ if [[ "$action" == reuse ]]; then
   if [[ "$unit_after" != "$before_unit" ]]; then
     echo "::error::C3 unit mismatch: expected=$before_unit actual=$unit_after" >&2; exit 1
   fi
+  sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F "$current/venv/bin/ocpp-csms" >/dev/null || {
+    echo "::error::C3 active systemd executable differs from previous release" >&2; exit 1;
+  }
   if [[ "$db_id_after" != "$db_id" ]]; then
     echo "::error::C3 SQLite identity changed: expected=$db_id actual=$db_id_after" >&2; exit 1
   fi
