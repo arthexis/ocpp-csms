@@ -37,7 +37,9 @@ ocpp_csms_dependency_key: >-
     ) | hash('sha256')
   }}
 ocpp_csms_dependencies_dir: "{{ ocpp_csms_prefix }}/dependencies"
-ocpp_csms_dependency_dir: "{{ ocpp_csms_dependencies_dir }}/{{ ocpp_csms_dependency_key }}"
+# Keep new runtime dependency venvs under their owning immutable release.
+# Old shared cache roots remain untouched for already-installed releases.
+ocpp_csms_dependency_dir: "{{ ocpp_csms_release_dir }}/dependencies/{{ ocpp_csms_dependency_key }}"
 ocpp_csms_dependency_venv: "{{ ocpp_csms_dependency_dir }}/venv"
 
 # Source location on the Ansible controller. Local bootstrap installs directly

@@ -16,6 +16,10 @@ def test_dependency_environment_is_scoped_to_immutable_release():
     assert "ocpp_csms_release_id" in key, (
         "C1: cached dependency set can change under an old release"
     )
+    location = source.split("ocpp_csms_dependency_dir:", 1)[1].splitlines()[0]
+    assert "ocpp_csms_release_dir" in location, (
+        "C1: an orphaned external dependency venv would survive release pruning"
+    )
 
 
 def test_installation_checks_wheel_requirements_before_cutover():
