@@ -18,7 +18,7 @@ This is a *direct-import* matrix, not proof that every lazy/dynamic import or ex
 
 ## Stage ordering and gates
 
-0. Characterization: `tests/test_modularization_baseline.py` checks legacy imports and identity aliases, current monkeypatch seams, offline CLI/export JSON, SQLite-backed cursor behavior and an offline wheel with both console-script entries. The existing CLI, export cursor, SQLite authority, TLS, firmware and Discover tests remain mandatory.
+0. Characterization: `tests/test_modularization_baseline.py` checks legacy imports and identity aliases, current monkeypatch seams, offline CLI/export JSON, SQLite-backed cursor behavior and installed console-script metadata; an offline wheel build runs only where the packaging backend is already installed. The existing CLI, export cursor, SQLite authority, TLS, firmware and Discover tests remain mandatory.
 1. Energy: move parsing/query/contract internals, preserving `ocpp_csms.energy_query`, `ocpp_csms.energy_contract` and the export sample semantics; verify units, UTC normalization, invalid samples and replay.
 2. Status: isolate models/query/formatting; retain legacy `ocpp_csms.status` import path, return types and `status/v1`.
 3. Export: isolate event, energy and snapshot projections with **one SQLite read snapshot**; preserve exact `ocpp-csms/export/v1` fields, ordered event IDs, exclusive `after`, `next`, `more`, source identity and transaction provenance. Reports must continue consuming the command JSON rather than opening CSMS SQLite.
@@ -35,4 +35,4 @@ This is a *direct-import* matrix, not proof that every lazy/dynamic import or ex
 
 ## Known limits of Stage 0
 
-The new tests are representative baselines, **not** a complete external API inventory or golden snapshot of all JSON responses. In particular, the wheel check builds without network access but does not install or execute the wheel in a fresh venv; installed entrypoint command smokes are already part of current CI. Treat those as separate complementary gates, and strengthen the baseline before higher-risk moves.
+The new tests are representative baselines, **not** a complete external API inventory or golden snapshot of all JSON responses. In particular, the wheel check skips when `setuptools.build_meta` is absent from the pytest interpreter (the CI editable install uses build isolation). Installed distribution entrypoint metadata is always tested, and installed command smokes are part of current CI. A mandatory wheel build in an explicitly provisioned packaging environment remains a separate gate. Treat those as separate complementary gates, and strengthen the baseline before higher-risk moves.
