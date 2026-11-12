@@ -52,12 +52,12 @@ Tracking: #247 (architecture), #244 (implementation). Supersedes unmerged PR #24
 - `tests/cli/test_transactions.py`: **retain** CLI argument/JSON contract tests, extend effective-stop provenance and incomplete state.
 
 ### Preserve/extend cross-cutting contracts
-- `tests/test_export_contract.py`, `tests/test_export_transaction_metadata.py`: preserve event cursor and source identity, ensure no derived stop becomes an exported synthetic OCPP event, ensure charge-point-scoped identity.
+- `tests/export/test_export_contract.py`, `tests/export/test_export_transaction_metadata.py`: preserve event cursor and source identity, ensure no derived stop becomes an exported synthetic OCPP event, ensure charge-point-scoped identity.
 - `tests/test_schema.py`: preserve schema safety/upgrade coverage; do not create migration code for unused exporter.
 - `tests/ocpp_csms/test_wss_transaction.py`: preserve WSS field-style transaction integration; add repeated start and reconnect behavior if feasible.
 - `tests/rfid/test_session_authorization.py`: preserve permissive authorization and ensure multiple legitimate starts do not regress.
 - `tests/test_status.py`, `tests/test_connector_status.py`, `tests/test_emergency_stop_status.py`, `tests/control/test_remote_commands.py`: audit stale-open assumptions when control guards are changed.
-- `tests/test_operational_reports.py`, `tests/rfid/test_report.py`, `tests/test_export_transaction_metadata.py`: review grouping/energy/report output for scoped identity and inferred boundaries.
+- `tests/test_operational_reports.py`, `tests/rfid/test_report.py`, `tests/export/test_export_transaction_metadata.py`: review grouping/energy/report output for scoped identity and inferred boundaries.
 - `tests/evidence/test_store.py`, `tests/evidence/test_timeline_grouping.py`: retain actual frame persistence and event ordering; add duplicate receipt evidence as needed.
 - `tests/ocpp_csms/test_deployment_profile.py`: distinguish appliance/deployment recovery from **transaction** recovery; do not delete unrelated cutover tests based only on their names.
 - `tests/evidence/README.md`: remove guidance to preserve obsolete recovery tests forever; document new contract tests.
