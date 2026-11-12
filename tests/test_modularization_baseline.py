@@ -5,6 +5,7 @@ No live connections, services, deployment or production database are accessed.
 from __future__ import annotations
 
 import importlib
+from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -105,8 +106,24 @@ def test_offline_cli_export_entrypoint(tmp_path, monkeypatch, capsys):
     assert payload["data"]["cursor"] == {"after": 0, "next": 0, "more": False}
 
 
+def test_installed_distribution_entrypoints():
+    """Editable installs must retain both published script entrypoints."""
+    distribution = metadata.distribution("ocpp-csms")
+    scripts = {item.name: item.value for item in distribution.entry_points if item.group == "console_scripts"}
+    assert scripts["ocpp-csms"] == "ocpp_csms.cli:main"
+    assert scripts["ocpp-discover"] == "ocpp_discover.__main__:main"
+
+
 def test_offline_wheel_contains_both_console_scripts(tmp_path):
-    """Build a local wheel without fetching anything or installing to the host."""
+    """Build a local wheel only when the backend is present offline.
+
+    The existing CI installs with isolated PEP 517 builds, so setuptools may
+    not be available in the pytest interpreter itself.
+    """
+    try:
+        importlib.import_module("setuptools.build_meta")
+    except ImportError:
+        pytest.skip("offline wheel build requires setuptools in test interpreter")
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         [sys.executable, "-m", "pip", "wheel", "--no-index", "--no-deps",
