@@ -49,8 +49,9 @@ def test_tls_invalid_config_fails_closed_without_guessing_live_state(tmp_path):
     with pytest.raises(ValueError, match="invalid_tls_configuration"):
         tls_config.status(path)
     assert TLSListener(path).status() == {
-        "configured": False, "error": "invalid_tls_configuration",
-        "listener": "stopped", "active_port": None,
+    # TLSListener.status preserves its runtime error slot even when the
+    # underlying config parser rejects this malformed file.
+        "configured": False, "listener": "stopped", "active_port": None,
         "draining_ports": [], "error": None,
     }
 
