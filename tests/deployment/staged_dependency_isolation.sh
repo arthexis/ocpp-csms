@@ -2,11 +2,11 @@
 # Stage-only dependency isolation and incompatible wheel rejection, on disposable hosted runners.
 set -euo pipefail
 [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]] || exit 2
+db="$(python3 "$(dirname -- "${BASH_SOURCE[0]}")/schema_database_guard.py")"
 repo="$(git rev-parse --show-toplevel)"
 owner="$HOME/.local/share/ocpp-csms"
 before="$(readlink -f "$owner/current")"
 pid="$(sudo systemctl show ocpp-csms.service -p MainPID --value)"
-db="$HOME/ocpp-csms-data/schemas/8/ocpp-csms.sqlite3"
 test -f "$db"
 inode="$(stat -c '%d:%i' "$db")"
 scratch="$(mktemp -d /tmp/csms-stage-isolation.XXXXXX)"
