@@ -1,4 +1,4 @@
-"""Phase 2 command contract tests."""
+"""Inspection and reconciliation command contracts."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 

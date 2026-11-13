@@ -80,7 +80,7 @@ PY
   sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F -- "/schemas/$TEST_SCHEMA"
   sudo systemctl is-active --quiet ocpp-csms.service
   /usr/local/bin/ocpp-csms status
-  bash tests/deployment/acceptance.sh
+  bash tests/deployment/idempotent_deployment.sh
 
   # Intent: an older application must not reactivate retained historical
   # storage after a newer schema has entered service.
@@ -170,10 +170,10 @@ print(json.dumps({k: page[k] for k in ("source_id", "cursor", "events")}, sort_k
 PY
 )"
 test "$snapshot_before" = "$snapshot_after" || {
-  echo "::error::C5 export/v1 source_id, cursor, or durable events changed across cutover" >&2
+  echo "::error::Same-schema upgrade changed export/v1 source_id, cursor, or durable events" >&2
   exit 1
 }
-echo "PASS C5: SQLite WAL/integrity, allocator, transactions, source_id, cursor and events"
+echo "PASS: same-schema upgrade preserves SQLite WAL/integrity, allocator, transactions, source_id, cursor and events"
 sudo systemctl is-active --quiet ocpp-csms.service
 sudo systemctl is-enabled --quiet ocpp-csms.service
 /usr/local/bin/ocpp-csms --help >/dev/null
@@ -182,5 +182,5 @@ sudo systemctl is-enabled --quiet ocpp-csms.service
 # Setup: candidate already active with seeded transaction and allocator state.
 # Expected: no release switch, service restart or database replacement.
 # Regression: destructive same-revision deployment or unsafe staging.
-bash tests/deployment/acceptance.sh
-bash tests/deployment/phase_c_acceptance.sh
+bash tests/deployment/idempotent_deployment.sh
+bash tests/deployment/staged_dependency_isolation.sh

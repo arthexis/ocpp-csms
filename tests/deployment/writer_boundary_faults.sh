@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C3/C4: fault-injected real Ansible cutovers, only on disposable GitHub runners.
+# Pre-writer recovery and post-writer no-rollback contracts, on disposable GitHub runners.
 set -euo pipefail
 [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]] || exit 2
 action="$1"
@@ -43,8 +43,8 @@ needle = ("    - name: Verify OCPP CSMS storage access as systemd service user\n
           if kind == "prewriter"
           else "    - name: Wait for OCPP CSMS listener\n")
 assert s.count(needle) == 1
-sentinel = "CI_PHASE_C_PREWRITER_FAULT" if kind == "prewriter" else "CI_PHASE_C_POSTWRITER_FAULT"
-injection = ("    - name: Inject phase C failure after controlled boundary\n"
+sentinel = "CI_PRE_WRITER_FAILURE" if kind == "prewriter" else "CI_POST_WRITER_FAILURE"
+injection = ("    - name: Inject failure at candidate activation boundary\n"
              "      ansible.builtin.fail:\n"
              "        msg: " + sentinel + "\n\n")
 file.write_text(s.replace(needle, injection + needle, 1))
@@ -65,31 +65,31 @@ PY
   if [[ "$action" == create ]]; then
     git -C "$tmp/$kind" add src/ocpp_csms/schema.py
   fi
-  git -C "$tmp/$kind" -c user.name="CI Fixture" -c user.email="ci@example.invalid" commit -qm "fixture: phase C $kind $action fault"
+  git -C "$tmp/$kind" -c user.name="CI Fixture" -c user.email="ci@example.invalid" commit -qm "fixture: $kind $action deployment fault"
 }
 
 if [[ "$action" == reuse ]]; then
   fixture prewriter
   if (cd "$tmp/prewriter" && ./deploy.sh) >"$tmp/prewriter.log" 2>&1; then
-    echo "::error::C3: failure before writer unexpectedly passed" >&2; exit 1
+    echo "::error::pre-writer failure unexpectedly passed" >&2; exit 1
   fi
-  grep -F CI_PHASE_C_PREWRITER_FAULT "$tmp/prewriter.log" >/dev/null || {
-    cat "$tmp/prewriter.log"; echo "::error::C3 failed for unrelated reason" >&2; exit 1;
+  grep -F CI_PRE_WRITER_FAILURE "$tmp/prewriter.log" >/dev/null || {
+    cat "$tmp/prewriter.log"; echo "::error::pre-writer fixture failed for unrelated reason" >&2; exit 1;
   }
   current_after="$(readlink -f "$owner/current")"
   unit_after="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' ' -f1)"
   db_id_after="$(stat -c '%d:%i' "$db")"
   if [[ "$current_after" != "$current" ]]; then
-    echo "::error::C3 current pointer changed: expected=$current actual=$current_after" >&2; exit 1
+    echo "::error::pre-writer failure changed current pointer: expected=$current actual=$current_after" >&2; exit 1
   fi
   if [[ "$unit_after" != "$before_unit" ]]; then
-    echo "::error::C3 unit mismatch: expected=$before_unit actual=$unit_after" >&2; exit 1
+    echo "::error::pre-writer failure changed systemd unit: expected=$before_unit actual=$unit_after" >&2; exit 1
   fi
   sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F "$current/venv/bin/ocpp-csms" >/dev/null || {
-    echo "::error::C3 active systemd executable differs from previous release" >&2; exit 1;
+    echo "::error::pre-writer failure retained unexpected systemd executable" >&2; exit 1;
   }
   if [[ "$db_id_after" != "$db_id" ]]; then
-    echo "::error::C3 SQLite identity changed: expected=$db_id actual=$db_id_after" >&2; exit 1
+    echo "::error::pre-writer failure changed SQLite identity: expected=$db_id actual=$db_id_after" >&2; exit 1
   fi
   sudo systemctl is-active --quiet ocpp-csms.service || {
     sudo systemctl status ocpp-csms.service --no-pager >&2; exit 1;
@@ -104,27 +104,27 @@ if [[ "$action" == reuse ]]; then
     sleep 0.2
   done
   [[ "$healthy" == 1 ]] || {
-    echo "::error::C3 prior service did not regain application status" >&2
+    echo "::error::previous service did not regain application status after pre-writer failure" >&2
     /usr/local/bin/ocpp-csms status >&2 || true
     exit 1
   }
-  echo "PASS C3: pre-writer failure restores old unit, release, SQLite and health"
+  echo "PASS: pre-writer failure restores old unit, release, SQLite and health"
 fi
 
 fixture postwriter
 candidate_id="$(git -C "$tmp/postwriter" rev-parse --short=12 HEAD)"
 if (cd "$tmp/postwriter" && ./deploy.sh) >"$tmp/postwriter.log" 2>&1; then
-  echo "::error::C4: post-start injected failure unexpectedly passed" >&2; exit 1
+  echo "::error::post-start injected failure unexpectedly passed" >&2; exit 1
 fi
-grep -F CI_PHASE_C_POSTWRITER_FAULT "$tmp/postwriter.log" >/dev/null || {
-  cat "$tmp/postwriter.log"; echo "::error::C4 failed for unrelated reason" >&2; exit 1;
+grep -F CI_POST_WRITER_FAILURE "$tmp/postwriter.log" >/dev/null || {
+  cat "$tmp/postwriter.log"; echo "::error::post-start fixture failed for unrelated reason" >&2; exit 1;
 }
 grep -F 'Candidate writer started; preserve database and release for forward repair' "$tmp/postwriter.log" >/dev/null || {
-  cat "$tmp/postwriter.log"; echo "::error::C4 unsafe rollback accepted" >&2; exit 1;
+  cat "$tmp/postwriter.log"; echo "::error::automatic rollback after writer start was incorrectly allowed" >&2; exit 1;
 }
 test "$(readlink -f "$owner/current")" = "$current"
 candidate_path="$owner/releases/$candidate_id/venv/bin/ocpp-csms"
 sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F "$candidate_path"
 test "$(stat -c '%d:%i' "$db")" = "$db_id"
 sudo systemctl is-active --quiet ocpp-csms.service
-echo "PASS C4 ($action): candidate may have written; no automatic rollback to old unit"
+echo "PASS ($action): candidate may have written; automatic rollback to old unit is prohibited"

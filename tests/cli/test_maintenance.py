@@ -1,4 +1,4 @@
-"""Phase 1 field-maintenance command coverage."""
+"""Field-maintenance command parsing, validation and dispatch contracts."""
 from __future__ import annotations
 
 from types import SimpleNamespace
