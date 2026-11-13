@@ -1,4 +1,4 @@
-"""Guard package preflight ordering for issue #284."""
+"""Guard package preflight ordering, retry policy, and cutover boundaries."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]

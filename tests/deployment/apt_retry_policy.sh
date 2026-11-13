@@ -23,9 +23,9 @@ p = Path(__file__).with_suffix('.count')
 n = int(p.read_text()) + 1 if p.exists() else 1
 p.write_text(str(n))
 if n < 3:
-    print('APT_REFRESH_TRANSIENT_284 attempt=' + str(n), file=sys.stderr)
+    print('APT_REFRESH_TRANSIENT attempt=' + str(n), file=sys.stderr)
     sys.exit(42)
-print('APT_REFRESH_RECOVERED_284 attempt=' + str(n))
+print('APT_REFRESH_RECOVERED attempt=' + str(n))
 """)
 replacement = '      ansible.builtin.command:\\n        argv:\\n          - python3\\n          - ' + str(probe) + '\\n      changed_when: false\\n'
 replacement = replacement.replace('\\n', '\n')
@@ -40,9 +40,9 @@ if ! (cd "$fixture" && ./deploy.sh -- -vvv) >"$log" 2>&1; then
   cat "$log"; echo "::error::APT retry fixture failed" >&2; exit 1
 fi
 test "$(cat "$fixture/apt_retry_probe.count")" = 3
-grep -F 'APT_REFRESH_TRANSIENT_284 attempt=1' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
-grep -F 'APT_REFRESH_TRANSIENT_284 attempt=2' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
-grep -F 'APT_REFRESH_RECOVERED_284 attempt=3' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
+grep -F 'APT_REFRESH_TRANSIENT attempt=1' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
+grep -F 'APT_REFRESH_TRANSIENT attempt=2' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
+grep -F 'APT_REFRESH_RECOVERED attempt=3' "$log" >/dev/null || { tail -n 100 "$log"; exit 1; }
 test "$(readlink -f "$HOME/.local/share/ocpp-csms/current")" = "$before_release"
 test "$(sudo systemctl show ocpp-csms.service -p MainPID --value)" = "$before_pid"
 test "$(sudo systemctl show ocpp-csms.service -p ExecStart --value)" = "$before_unit"

@@ -43,7 +43,7 @@ class PruneApplyTests(unittest.TestCase):
         self.addCleanup(runtime.stop)
 
     def test_unpromoted_running_candidate_is_never_pruned(self):
-        # A post-start C4 failure leaves systemd on the candidate while
+        # A post-start writer failure leaves systemd on the candidate while
         # current and the CLI still reference the earlier release.
         candidate = self.root / "releases" / self.old
         installed = candidate / "dependencies" / "runtime" / "venv" / "lib"

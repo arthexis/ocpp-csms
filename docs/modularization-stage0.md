@@ -36,3 +36,39 @@ This is a *direct-import* matrix, not proof that every lazy/dynamic import or ex
 ## Known limits of Stage 0
 
 The new tests are representative baselines, **not** a complete external API inventory or golden snapshot of all JSON responses. In particular, the wheel check skips when `setuptools.build_meta` is absent from the pytest interpreter (the CI editable install uses build isolation). Installed distribution entrypoint metadata is always tested, and installed command smokes are part of current CI. A mandatory wheel build in an explicitly provisioned packaging environment remains a separate gate. Treat those as separate complementary gates, and strengthen the baseline before higher-risk moves.
+
+
+## 2026-11-13: synchronization and extended characterization under #346
+
+The historical original baseline above is retained for provenance. The Stage-0 Draft branch
+is synchronized with main `2c400e8b3744881003eec1735be29de8e35981bd` by an explicit two-parent
+merge (first parent: original Draft HEAD; second parent: reviewed main HEAD).
+The merge tree contains the complete main snapshot plus only the two Stage-0
+tests/docs paths; do not undo the independently integrated test-suite relocations.
+
+New offline characterization:
+- Import/reexport interfaces: `ocpp_csms.cli.parser`, `ocpp_csms.contracts`, `ocpp_csms.control`,
+  and the preserved test patch seam on `control.os`.
+- A non-listening TLS status query records that the *static* placeholder
+  `not_implemented` and the *live* listener state `stopped` are different contracts.
+  This is characterization only, not approval to change a response.
+- The entrypoint dispatches historical `txn stop`, `txn explain`, `txn [ID] --json`,
+  and `reserve [ID] --json` via fully stubbed functions, without a control socket.
+- Cursor pagination/replay and orphan StopTransaction remain SQLite-backed.
+- Where the PEP 517 setuptools backend is **already installed**, the wheel smoke
+  now additionally installs the real wheel into a disposable `pip --target`
+  directory with `--no-index --no-deps`, checks generated console scripts,
+  and imports both distributions from the isolated installation.
+
+**Outstanding Stage-0 acceptance:** Python 3.13 jobs historically skipped the
+backend-dependent wheel test, while Python 3.11 executed it. Those skips must
+not be counted as wheel-build verification. The editable-install and installed
+script metadata/CLI smokes in CI are separate coverage. A future explicitly
+authorized CI/packaging prerequisite change is necessary if mandatory native
+PEP 517 wheel build/install must execute on every supported runner, unless the
+current runner provides a suitable offline build backend. Do not add downloads
+or unbounded network access to make the test pass.
+
+The Stage-1 source-to-caller classification and external-usage uncertainties are
+maintained in [#346](https://github.com/arthexis/ocpp-csms/issues/346),
+not promoted to removals in the Stage-0 tests/docs PR.

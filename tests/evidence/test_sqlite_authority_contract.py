@@ -1,4 +1,4 @@
-"""SQLite-authoritative transaction contract for issues #247 and #244.
+"""SQLite-authoritative transaction identity and export evidence contracts.
 
 No JSON archive is used as a source of transaction identity or export evidence.
 """
