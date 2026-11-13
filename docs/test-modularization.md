@@ -26,11 +26,23 @@ Four additional modules are relocated byte-for-byte in PR stage B, independently
 
 No `__init__.py` or nested conftest is introduced: `tests/conftest.py` remains in scope. Verify exact Git blob equality, all normalized pytest node IDs and pass/skip totals versus the current `main` commit `59808b56411b300a3485e2f8fe365a48c76bf8df` for each CI environment. No production or test-body edits.
 
+## Stage C: remaining root status and connector-query tests
+
+Move exactly these three modules byte-for-byte to `tests/status/`:
+
+| Original | New path |
+| --- | --- |
+| `tests/test_status.py` | `tests/status/test_status.py` |
+| `tests/test_emergency_stop_status.py` | `tests/status/test_emergency_stop_status.py` |
+| `tests/test_connector_query.py` | `tests/status/test_connector_query.py` |
+
+The existing `tests/energy/` suite is unchanged in Stage C; all three moves cover status reporting, emergency-stop status and physical connector queries. The old `tests/conftest.py` remains the only applicable shared fixture file. No new `__init__.py`, `conftest.py`, monkeypatch hooks or test bodies are introduced. Compare exact Git blobs and normalize only the three path prefixes in CI pytest node IDs against `main` `bc54acac726e2ff2007108546cdcd3e8b5a0550f`.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
 | --- | --- | --- | --- |
-| status | `tests/test_status.py`, `tests/status/test_connector_status.py`, `tests/status/test_disconnected_status.py`, CLI status tests | fixtures and liveness vs historical observation | same collected node IDs, statuses and formatting assertions |
+| status | `tests/status/test_status.py`, `tests/status/test_emergency_stop_status.py`, `tests/status/test_connector_query.py`, other `tests/status/` modules and CLI status tests | fixtures and liveness vs historical observation | same collected node IDs, statuses and formatting assertions |
 | energy | `tests/energy/test_live_energy_export_metadata.py`, `tests/energy/test_transaction_soc.py`, `tests/transactions/` | shared events, source identity, timestamps and units | no changes to SoC/energy normalization or event provenance |
 | export | remaining root `test_export_*.py`, export CLI and evidence suites | shared snapshot consistency, cursor semantics and private monkeypatch targets | preserve `ocpp-csms/export/v1` and authoritative SQLite |
 | storage | `tests/test_schema*.py`, `tests/test_persistent_wal.py`, `tests/test_deployment_schema_verify.py` | fixture scope, SQLite lifecycle and rollback evidence | schema v8 and WAL/backup semantics unchanged |
