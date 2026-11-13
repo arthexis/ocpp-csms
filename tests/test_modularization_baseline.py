@@ -176,6 +176,19 @@ def test_offline_wheel_contains_both_console_scripts(tmp_path):
     )
     assert probe.returncode == 0, probe.stdout + "\n" + probe.stderr
 
+    # Exercise the actual entrypoint scripts installed from this wheel, not
+    # the editable checkout or a similarly named command on PATH.
+    for name in ("ocpp-csms", "ocpp-discover"):
+        script = target / "bin" / name
+        smoke = subprocess.run(
+            [str(script), "--help"],
+            cwd=str(tmp_path), capture_output=True, text=True, timeout=30,
+            check=False,
+            env={**os.environ, "PYTHONPATH": str(target), "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        assert smoke.returncode == 0, f"{name} --help: {smoke.stdout}\n{smoke.stderr}"
+        assert "usage:" in smoke.stdout.lower(), f"{name} missing help: {smoke.stdout}"
+
 
 @pytest.mark.parametrize(("module", "symbols"), [
     ("ocpp_csms.cli.parser", ("add_appliance_commands", "add_config_command", "add_control_commands", "add_diagnostic_commands", "add_profile_command")),
