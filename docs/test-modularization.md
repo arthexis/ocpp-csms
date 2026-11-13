@@ -52,6 +52,19 @@ Their imports are absolute, fixtures still inherit from `tests/conftest.py`, and
 
 `tests/test_export_revision_fingerprint.py` is deliberately **not** moved: it resolves `src/ocpp_csms/export_contract.py` using `Path(__file__).resolve().parents[1]` and would fail if moved byte-identically into a nested directory. Any relocation requires a separately authorized behavioral review, not this stage.
 
+## Stage E: node identity and configuration report tests
+
+Relocate exactly two small modules byte-identically:
+
+| Original | New path |
+| --- | --- |
+| `tests/test_node_identity.py` | `tests/storage/test_node_identity.py` |
+| `tests/test_config_report.py` | `tests/status/test_config_report.py` |
+
+Both destination directories are non-package suites with no nested `conftest.py`; root `tests/conftest.py` remains applicable. All source imports and monkeypatch targets are unchanged, including hostname patches under `ocpp_csms.node_identity`. Verify blob identity, normalized pytest node IDs and pass/skip counts for the exact main baseline `6b01aa75746cd7a26f94309b70aa768dbc47cc11` on Python 3.11/3.13. No fixture, assertion, schema, production, security or export behavior changes.
+
+Explicit exclusions: `test_export_revision_fingerprint.py`, `test_deployment_preflight.py` and `test_release_prune_lock.py` use location-sensitive `__file__` paths; Evidence tests were not relocated because `tests/evidence/__init__.py` would alter test module import identities.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
