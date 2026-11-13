@@ -38,6 +38,20 @@ Move exactly these three modules byte-for-byte to `tests/status/`:
 
 The existing `tests/energy/` suite is unchanged in Stage C; all three moves cover status reporting, emergency-stop status and physical connector queries. The old `tests/conftest.py` remains the only applicable shared fixture file. No new `__init__.py`, `conftest.py`, monkeypatch hooks or test bodies are introduced. Compare exact Git blobs and normalize only the three path prefixes in CI pytest node IDs against `main` `bc54acac726e2ff2007108546cdcd3e8b5a0550f`.
 
+## Stage D: storage/schema test grouping
+
+Three modules are relocated byte-for-byte into `tests/storage/`, with no test-body, fixture or monkeypatch changes:
+
+| Original | New path |
+| --- | --- |
+| `tests/test_schema.py` | `tests/storage/test_schema.py` |
+| `tests/test_schema_storage.py` | `tests/storage/test_schema_storage.py` |
+| `tests/test_persistent_wal.py` | `tests/storage/test_persistent_wal.py` |
+
+Their imports are absolute, fixtures still inherit from `tests/conftest.py`, and existing monkeypatch targets stay in `ocpp_csms` modules. No `tests/storage/__init__.py` or nested conftest is created. Preserve current SQLite schema v8, WAL and failure assertions. Verify exact Git blobs, normalized pytest node IDs and pass/skip counts against `main` `941bc77b44adb3b5f4a678c43bad1b1a7e6093fd` across Python 3.11/3.13.
+
+`tests/test_export_revision_fingerprint.py` is deliberately **not** moved: it resolves `src/ocpp_csms/export_contract.py` using `Path(__file__).resolve().parents[1]` and would fail if moved byte-identically into a nested directory. Any relocation requires a separately authorized behavioral review, not this stage.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
@@ -45,7 +59,7 @@ The existing `tests/energy/` suite is unchanged in Stage C; all three moves cove
 | status | `tests/status/test_status.py`, `tests/status/test_emergency_stop_status.py`, `tests/status/test_connector_query.py`, other `tests/status/` modules and CLI status tests | fixtures and liveness vs historical observation | same collected node IDs, statuses and formatting assertions |
 | energy | `tests/energy/test_live_energy_export_metadata.py`, `tests/energy/test_transaction_soc.py`, `tests/transactions/` | shared events, source identity, timestamps and units | no changes to SoC/energy normalization or event provenance |
 | export | remaining root `test_export_*.py`, export CLI and evidence suites | shared snapshot consistency, cursor semantics and private monkeypatch targets | preserve `ocpp-csms/export/v1` and authoritative SQLite |
-| storage | `tests/test_schema*.py`, `tests/test_persistent_wal.py`, `tests/test_deployment_schema_verify.py` | fixture scope, SQLite lifecycle and rollback evidence | schema v8 and WAL/backup semantics unchanged |
+| storage | `tests/storage/test_schema*.py`, `tests/storage/test_persistent_wal.py`, `tests/test_deployment_schema_verify.py` | fixture scope, SQLite lifecycle and rollback evidence | schema v8 and WAL/backup semantics unchanged |
 | tls | `tests/ocpp_csms/test_tls*.py`, `tests/ocpp_csms/test_basic_auth.py` | listener and authentication safety | full negative/auth/drain tests unchanged |
 | firmware | `tests/cli/test_firmware*.py`, diagnostics suites | private CLI monkeypatch paths and transport | preserve preflight, URL validation and response handling |
 | discovery | `tests/ocpp_discover/` (already grouped) | network mocking and installer coupling | leave grouped; no extra repo |
