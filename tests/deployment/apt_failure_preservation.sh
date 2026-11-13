@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run only on the disposable GitHub Actions runner, after integration.sh has
+# Run only on the disposable GitHub Actions runner, after schema_aware_upgrade.sh has
 # installed and verified a healthy CSMS. Never run against a field appliance.
 [[ "${GITHUB_ACTIONS:-}" == "true" && "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]] || {
   echo "APT fault acceptance requires a GitHub-hosted disposable runner" >&2
@@ -21,7 +21,7 @@ p = Path(sys.argv[1])
 source = p.read_text()
 needle = "'python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump'"
 assert source.count(needle) == 1
-p.write_text(source.replace(needle, needle + ", 'ocpp-csms-ci-nonexistent-package-284'"))
+p.write_text(source.replace(needle, needle + ", 'ocpp-csms-ci-nonexistent-package'"))
 PY
 
 release_path="$HOME/.local/share/ocpp-csms/current"
@@ -52,7 +52,7 @@ if (cd "$fixture" && ./deploy.sh) >"$log" 2>&1; then
   exit 1
 fi
 # Require a meaningful APT failure, not a false positive from another task.
-grep -F 'ocpp-csms-ci-nonexistent-package-284' "$log" >/dev/null || {
+grep -F 'ocpp-csms-ci-nonexistent-package' "$log" >/dev/null || {
   cat "$log"; echo "::error::Missing injected package in failure receipt" >&2; exit 1;
 }
 grep -E 'No package matching|Unable to locate package|Could not find|not available' "$log" >/dev/null || {

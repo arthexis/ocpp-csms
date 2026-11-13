@@ -155,7 +155,7 @@ jobs:
 
 
   ansible:
-    name: Ansible validation
+    name: Ansible syntax and lint
     timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -183,7 +183,7 @@ jobs:
 
 
   ansible_integration:
-    name: Ansible integration
+    name: Ansible deployment and recovery
     timeout-minutes: 25
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -198,23 +198,23 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      - name: Run schema-aware deployment integration
+      - name: Verify same-schema upgrade and storage integrity
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash tests/deployment/integration.sh
+        run: bash tests/deployment/schema_aware_upgrade.sh
 
       - name: Verify injected APT failure preserves active release
         shell: bash
-        run: bash tests/deployment/apt_failure_acceptance.sh
+        run: bash tests/deployment/apt_failure_preservation.sh
 
       - name: Verify bounded transient APT retries and error receipts
         shell: bash
-        run: bash tests/deployment/apt_retry_acceptance.sh
+        run: bash tests/deployment/apt_retry_policy.sh
 
-      - name: Phase C pre-writer and reused-storage post-start fault tests
+      - name: Verify recovery before writer start and forbid rollback after start
         shell: bash
-        run: bash tests/deployment/phase_c_cutover.sh reuse
+        run: bash tests/deployment/writer_boundary_faults.sh reuse
 
       - name: Show service logs on failure
         if: failure()
@@ -222,7 +222,7 @@ jobs:
 
 
   ansible_schema_advance:
-    name: Ansible schema advancement
+    name: Schema isolation and downgrade protection
     timeout-minutes: 25
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -237,7 +237,7 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      - name: Exercise schema advancement with disposable candidate
+      - name: Verify isolated new-schema deployment with disposable candidate
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -273,11 +273,11 @@ jobs:
           PY
           git -C /tmp/ocpp-csms-schema-advance add src/ocpp_csms/schema.py
           git -C /tmp/ocpp-csms-schema-advance -c user.name='CI Schema Fixture' -c user.email='ci@example.invalid' commit -m 'test fixture: advance schema'
-          (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/integration.sh)
+          (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/schema_aware_upgrade.sh)
 
-      - name: Phase C new-schema post-start fault test
+      - name: Verify no rollback after new-schema writer start
         shell: bash
-        run: (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/phase_c_cutover.sh create)
+        run: (cd /tmp/ocpp-csms-schema-advance && bash tests/deployment/writer_boundary_faults.sh create)
 
       - name: Show service logs on failure
         if: failure()
@@ -341,7 +341,7 @@ jobs:
           fi
 
           if [[ "$ANSIBLE_SCHEMA_ADVANCE_RESULT" != "success" ]]; then
-            echo "Schema advancement integration did not succeed: $ANSIBLE_SCHEMA_ADVANCE_RESULT"
+            echo "Schema isolation and downgrade protection did not succeed: $ANSIBLE_SCHEMA_ADVANCE_RESULT"
             exit 1
           fi
 
