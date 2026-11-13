@@ -1,6 +1,6 @@
 # Issue #346 — Stage 1A: tombstones and compatibility matrix
 
-**Baseline:** `00e4d366d701d3653ee1b45b7d64a9fdbba00e00`. This file is an evidence-led inventory, **not** permission to remove production code or change SQLite v8, OCPP, security, installer, Discover, `export/v1`, or any downstream contract. Issue #336 test relocation remains independent. Prior Stage 0 (#334 / PR #335) is merged and closed. Stage 1 issue checkboxes remain open until separately accepted.
+**Baseline:** `00e4d366d701d3653ee1b45b7d64a9fdbba00e00`. This file is an evidence-led inventory, **not** permission to remove production code or change SQLite v8, OCPP, security, installer, Discover, `export/v1`, or any downstream contract. Issue #336 test relocation remains independent. Prior Stage 0 (#334 / PR #335) is merged and closed. At this baseline the eight Stage 1 checks were pending; they were subsequently accepted administratively in #346, without passing the negative deletion gates.
 
 ## Classification and source-to-caller matrix
 
@@ -35,7 +35,7 @@
 
 ## Stage 1B — expanded consumers and limits (documentation only)
 
-**Evidence:** Stage 1A squash on `main` `252221d05edd0785da57e10e06a5d9b7a460a37b` (PR #347, CI #43482051576 PASS). This appendix corrects the intentionally scoped Stage 1A inventory, not the implementation. Stage 1 remains open with eight unchecked issue #346 acceptance items; issue #336 stays independent; no tombstone removal is authorized.
+**Evidence:** Stage 1A squash on `main` `252221d05edd0785da57e10e06a5d9b7a460a37b` (PR #347, CI #43482051576 PASS). This appendix corrects the intentionally scoped Stage 1A inventory, not the implementation. At the Stage 1B merge the eight #346 Stage 1 checks were unchecked; they were subsequently accepted administratively. Issue #336 stays independent, #346 remains open for Stages 2–6, and no tombstone removal is authorized.
 
 ### Reclassified candidates and exact call sites
 
@@ -65,7 +65,7 @@
 3. **Discover and permissions**: partial/old session-evidence databases, stale/reused tuple, missing inbound event and watermark, repeat DDL initialization; preserve `control.os.geteuid` monkeypatch rejection and TLS `legacy_version` parsing.
 4. **External contract**: exact installed CLI `--help`, `status --json`, subprocess imports under Reports active CSMS interpreter; compare `export/v1`, source ID, read-only WAL and Simulator offline v8 queries. Do not run any of these against field nodes under Stage 1B documentation scope.
 
-**Only currently safe cleanup:** the obsolete **comment/docstring** `src/ocpp_csms/cli/tls.py:1` saying listener management follows in "Chunk 2B". That is **not** a functional tombstone; a later independent approval could correct text with no behavior/JSON/CLI change. The Stage 1B change itself is only this documentation file. Stage 1's eight issue checks remain pending until explicitly accepted; do not close #346 or #336.
+**Nonfunctional cleanup proposed in the separately authorized Stage 0–1 closure Draft:** the obsolete **docstring** in `src/ocpp_csms/cli/tls.py:1` is corrected to describe existing live-listener control. It is **not** a functional tombstone; CLI help, JSON, exits and behavior remain unchanged. The historical Stage 1B PR changed only this documentation file. All eight Stage 1 checks have since been accepted administratively, **not** as passed deletion gates. Keep #346 and #336 open.
 
 ## Stage 1A acceptance and future minimal cleanup
 
@@ -73,4 +73,4 @@
 
 **Stage 1A gate:** all tests including existing Stage-0 import/CLI/evidence tests must pass on Debian 12/Python 3.11 and Python 3.13 functional CI, with original Ansible and schema-safety CI unchanged. The Python 3.13 wheel test may remain SKIPPED/NOT TESTED; future target deployment packaging is a separate gate.
 
-**Future, independent Draft only after explicit authorization:** correct the demonstrably outdated `cli/tls.py:1` comment. Do **not** remove v5/v6 SQL constants, `transaction_recoveries` DROP, JSON methods/adapters, import reexports, `control.os`, anti-replay checks or Ansible cleanup based on static reachability alone. A larger deletion proposal requires reference search across field clients plus exact-output/negative regression coverage and a separate approval. #336 remains independent.
+**Separately authorized closure Draft (not merged by this documentation):** only correct the obsolete `cli/tls.py:1` docstring and synchronize these two audit documents. Do **not** remove v5/v6 SQL constants, `transaction_recoveries` DROP, JSON methods/adapters, import reexports, `control.os`, anti-replay checks or Ansible cleanup based on static reachability alone. A larger deletion proposal requires reference search across field clients plus exact-output/negative regression coverage and a separate approval. #336 remains independent.

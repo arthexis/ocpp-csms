@@ -1,5 +1,11 @@
 # Stage 0: modularization dependency and acceptance baseline
 
+## Final administrative status (2026-11-13)
+
+Stage 0 was accepted and closed in [issue #334](https://github.com/arthexis/ocpp-csms/issues/334); its tests/docs-only [PR #335](https://github.com/arthexis/ocpp-csms/pull/335) was merged. The subsequent Stage 1A/1B audit ([PR #347](https://github.com/arthexis/ocpp-csms/pull/347), [PR #348](https://github.com/arthexis/ocpp-csms/pull/348)) was integrated, and all eight Stage 1 checks in [#346](https://github.com/arthexis/ocpp-csms/issues/346) were accepted **administratively as audited/classified**, not as passed deletion gates. Issue #346 remains open for Stages 2–6; #336 remains open and independent. No production-code removal, behavior change, deployment, or field verification was authorized. The historical snapshots below are retained for provenance.
+
+The Python 3.13 wheel build/install remains **NOT TESTED** where skipped; it is a separate fail-closed prerequisite only before a deployment targeting Python 3.13. Unknown installed, private, and dynamic consumers remain unknown, and the Stage 1 negative gates must be met before any future removal.
+
 Baseline: `main` 77452e39efb1702cc78c753724d1d30892ae411d. This is documentation and characterization tests only. SQLite schema 8, security, deployment and all CLI/JSON behavior remain unchanged.
 
 ## Precise direct-import edges (observed on baseline)
@@ -40,8 +46,8 @@ The new tests are representative baselines, **not** a complete external API inve
 
 ## 2026-11-13: synchronization and extended characterization under #346
 
-The historical original baseline above is retained for provenance. The Stage-0 Draft branch
-is synchronized with main `2c400e8b3744881003eec1735be29de8e35981bd` by an explicit two-parent
+The historical original baseline above is retained for provenance. At synchronization time,
+the Stage-0 Draft branch was synchronized with main `2c400e8b3744881003eec1735be29de8e35981bd` by an explicit two-parent
 merge (first parent: original Draft HEAD; second parent: reviewed main HEAD).
 The merge tree contains the complete main snapshot plus only the two Stage-0
 tests/docs paths; do not undo the independently integrated test-suite relocations.
@@ -111,7 +117,7 @@ Python imports within CSMS:
   completion or simulator permission from a read-only snapshot.
 
 This inventory does **not** prove that no other dynamically loaded, third-party
-or field-installed consumer exists. Stage 1 must continue to classify tombstones
+or field-installed consumer exists. Stage 1 subsequently classified these tombstones
 without deleting code; any newly authorized refactor must preserve these
 interfaces or propose a separately reviewed contract change.
 

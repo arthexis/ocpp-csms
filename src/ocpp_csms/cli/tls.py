@@ -1,4 +1,4 @@
-"""TLS configuration CLI (listener management follows in Chunk 2B)."""
+"""TLS configuration and live-listener control CLI."""
 from __future__ import annotations
 
 import argparse
