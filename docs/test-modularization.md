@@ -65,14 +65,25 @@ Both destination directories are non-package suites with no nested `conftest.py`
 
 Explicit exclusions: `test_export_revision_fingerprint.py`, `test_deployment_preflight.py` and `test_release_prune_lock.py` use location-sensitive `__file__` paths; Evidence tests were not relocated because `tests/evidence/__init__.py` would alter test module import identities.
 
+## Stage F: storage verification and nominal rating tests
+
+Two additional root-level tests are relocated **byte-for-byte**, without changing their assertions, helpers, imports, fixtures, or monkeypatch targets:
+
+| Original | New path |
+| --- | --- |
+| `tests/test_deployment_schema_verify.py` | `tests/storage/test_deployment_schema_verify.py` |
+| `tests/test_charger_ratings.py` | `tests/energy/test_charger_ratings.py` |
+
+The schema verification suite covers fail-closed schema/WAL checks and transaction/export identity preservation; the charger-ratings suite covers nominal rating metadata and its export representation, **not** measured power or charging control. These are categorization changes only. Both destination directories are non-package test directories without nested `conftest.py`, so root `tests/conftest.py` remains in scope; no changes to `ocpp_csms` source, SQLite v8, `ocpp-csms/export/v1`, or test code. The CI workflow continues to collect `tests/` recursively. Compare exact Git blobs, full pytest node-ID multisets with only these two path prefixes normalized, and pass/skip counts against the exact `main` baseline `80e257aec446fb08db0bae309a80a48ac3366b71` under Python 3.11/3.13. Keep #334/#335 independent and #336 open; PR remains Draft until separately authorized.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
 | --- | --- | --- | --- |
 | status | `tests/status/test_status.py`, `tests/status/test_emergency_stop_status.py`, `tests/status/test_connector_query.py`, other `tests/status/` modules and CLI status tests | fixtures and liveness vs historical observation | same collected node IDs, statuses and formatting assertions |
-| energy | `tests/energy/test_live_energy_export_metadata.py`, `tests/energy/test_transaction_soc.py`, `tests/transactions/` | shared events, source identity, timestamps and units | no changes to SoC/energy normalization or event provenance |
+| energy | `tests/energy/test_live_energy_export_metadata.py`, `tests/energy/test_transaction_soc.py`, `tests/energy/test_charger_ratings.py`, `tests/transactions/` | shared events, source identity, timestamps and units | no changes to SoC/energy normalization or event provenance |
 | export | remaining root `test_export_*.py`, export CLI and evidence suites | shared snapshot consistency, cursor semantics and private monkeypatch targets | preserve `ocpp-csms/export/v1` and authoritative SQLite |
-| storage | `tests/storage/test_schema*.py`, `tests/storage/test_persistent_wal.py`, `tests/test_deployment_schema_verify.py` | fixture scope, SQLite lifecycle and rollback evidence | schema v8 and WAL/backup semantics unchanged |
+| storage | `tests/storage/test_schema*.py`, `tests/storage/test_persistent_wal.py`, `tests/storage/test_deployment_schema_verify.py` | fixture scope, SQLite lifecycle and rollback evidence | schema v8 and WAL/backup semantics unchanged |
 | tls | `tests/ocpp_csms/test_tls*.py`, `tests/ocpp_csms/test_basic_auth.py` | listener and authentication safety | full negative/auth/drain tests unchanged |
 | firmware | `tests/cli/test_firmware*.py`, diagnostics suites | private CLI monkeypatch paths and transport | preserve preflight, URL validation and response handling |
 | discovery | `tests/ocpp_discover/` (already grouped) | network mocking and installer coupling | leave grouped; no extra repo |
