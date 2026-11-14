@@ -101,6 +101,73 @@ def print_help(parser, commands, topic=None) -> None:
     parser.print_help()
 
 
+
+def _run_parsed_config(args: argparse.Namespace) -> int:
+    # Keep the historic short-circuit priority: diff, download, then configure.
+    return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
+
+
+def _run_parsed_transaction_soc(args: argparse.Namespace) -> int:
+    emit_json(transaction_soc(args.data_dir, cp=args.cp, transaction=args.transaction))
+    return 0
+
+
+def _run_parsed_rfid(args: argparse.Namespace, commands: dict[str, argparse.ArgumentParser]) -> int:
+    if args.rfid_command is None:
+        commands["rfid"].print_help()
+        return 0
+    if args.rfid_command == "edit":
+        return run_rfid_edit(args)
+    if args.rfid_command == "report":
+        print(run_rfid(args))
+        return 0
+    return run_rfid_action(args)
+
+
+def _run_parsed_txn(args: argparse.Namespace) -> int:
+    if args.json:
+        return run_transactions_json(args)
+    print(run_transactions(args))
+    return 0
+
+
+def _dispatch_parsed_command(args: argparse.Namespace, commands: dict[str, argparse.ArgumentParser]) -> int:
+    """Route parsed root commands in their original priority order.
+
+    Bind exported handlers on each call, not at import time: external callers
+    and existing tests monkeypatch functions in ocpp_csms.cli directly.
+    """
+    routes = (
+        (APPLIANCE_COMMANDS, run_appliance),
+        (CONTROL_COMMANDS, run_control),
+        (MAINTENANCE_COMMANDS, run_maintenance),
+        (("inspect",), run_inspect),
+        (("capabilities", "reconcile"), run_inspection),
+        (CHARGER_COMMANDS, run_chargers),
+        (("reserve",), run_reservation),
+        (("data",), run_data),
+        (("data-transfer",), run_data_transfer),
+        (("firmware",), run_firmware),
+        (("diagnose",), run_diagnostics),
+        (("config",), _run_parsed_config),
+        (("tls",), run_tls),
+        (("auth",), run_auth),
+        (("report",), run_report),
+        (("rating",), run_rating),
+        (("transaction-soc",), _run_parsed_transaction_soc),
+        (("profile",), run_profile),
+        (("energy",), run_energy),
+        (("export",), run_export),
+        (("rfid",), lambda parsed: _run_parsed_rfid(parsed, commands)),
+        (DIAGNOSTIC_COMMANDS, run_diagnostic),
+        (("txn",), _run_parsed_txn),
+    )
+    for names, handler in routes:
+        if args.command in names:
+            return handler(args)
+    return 2
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     # Transaction operations use their own real subparsers; txn [ID] remains
@@ -141,39 +208,7 @@ def main() -> int:
         args.reservation_id = reserve_id
     if args.command is None or args.command == "help": print_help(parser, commands, getattr(args, "topic", None)); return 0
     try:
-        if args.command in APPLIANCE_COMMANDS: return run_appliance(args)
-        if args.command in CONTROL_COMMANDS: return run_control(args)
-        if args.command in MAINTENANCE_COMMANDS: return run_maintenance(args)
-        if args.command == 'inspect': return run_inspect(args)
-        if args.command in ('capabilities', 'reconcile'): return run_inspection(args)
-        if args.command in CHARGER_COMMANDS: return run_chargers(args)
-        if args.command == "reserve": return run_reservation(args)
-        if args.command == "data": return run_data(args)
-        if args.command == "data-transfer": return run_data_transfer(args)
-        if args.command == "firmware": return run_firmware(args)
-        if args.command == "diagnose": return run_diagnostics(args)
-        if args.command == "config": return run_config_diff(args) if is_config_diff(args) else run_config_download(args) if is_config_download(args) else run_configuration(args)
-        if args.command == "tls": return run_tls(args)
-        if args.command == "auth": return run_auth(args)
-        if args.command == "report": return run_report(args)
-        if args.command == "rating": return run_rating(args)
-        if args.command == "transaction-soc":
-            emit_json(transaction_soc(args.data_dir, cp=args.cp, transaction=args.transaction))
-            return 0
-        if args.command == "profile": return run_profile(args)
-        if args.command == "energy": return run_energy(args)
-        if args.command == "export": return run_export(args)
-        if args.command == "rfid":
-            if args.rfid_command is None:
-                commands["rfid"].print_help(); return 0
-            if args.rfid_command == "edit": return run_rfid_edit(args)
-            if args.rfid_command == "report":
-                print(run_rfid(args)); return 0
-            return run_rfid_action(args)
-        if args.command in DIAGNOSTIC_COMMANDS: return run_diagnostic(args)
-        if args.command == "txn":
-            if args.json: return run_transactions_json(args)
-            print(run_transactions(args)); return 0
+        return _dispatch_parsed_command(args, commands)
     except ValueError as exc:
         parser.error(str(exc))
     return 2
