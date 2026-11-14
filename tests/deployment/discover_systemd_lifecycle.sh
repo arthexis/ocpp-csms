@@ -17,6 +17,7 @@ cleanup() {
   sudo systemctl stop ocpp-discover.service >/dev/null 2>&1 || true
   sudo systemctl reset-failed ocpp-discover.service >/dev/null 2>&1 || true
   sudo ip link del ocppci0 >/dev/null 2>&1 || true
+  git -C "$repo" worktree remove --force "$tmp/pre" >/dev/null 2>&1 || true
   git -C "$repo" worktree remove --force "$tmp/new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
@@ -134,6 +135,66 @@ git -C "$tmp/new" -c user.name='Stage A CI' -c user.email='ci@example.invalid' \
 new_schema="$(schema_from_source "$tmp/new/src/ocpp_csms/schema.py")"
 old_unit="$(sudo cat /etc/systemd/system/ocpp-discover.service)"
 [[ "$old_unit" != *"/schemas/$new_schema"* ]] || fail "unexpected new-schema Discover unit"
+
+# Exercise failure inside the real CSMS cutover AFTER quiescing Discover
+# and stopping the old writer, but BEFORE marking the candidate writer.
+# Only a disposable fixture worktree is instrumented, never product code.
+old_current="$(readlink -f "$HOME/.local/share/ocpp-csms/current")"
+old_csms_unit="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' ' -f1)"
+old_discover_unit="$(sudo sha256sum /etc/systemd/system/ocpp-discover.service | cut -d' ' -f1)"
+old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
+old_db_inode="$(stat -c '%d:%i' "$old_db")"
+old_db_hash="$(sha256sum "$old_db" | cut -d' ' -f1)"
+# Both managed services must be healthy before this fault is injected.
+assert_active
+git worktree add --detach "$tmp/pre" "$(git -C "$tmp/new" rev-parse HEAD)"
+python3 - "$tmp/pre/ansible/roles/ocpp_csms/tasks/cutover.yml" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+source = p.read_text()
+anchor = "    - name: Verify OCPP CSMS storage access as systemd service user\n"
+assert source.count(anchor) == 1, "unexpected CSMS cutover pre-writer anchor"
+failure = (
+    "    - name: Inject CI-only pre-writer failure after Discover quiesce\n"
+    "      ansible.builtin.fail:\n"
+    "        msg: CI_STAGE_A_PRE_WRITER_BOUNDARY\n\n"
+)
+p.write_text(source.replace(anchor, failure + anchor, 1))
+PY
+git -C "$tmp/pre" add ansible/roles/ocpp_csms/tasks/cutover.yml
+git -C "$tmp/pre" -c user.name='Stage A CI' -c user.email='ci@example.invalid' \
+    commit -qm 'fixture: fail pre-writer after Discover quiescence'
+
+if (cd "$tmp/pre" && ansible-playbook ansible/playbooks/ci-discover-isolated.yml \
+    -i localhost, -c local -e ocpp_stage_a_ci_fixture=true) >"$tmp/prewriter.log" 2>&1; then
+  fail "pre-writer fault unexpectedly succeeded"
+fi
+grep -F CI_STAGE_A_PRE_WRITER_BOUNDARY "$tmp/prewriter.log" >/dev/null || {
+  tail -n 100 "$tmp/prewriter.log" >&2
+  fail "pre-writer injection not reached"
+}
+grep -F 'OCPP CSMS handoff failed before activation' "$tmp/prewriter.log" >/dev/null || {
+  tail -n 100 "$tmp/prewriter.log" >&2
+  fail "old-CSMS recovery path did not complete"
+}
+# Verify both actual systemd services recovered, not just a role's YAML order.
+assert_active
+[[ "$(csms_dir)" == "$HOME/ocpp-csms-data/schemas/$old_schema" ]] ||
+  fail "pre-writer recovery activated the wrong schema"
+[[ "$(readlink -f "$HOME/.local/share/ocpp-csms/current")" == "$old_current" ]] ||
+  fail "pre-writer recovery changed the active release"
+[[ "$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' ' -f1)" == "$old_csms_unit" ]] ||
+  fail "pre-writer recovery changed the old CSMS unit"
+[[ "$(sudo sha256sum /etc/systemd/system/ocpp-discover.service | cut -d' ' -f1)" == "$old_discover_unit" ]] ||
+  fail "pre-writer recovery changed the old Discover unit"
+[[ "$(stat -c '%d:%i' "$old_db")" == "$old_db_inode" ]] ||
+  fail "pre-writer recovery replaced the old SQLite database"
+[[ "$(sha256sum "$old_db" | cut -d' ' -f1)" == "$old_db_hash" ]] ||
+  fail "pre-writer recovery modified the old SQLite database"
+[[ "$(snapshot)" == "$before" ]] || fail "pre-writer recovery modified Discover receipts"
+assert_nft_unchanged
+echo "PASS: pre-writer fault after active Discover quiesce restores CSMS and Discover, old schema, SQLite inode/hash, receipts and nftables"
 
 # Deliberately fail between successful CSMS writer handoff and Discover role.
 if (cd "$tmp/new" && ansible-playbook ansible/playbooks/ci-discover-postwriter.yml \

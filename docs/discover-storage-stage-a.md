@@ -1,88 +1,81 @@
-# Discover active storage — issue #355, Stage A
+# Discover active schema storage — issue #355, Stage A
 
-## Contract
+## Scope and storage authority
 
-Discover uses the effective `ocpp_csms_service_data_dir` selected by CSMS
-storage planning and cutover. No hardcoded schema version or unversioned
-fallback database is permitted. Before the Discover role changes its stable
-command, persistent integration, nftables boot registration or systemd unit,
-the read-only `ocpp_discover.storage_contract` checks the active CSMS MainPID,
-its `--data-dir`, SQLite database and evidence tables. The same check runs
-at service start through `ExecStartPre`. Mismatches fail closed.
+Discover inherits `ocpp_csms_service_data_dir` from the Ansible CSMS
+storage selection. It must use the **running CSMS writer's** versioned
+directory, not the unversioned storage parent or a hardcoded `schemas/8`.
+Before modifying Discover's stable command, persistent integration or
+systemd unit, its role executes a read-only storage preflight. The installed
+Discover service repeats this validation via `ExecStartPre` at each start.
 
-## Failure and recovery boundary
+The preflight inspects the live `ocpp-csms.service` MainPID and its single
+`--data-dir`, checks readable SQLite evidence tables in `mode=ro`, and
+rejects mismatches without initializing the database or modifying
+Discover's adaptation. It does **not** continuously revalidate an already
+running Discover process.
 
-The combined installer runs CSMS before Discover. Its Discover preflight is
-not a preflight of CSMS mutation: APT and a CSMS schema handoff may already
-have happened. After the replacement CSMS writer might have started,
-automatic rollback is forbidden by the pre-existing cutover contract.
-Repair must be **fail-forward** against the active schema; do not reactivate
-historical transactions or an old database. A preflight failure leaves
-Discover's durable adaptation and firewall configuration untouched by
-the Discover role. On later service starts, an old unit whose data-dir no
-longer matches the writer fails `ExecStartPre` before any new discovery.
-An already-running Discover process is not continuously revalidated;
-cross-service atomic activation and reboot acceptance remain unproven.
+## Schema handoff and recovery
 
-## Test evidence and limitations
+The product installer runs the CSMS role before the Discover role.
+For an **effective storage-directory switch**, CSMS records whether
+Discover was active and stops it **before** stopping the previous writer.
+If Discover cannot be quiesced, CSMS refuses the writer handoff.
 
-Hermetic tests cover schema 8/9/12, missing or mismatched SQLite evidence,
-missing/inaccessible MainPID, nonnumeric systemctl response, command errors,
-read-only preservation, and selected-schema switch/reversal. Disposable CI
-Ansible tests deploy CSMS and run a separate read-only integration probe
-after the candidate deploy and after idempotent/stage-only reconvergence.
-The probe reads the real installed CSMS MainPID, renders the actual Discover
-unit template with that selected path, executes its `ExecStartPre` checker,
-rejects the incorrect parent directory, and verifies no persistent
-Discover state was modified.
+A failure **before the candidate writer may start** restores the previous
+CSMS unit/service and then restarts Discover only if it was previously
+active. The previous schema, SQLite database and Discover receipts must
+remain unchanged. If the candidate writer **may have started**, CSMS
+forbids automatic rollback, preserves its candidate storage/release and
+leaves Discover stopped until a managed **fail-forward** reconvergence
+installs the correct unit. An old Discover unit refuses a new start through
+its `ExecStartPre`.
 
-**CI limitation:** GitHub-hosted Ansible runners currently lack `eth0`;
-`install.yml` skips the Discover role. Green CI therefore verifies the
-rendered unit and live CSMS storage but does **not** prove actual Discover
-service installation, startup, restart, reboot or physical EV Ready contact.
-When `eth0` exists on a disposable test runner, the probe also verifies
-the installed unit and its active state. Full field acceptance is separate.
+This is not an atomic two-service transaction. Failures in the combined
+installer can occur after CSMS has changed storage but before the Discover
+role converges. An operator must repair forward in that case, rather than
+reactivating a historical database. For **same-schema release changes**,
+the new quiescence step does not stop Discover unnecessarily.
 
-Stage B/C, routed HTTP opt-in (default off), nftables rules, OCPP wire
-semantics, SQLite v8, source identity and customer transactions are unchanged.
+## Validation and isolated CI evidence
 
+Hermetic Python tests cover schema 8/9/12, missing/ambiguous MainPID,
+`systemctl` and `/proc` failures, directory mismatch, missing SQLite
+evidence, service preflight and read-only preservation. Existing Ansible
+CI tests also verify no-op, staging, same-schema upgrades, schema
+advancement, downgrade rejection, and pre/post-writer recovery.
 
-## Real disposable systemd/Ansible Stage A gate
+The dedicated `discover_systemd` CI job uses a fresh **GitHub-hosted,
+disposable** Ubuntu VM, refuses a pre-existing Discover service or an
+`ocppci0` interface, then creates an **unaddressed Linux dummy
+`ocppci0`** interface. It leaves the runner's actual `eth0` untouched
+and binds CSMS to `127.0.0.1`. A guarded CI-only playbook calls the
+**actual CSMS and Discover Ansible roles**. The production `install.yml`
+and real interfaces are unchanged.
 
-The CI-only \`discover_systemd\` job runs on a fresh GitHub-hosted VM.
-Its fixture refuses existing eth0 or installed Discover, creates a Linux
-dummy eth0 with no address or peer, and installs the **actual product roles**
-with systemd. It checks successful first start, idempotent redeploy, real
-restart, persistent receipt/configuration preservation and unchanged **live**
-nftables ruleset. The runner is discarded after CI; no field appliance,
-real network connection, or physical charger is accessed.
+The fixture proves real systemd installation, initial activation,
+`ExecStartPre`, restart, idempotent reconvergence and selected data-dir.
+It injects a failure **inside cutover, after Discover quiescence but
+before writer start**, and verifies actual restoration of **both**
+services, the old schema, CSMS release/systemd unit, SQLite inode/hash
+and Discover receipts. Separately, a failure **after the new writer
+starts but before Discover convergence** verifies that Discover stays
+stopped, the obsolete unit fails at `ExecStartPre`, and managed
+reconvergence repairs forward to a synthetic next schema.
 
-A test-only playbook executes the CSMS role on a temporary schema+1
-commit, deliberately fails after its real writer handoff, and does **not**
-converge the Discover role. Stage A quiesces a previously active Discover
-before the old schema writer stops; the test checks that the old Discover
-remains stopped and its stale systemd unit fails ExecStartPre. A subsequent
-normal managed candidate deploy repairs forward and validates the updated
-Discover unit and restart. Failed pre-writer CSMS handoffs restore the
-previously running Discover only after the old CSMS service is restored.
-The writer-started no-rollback guard remains unchanged.
+The fixture snapshots Discover-owned persistent files and canonical
+nftables rule structures. It ignores volatile packet/byte counters and
+handle identifiers of the disposable runner but rejects structural
+changes; it also separately requires that no
+`table ip ocpp_field_redirect` is installed during the test.
+The only networking fixture is the disposable, unaddressed dummy device.
 
-This CI gate does not certify real EV Ready traffic, connectivity across
-a reboot, routed HTTP opt-in, or any field integration.
+## Exclusions
 
-
-CI isolation refinement: GitHub-hosted runners already have an eth0 of
-unknown provenance. The fixture **must not** use or alter it. Instead,
-the CI-only playbook targets the unaddressed \`ocppci0\` dummy interface,
-with CSMS bound to loopback. A guarded environment variable is used only
-to compare the test-only Discover unit against the selected storage
-contract; it is never accepted on self-hosted runners. The product
-\`install.yml\` remains unchanged.
-
-
-The CI firewall check compares the canonical JSON structure of live
-nftables tables, chains and rules, ignoring volatile packet/byte counters
-and handle identifiers from the disposable runner. It separately asserts
-that \`table ip ocpp_field_redirect\` never exists during Stage A. A
-structural rule change is a test failure; dynamic traffic counters alone
-are not.
+Stage A CI does **not** certify actual EV Ready behavior, physical
+chargers, real charger-facing interfaces, reboot of the complete
+appliance, or field network connectivity. Routed HTTP remains
+opt-in/default-off, and Stage B/C remain separate acceptance stages.
+No changes to OCPP wire semantics, SQLite v8, source identities,
+transaction history, production firewall rules, or production
+deployments are implied by Stage A acceptance.
