@@ -67,6 +67,79 @@ csms_dir() {
 }
 discover_pid() { sudo systemctl show ocpp-discover.service -p MainPID --value; }
 sqlite_logical_snapshot() {
+  # Baseline with an empty second argument; verify using its JSON file.
+  # CSMS legitimately appends server_started/server_stopped audit records.
+  python3 - "$1" "$2" <<'PY'
+import json
+from pathlib import Path
+import sqlite3
+import sys
+
+def encode(value):
+    return {"__blob__": value.hex()} if isinstance(value, bytes) else value
+
+database = Path(sys.argv[1]).resolve(strict=True)
+connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=5)
+try:
+    connection.execute("PRAGMA query_only=ON")
+    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise SystemExit("SQLite integrity_check failed")
+    tables = [
+        name for (name,) in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name != 'sqlite_sequence' ORDER BY name"
+        )
+    ]
+    state = {
+        "version": connection.execute("PRAGMA user_version").fetchone()[0],
+        "schema": [list(row) for row in connection.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master "
+            "WHERE name != 'sqlite_sequence' ORDER BY type, name"
+        )],
+        "tables": {},
+    }
+    for name in tables:
+        quoted = '"' + name.replace('"', '""') + '"'
+        rows = [
+            [encode(v) for v in row]
+            for row in connection.execute("SELECT * FROM " + quoted)
+        ]
+        state["tables"][name] = sorted(
+            rows, key=lambda r: json.dumps(r, sort_keys=True)
+        )
+finally:
+    connection.close()
+
+baseline_path = sys.argv[2]
+if not baseline_path:
+    print(json.dumps(state, sort_keys=True))
+else:
+    before = json.loads(Path(baseline_path).read_text())
+    if state["version"] != before["version"] or state["schema"] != before["schema"]:
+        raise SystemExit("SQLite schema/version changed during pre-writer recovery")
+    if set(state["tables"]) != set(before["tables"]):
+        raise SystemExit("SQLite tables changed during pre-writer recovery")
+    for name in state["tables"]:
+        previous = before["tables"][name]
+        current = state["tables"][name]
+        if name != "runtime_events":
+            if current != previous:
+                raise SystemExit("SQLite table mutated during pre-writer recovery: " + name)
+            continue
+        old_by_id = {row[0]: row for row in previous}
+        new_by_id = {row[0]: row for row in current}
+        if any(new_by_id.get(key) != row for key, row in old_by_id.items()):
+            raise SystemExit("Prior runtime_events rows were removed or modified")
+        previous_max = max(old_by_id, default=0)
+        appended = [row for key, row in new_by_id.items() if key not in old_by_id]
+        if any(row[0] <= previous_max or row[2] not in
+               ("server_started", "server_stopped") for row in appended):
+            raise SystemExit("Unexpected runtime_events written during recovery")
+    print("PASS: SQLite integrity, schema and prior evidence preserved; "
+          "only CSMS startup/shutdown audit events appended")
+PY
+}
+snapshot() {
   python3 - "$1" <<'PY'
 import hashlib
 from pathlib import Path
@@ -162,7 +235,7 @@ old_csms_unit="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' 
 old_discover_unit="$(sudo sha256sum /etc/systemd/system/ocpp-discover.service | cut -d' ' -f1)"
 old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
 old_db_inode="$(stat -c '%d:%i' "$old_db")"
-old_db_logical="$(sqlite_logical_snapshot "$old_db")"
+sqlite_logical_snapshot "$old_db" "" >"$tmp/old-sqlite-logical.json"
 # Both managed services must be healthy before this fault is injected.
 assert_active
 git worktree add --detach "$tmp/pre" "$(git -C "$tmp/new" rev-parse HEAD)"
@@ -208,11 +281,11 @@ assert_active
   fail "pre-writer recovery changed the old Discover unit"
 [[ "$(stat -c '%d:%i' "$old_db")" == "$old_db_inode" ]] ||
   fail "pre-writer recovery replaced the old SQLite database"
-[[ "$(sqlite_logical_snapshot "$old_db")" == "$old_db_logical" ]] ||
-  fail "pre-writer recovery changed SQLite logical contents or integrity"
+sqlite_logical_snapshot "$old_db" "$tmp/old-sqlite-logical.json" ||
+  fail "pre-writer recovery changed existing SQLite evidence or integrity"
 [[ "$(snapshot)" == "$before" ]] || fail "pre-writer recovery modified Discover receipts"
 assert_nft_unchanged
-echo "PASS: pre-writer fault after active Discover quiesce restores CSMS and Discover, old schema, SQLite inode/logical contents, receipts and nftables"
+echo "PASS: pre-writer fault after active Discover quiesce restores CSMS and Discover, old schema, SQLite inode/prior evidence, receipts and nftables"
 
 # Deliberately fail between successful CSMS writer handoff and Discover role.
 if (cd "$tmp/new" && ansible-playbook ansible/playbooks/ci-discover-postwriter.yml \
