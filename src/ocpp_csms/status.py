@@ -14,6 +14,7 @@ from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
 from ocpp_csms._status_observation import derive_status as _observed_derive_status, operational_state as _observed_operational_state
+from ocpp_csms import _status_queries
 
 
 @dataclass
@@ -160,28 +161,14 @@ def _charger_status(
     *,
     live_since_id: int | None = None,
 ) -> ChargerStatus:
-    runtime = connection.execute(
-        """
-        SELECT id, occurred_at, event FROM runtime_events
-        WHERE charger_id = ? AND event IN ('charger_connected', 'charger_disconnected')
-        ORDER BY id DESC LIMIT 1
-        """,
-        (charger_id,),
-    ).fetchone()
+    runtime = _status_queries.latest_runtime_event(connection, charger_id)
     connected = bool(
         runtime
         and runtime["event"] == "charger_connected"
         and (live_since_id is None or int(runtime["id"]) > live_since_id)
     )
 
-    connection_event = connection.execute(
-        """
-        SELECT details_json FROM runtime_events
-        WHERE charger_id = ? AND event = 'charger_connected'
-        ORDER BY id DESC LIMIT 1
-        """,
-        (charger_id,),
-    ).fetchone()
+    connection_event = _status_queries.latest_connection_metadata(connection, charger_id)
     subprotocol = None
     if connection_event and connection_event["details_json"]:
         try:
@@ -190,32 +177,9 @@ def _charger_status(
         except (json.JSONDecodeError, TypeError, AttributeError):
             pass
 
-    latest = connection.execute(
-        """
-        SELECT received_at FROM events
-        WHERE charger_id = ? AND direction = 'in'
-        ORDER BY id DESC LIMIT 1
-        """,
-        (charger_id,),
-    ).fetchone()
-    status_rows = connection.execute(
-        """
-        SELECT connector_id, status, error_code, info, received_at
-        FROM connector_status
-        WHERE charger_id = ?
-        ORDER BY connector_id
-        """,
-        (charger_id,),
-    ).fetchall()
-    transaction_rows = connection.execute(
-        """
-        SELECT transaction_id, connector_id, id_tag, started_at, start_received_at
-        FROM transactions
-        WHERE charger_id = ? AND state = 'open'
-        ORDER BY start_received_at DESC
-        """,
-        (charger_id,),
-    ).fetchall()
+    latest = _status_queries.latest_inbound_event(connection, charger_id)
+    status_rows = _status_queries.connector_status_rows(connection, charger_id)
+    transaction_rows = _status_queries.open_transaction_rows(connection, charger_id)
 
     statuses = {int(row["connector_id"]): row for row in status_rows}
     transactions: dict[int, sqlite3.Row] = {}
