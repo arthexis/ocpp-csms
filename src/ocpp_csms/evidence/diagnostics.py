@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME
+from ocpp_csms.evidence._diagnostics_presentation import render_faults as _render_faults
 
 
 def _time(value: str) -> str:
@@ -121,19 +122,7 @@ def fault_events(
 
 
 def format_faults(faults: list[dict[str, Any]], *, local_time: bool = False) -> str:
-    if not faults:
-        return "No recorded fault notifications."
-    lines = []
-    for fault in faults:
-        connector = fault["connector_id"]
-        parts = [_event_display_timestamp(str(fault["received_at"]), local_time=local_time), str(fault["charger_id"]),
-                 f"C{connector}" if connector is not None else "C?",
-                 "Faulted", str(fault.get("error_code") or "UnknownError")]
-        for name in ("charger_at", "info", "vendor_id", "vendor_error_code"):
-            if fault.get(name) not in (None, ""):
-                parts.append(f"{name}={_event_display_timestamp(str(fault[name]), local_time=local_time) if name == 'charger_at' else fault[name]}")
-        lines.append("  ".join(parts))
-    return "\n".join(lines)
+    return _render_faults(faults, event_display_timestamp=_event_display_timestamp, local_time=local_time)
 
 
 def transaction_events(
