@@ -8,6 +8,7 @@ from typing import Any
 
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.evidence._diagnostics_presentation import render_faults as _render_faults
+from ocpp_csms.evidence import _diagnostics_queries
 
 
 def _time(value: str) -> str:
@@ -55,26 +56,10 @@ def events_between(
         params.extend(exclude)
     action_where = (" AND " + " AND ".join(filters)) if filters else ""
     try:
-        rows = connection.execute(
-            f"""
-            SELECT * FROM (
-                SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
-                       action, direction, transaction_id, id_tag, payload_json AS payload
-                FROM events
-                UNION ALL
-                SELECT id, occurred_at, charger_id, 'runtime', event, NULL, NULL, NULL, details_json
-                FROM runtime_events
-            )
-            WHERE (? IS NULL OR charger_id = ?)
-              {tx_condition}
-              AND (? IS NULL OR occurred_at >= ?)
-              AND (? IS NULL OR occurred_at <= ?)
-              {action_where}
-            ORDER BY occurred_at DESC, id DESC
-            LIMIT ?
-            """,
-            (*params, limit if limit is not None else -1),
-        ).fetchall()
+        rows = _diagnostics_queries.select_events_between(
+            connection, tx_condition=tx_condition, action_where=action_where,
+            params=params, limit=limit,
+        )
     finally:
         connection.close()
     rows.reverse()
@@ -139,17 +124,9 @@ def transaction_events(
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
     try:
-        return connection.execute(
-            """
-            SELECT id, received_at AS occurred_at, charger_id, 'ocpp' AS kind,
-                   action, direction, transaction_id, id_tag, payload_json AS payload
-            FROM events
-            WHERE transaction_id = ?
-            ORDER BY occurred_at ASC, id ASC
-            LIMIT ?
-            """,
-            (int(transaction_id), limit),
-        ).fetchall()
+        return _diagnostics_queries.select_transaction_events(
+            connection, int(transaction_id), limit,
+        )
     finally:
         connection.close()
 
