@@ -13,6 +13,7 @@ from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 from ocpp_csms.runtime import process_is_running
 from ocpp_csms.rfid.authorization import load_rfid_authorization
+from ocpp_csms._status_observation import derive_status as _observed_derive_status, operational_state as _observed_operational_state
 
 
 @dataclass
@@ -47,26 +48,12 @@ class ChargerStatus:
 
 
 def derive_status(status: str | None, error_code: str | None, info: str | None) -> str | None:
-    return 'EmergencyStop' if (status == 'Faulted' and error_code == 'InternalError' and info == 'EmergencyStop') else status
+    return _observed_derive_status(status, error_code, info)
 
 
 def operational_state(connectors: list[ConnectorStatus]) -> tuple[str, str]:
     """Customer availability and observed activity are independent."""
-    physical = [item for item in connectors if item.connector_id > 0]
-    availability = (
-        "available" if any(item.status == "Available" for item in physical)
-        else "unavailable" if physical and all(item.status in {
-            "Charging", "SuspendedEV", "SuspendedEVSE", "Preparing",
-            "Finishing", "Faulted", "Unavailable", "Reserved",
-        } for item in physical)
-        else "unknown"
-    )
-    activity = (
-        "active" if any(item.status in {"Charging", "SuspendedEV", "SuspendedEVSE"} for item in physical)
-        else "inactive" if physical and all(item.status in {"Available", "Unavailable", "Faulted"} for item in physical)
-        else "unknown"
-    )
-    return availability, activity
+    return _observed_operational_state(connectors)
 
 
 def _connect(database: Path) -> sqlite3.Connection:
