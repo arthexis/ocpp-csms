@@ -55,7 +55,7 @@ class RecordingRegistry:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("request", "error"), [
+@pytest.mark.parametrize(("control_request", "error"), [
     ({"command": "data_transfer", "vendor_id": ""}, "invalid_vendor_id"),
     ({"command": "reserve", "connector": False}, "invalid_connector"),
     ({"command": "cancel_reservation", "reservation_id": 0}, "invalid_reservation_id"),
@@ -74,23 +74,23 @@ class RecordingRegistry:
     ({"command": "clear_charging_profile", "id": -1}, "invalid_profile_id"),
     ({"command": "get_composite_schedule", "connector": -1}, "invalid_connector"),
 ])
-async def test_invalid_family_requests_do_not_send_ocpp(request, error):
+async def test_invalid_family_requests_do_not_send_ocpp(control_request, error):
     session = RecordingSession()
     registry = RecordingRegistry(session)
-    assert await dispatch_control(registry, request) == {"error": error}
+    assert await dispatch_control(registry, control_request) == {"error": error}
     assert session.calls == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("request", "method"), [
+@pytest.mark.parametrize(("control_request", "method"), [
     ({"command": "data_transfer", "vendor_id": "vendor"}, "data_transfer"),
     ({"command": "availability", "connector": 0, "type": "Operative"}, "change_availability"),
     ({"command": "rfid_version"}, "get_local_list_version"),
     ({"command": "set_charging_profile", "connector": 0, "profile": {}, "force": True}, "set_charging_profile"),
 ])
-async def test_family_success_preserves_response_envelope(request, method):
+async def test_family_success_preserves_response_envelope(control_request, method):
     session = RecordingSession()
-    result = await dispatch_control(RecordingRegistry(session), request)
+    result = await dispatch_control(RecordingRegistry(session), control_request)
     assert result["ok"] is True
     assert result["response"]["status"] == "Accepted"
     assert any(name == method for name, _, _ in session.calls)
