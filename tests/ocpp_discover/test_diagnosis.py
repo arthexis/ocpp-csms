@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from ocpp_discover import diagnosis, persistence
+from ocpp_discover.routed_http_policy import RoutedHttpPolicy
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 
 
@@ -73,14 +74,14 @@ def test_same_endpoint_is_not_a_contradiction(monkeypatch):
     assert diagnosis.observe_contradiction(expected, seconds=1) is None
 
 
-def _run_observer(monkeypatch, lines, *, expected=None):
+def _run_observer(monkeypatch, lines, *, expected=None, policy=None):
     process = FakeProcess(lines)
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_LOCAL_8888", "1")
     commands = []
     monkeypatch.setattr(diagnosis.shutil, "which", lambda name: "/usr/bin/tcpdump")
     monkeypatch.setattr(diagnosis.discover, "host_addresses", lambda: {"192.168.129.1", "192.168.50.1", "172.16.5.1"})
     monkeypatch.setattr(diagnosis.subprocess, "Popen", lambda command, **kwargs: commands.append(command) or process)
-    evidence = diagnosis.wait_for_discovery_evidence("enp7s0", expected=expected)
+    evidence = diagnosis.wait_for_discovery_evidence("enp7s0", expected=expected, routed_http_policy=policy)
     return evidence, commands[0], process
 
 
@@ -163,6 +164,15 @@ def test_first_contact_skips_ssh_and_tls_but_accepts_http(monkeypatch):
     ssh = "12:00:00.000000 IP 192.168.129.184.50001 > 192.168.129.1.22: Flags [S], seq 1\n"
     tls = "12:00:01.000000 IP 192.168.129.184.50002 > 192.168.129.1.443: Flags [S], seq 1\n"
     http = "12:00:02.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
-    evidence, command, _ = _run_observer(monkeypatch, [ssh, tls, http, http])
+    evidence, command, _ = _run_observer(monkeypatch, [ssh, tls, http, http], policy=RoutedHttpPolicy(True, "enp7s0"))
     assert evidence.capture == http + http
     assert "-p" in command
+
+
+def test_observer_legacy_env_never_suffices(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    line = "12:00:00.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
+    with pytest.raises(RuntimeError, match="passive_observer_stopped"):
+        _run_observer(monkeypatch, [line, line])
+    evidence, _, _ = _run_observer(monkeypatch, [line, line], policy=RoutedHttpPolicy(True, "enp7s0"))
+    assert evidence.capture == line + line

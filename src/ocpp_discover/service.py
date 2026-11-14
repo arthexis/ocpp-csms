@@ -6,7 +6,7 @@ import logging
 import time
 from pathlib import Path
 
-from ocpp_discover import diagnosis, first_contact as discover, handoff, reconcile
+from ocpp_discover import diagnosis, first_contact as discover, handoff, reconcile, routed_http_policy
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 
 _DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
@@ -59,9 +59,9 @@ def _observe_persistent(data_dir: str | Path, persistent_dir: str | Path, *, boo
     return _wait_for_recovery(data_dir, persistent_dir, receipt, diagnosis_seconds=diagnosis_seconds, timeout=validation_timeout)
 
 
-def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persistent_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float) -> dict[str, object]:
+def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persistent_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float, policy: routed_http_policy.RoutedHttpPolicy | None = None) -> dict[str, object]:
     """Wait silently for first charger evidence, prove it, and promote it to durable state."""
-    evidence = diagnosis.wait_for_discovery_evidence(interface)
+    evidence = diagnosis.wait_for_discovery_evidence(interface, routed_http_policy=policy)
     result = discover.run_discovery(
         data_dir=data_dir,
         state_dir=runtime_dir,
@@ -72,6 +72,7 @@ def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persis
         tcp_seconds=tcp_seconds,
         connect_timeout=connect_timeout,
         initial_evidence=evidence.capture,
+        routed_http_policy=policy,
     )
     receipt = getattr(result, "receipt", None)
     charger_id = getattr(result, "charger_id", None)
@@ -88,6 +89,7 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     leave it unset, so successful discovery/validation never terminates the service.
     """
     cycles = 0
+    policy = routed_http_policy.load_policy()
 
     if handoff.discovered_path(persistent_dir).exists():
         outcome = _observe_persistent(data_dir, persistent_dir, boot_timeout=boot_timeout, diagnosis_seconds=wait_interval, validation_timeout=connect_timeout)
@@ -95,7 +97,7 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
         retry_seconds = max(1.0, wait_interval)
         while True:
             try:
-                outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout)
+                outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout, policy=policy)
                 break
             except ValueError as exc:
                 reason = str(exc)

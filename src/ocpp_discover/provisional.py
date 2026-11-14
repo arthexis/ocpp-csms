@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 
 from ocpp_discover import discover, redirect
+from ocpp_discover.routed_http_policy import RoutedHttpPolicy
 
 
 @dataclass(frozen=True)
@@ -16,9 +17,9 @@ class LocalSynCandidate:
     listen_port: int
 
 
-def routed_http_enabled() -> bool:
-    """Routed HTTP interception is unsafe on shared networks; opt in explicitly."""
-    return os.environ.get("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80") == "1"
+def routed_http_enabled(interface: str, policy: RoutedHttpPolicy | None = None) -> bool:
+    """The legacy environment variable cannot authorize routed HTTP."""
+    return policy is not None and policy.authorizes(interface)
 
 
 def local_probe_enabled() -> bool:
@@ -26,7 +27,7 @@ def local_probe_enabled() -> bool:
     return os.environ.get("OCPP_DISCOVER_ALLOW_LOCAL_8888") == "1"
 
 
-def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> LocalSynCandidate | None:
+def local_syn_candidate(text: str, *, interface: str, listen_port: int, routed_http_policy: RoutedHttpPolicy | None = None) -> LocalSynCandidate | None:
     """Return one unambiguous supported plaintext endpoint, local or routed."""
     if not discover._INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
@@ -55,7 +56,7 @@ def local_syn_candidate(text: str, *, interface: str, listen_port: int) -> Local
         if destination in local_addresses:
             if destination_port != 8888 or not local_probe_enabled():
                 continue
-        elif destination_port != 80 or not routed_http_enabled():
+        elif destination_port != 80 or not routed_http_enabled(interface, routed_http_policy):
             continue
         if destination_port == listen_port:
             continue

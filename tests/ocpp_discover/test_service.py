@@ -135,3 +135,24 @@ def test_service_fails_closed_when_discovered_receipt_is_invalid(tmp_path, monke
     monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: pytest.fail("invalid durable state must not fall through to discovery"))
     with pytest.raises(RuntimeError, match="invalid_discovered_receipt"):
         service.run_service(data_dir=tmp_path / "data", runtime_dir=tmp_path / "runtime", persistent_dir=persistent, listen_port=9100, max_cycles=1)
+
+
+def test_service_loads_and_threads_disabled_policy(tmp_path, monkeypatch):
+    from ocpp_discover.routed_http_policy import RoutedHttpPolicy
+    observed = []
+    monkeypatch.setattr(service.routed_http_policy, "load_policy", lambda: RoutedHttpPolicy(False, "eth0"))
+    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface, **kw: observed.append(kw["routed_http_policy"]) or diagnosis.DiscoveryEvidence("candidate", "arp"))
+    monkeypatch.setattr(service.discover, "run_discovery", lambda **kw: observed.append(kw["routed_http_policy"]) or discovery_result())
+    monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args: None)
+    service.run_service(data_dir=tmp_path, persistent_dir=tmp_path / "persistent", max_cycles=1)
+    assert observed == [RoutedHttpPolicy(False, "eth0")] * 2
+
+
+def test_invalid_policy_fails_before_capture(tmp_path, monkeypatch):
+    from ocpp_discover.routed_http_policy import RoutedHttpPolicyError
+    def denied():
+        raise RoutedHttpPolicyError("invalid_policy")
+    monkeypatch.setattr(service.routed_http_policy, "load_policy", denied)
+    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda *args, **kw: pytest.fail("must not capture"))
+    with pytest.raises(RoutedHttpPolicyError):
+        service.run_service(data_dir=tmp_path, persistent_dir=tmp_path / "persistent", max_cycles=1)

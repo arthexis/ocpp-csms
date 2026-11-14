@@ -175,10 +175,12 @@ def run_discovery(*, initial_evidence: str, **kwargs):
 
     interface = str(kwargs.get("interface", "eth0"))
     listen_port = int(kwargs.get("listen_port", 9000))
+    policy = kwargs.pop("routed_http_policy", None)
     candidate = provisional.local_syn_candidate(
         initial_evidence,
         interface=interface,
         listen_port=listen_port,
+        routed_http_policy=policy,
     )
     if candidate is not None:
         return _run_local_syn_discovery(
