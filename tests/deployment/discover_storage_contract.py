@@ -122,7 +122,9 @@ def main() -> None:
         if not installed.is_file():
             raise AssertionError("installed Discover unit missing")
         actual = installed.read_text()
-        if actual != rendered:
+        # Ansible template output may add one terminal newline; unit semantics
+        # and all nonterminal bytes must still match exactly.
+        if actual.rstrip("\n") != rendered.rstrip("\n"):
             from difflib import unified_diff
             diff = "".join(unified_diff(
                 rendered.splitlines(keepends=True),
