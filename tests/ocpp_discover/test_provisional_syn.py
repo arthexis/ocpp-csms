@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from ocpp_discover import first_contact, provisional
+from ocpp_discover.routed_http_policy import RoutedHttpPolicy
 from ocpp_discover.redirect import RedirectReceipt, WebSocketRequest
 
 
@@ -131,7 +132,7 @@ def test_external_plaintext_syn_becomes_exact_scoped_candidate(monkeypatch):
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
     monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
     line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
-    candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000)
+    candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "eth0"))
     assert candidate.destination_ip == "198.18.0.1"
     assert "ip daddr 198.18.0.1 tcp dport 80 redirect to :9000" in provisional._ruleset(candidate)
 
@@ -256,9 +257,11 @@ def test_external_http_is_never_intercepted_by_default(monkeypatch):
 
 def test_routed_http_opt_in_requires_exact_value(monkeypatch):
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "true")
-    assert not provisional.routed_http_enabled()
+    assert not provisional.routed_http_enabled("eth0")
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
-    assert provisional.routed_http_enabled()
+    assert not provisional.routed_http_enabled("eth0")
+    assert provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "eth0"))
+    assert not provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "wlan0"))
 
 
 def test_same_charger_other_session_cannot_prove_capture(tmp_path):
@@ -291,3 +294,12 @@ def test_reused_source_port_is_ambiguous_even_with_fresh_ocpp(tmp_path):
     store.record_session("replacement", "CP-1", "192.168.129.182", 39812)
     store.record_ocpp("CP-1", "Heartbeat", {}, session_id="replacement")
     assert not first_contact._session_proven(tmp_path, "CP-1", "192.168.129.182", {39812}, 0)
+
+
+def test_routed_http_legacy_env_never_suffices(monkeypatch):
+    monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
+    syn = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
+    assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000) is None
+    assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "wlan0")) is None
+    assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "eth0")) is not None

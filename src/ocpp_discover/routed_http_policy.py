@@ -1,7 +1,7 @@
 """Offline contract for operator-authorized routed HTTP discovery.
 
-This module is intentionally NOT used by Discover's running service in B1.
-It cannot activate redirects, change nftables, or persist charger endpoints.
+B2-A supplies an explicit startup policy for first contact.
+It does not change firewall rules, services or persistent adaptations.
 """
 from __future__ import annotations
 
@@ -59,6 +59,11 @@ def load_policy(
     raises, so callers must fail closed rather than enable interception.
     """
     file = Path(path)
+    if file.exists() or file.is_symlink():
+        parent = os.stat(file.parent, follow_symlinks=False)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != owner_uid
+                or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory")
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         # Bind validation and the read to ONE descriptor. O_NOFOLLOW rejects

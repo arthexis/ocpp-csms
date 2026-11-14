@@ -33,7 +33,7 @@ def run_adapter(monkeypatch, *, initial="first\n", later="later\n", captures=1):
 
 def test_service_passes_initial_syn_into_discovery(tmp_path, monkeypatch):
     evidence = diagnosis.DiscoveryEvidence("candidate", SYN)
-    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface: evidence)
+    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface, **kwargs: evidence)
     calls = []
     monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or result())
     monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args, **kwargs: None)
@@ -56,7 +56,7 @@ def test_service_preserves_complete_qualified_arp_capture(tmp_path, monkeypatch)
     first = "12:00:00.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
     second = "12:00:01.000000 ARP, Request who-has 10.42.0.1 tell 10.42.0.50, length 28\n"
     evidence = diagnosis.DiscoveryEvidence("candidate", first + second)
-    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface: evidence)
+    monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface, **kwargs: evidence)
     calls = []
     monkeypatch.setattr(service.discover, "run_discovery", lambda **kwargs: calls.append(kwargs) or result())
     monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args, **kwargs: None)

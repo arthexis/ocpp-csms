@@ -222,3 +222,26 @@ def test_no_path_lstat_or_path_reopen():
     assert "stream.read(4097)" in source
     assert ".lstat(" not in source
     assert "file.open(" not in source
+
+
+def test_untrusted_policy_parent_rejected(tmp_path):
+    parent = tmp_path / "conf"
+    parent.mkdir()
+    path = parent / "policy.json"
+    path.write_text(json.dumps(payload()))
+    path.chmod(0o600)
+    parent.chmod(0o777)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_parent_symlink_rejected(tmp_path):
+    original = tmp_path / "original"
+    original.mkdir()
+    path = original / "policy.json"
+    path.write_text(json.dumps(payload()))
+    path.chmod(0o600)
+    link = tmp_path / "link"
+    link.symlink_to(original, target_is_directory=True)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(link / "policy.json", owner_uid=os.getuid())

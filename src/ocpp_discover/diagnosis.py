@@ -11,6 +11,7 @@ from typing import NamedTuple
 
 from ocpp_discover import discover, persistence, provisional, redirect
 from ocpp_discover.redirect import RedirectReceipt
+from ocpp_discover.routed_http_policy import RoutedHttpPolicy
 
 
 class Configuration(NamedTuple):
@@ -47,7 +48,7 @@ def inspect_configuration(
     return Configuration(configured_matches, redirect.table_exists())
 
 
-def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None) -> DiscoveryEvidence:
+def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None, routed_http_policy: RoutedHttpPolicy | None = None) -> DiscoveryEvidence:
     """Block until positive charger-side evidence appears, without mutating the host.
 
     First contact requires two matching plaintext SYN attempts within 30 seconds;
@@ -79,7 +80,7 @@ def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | N
                 if expected is None:
                     port = int(tcp.group("dst_port"))
                     destination = tcp.group("dst")
-                    supported = (port == 8888 and provisional.local_probe_enabled()) if destination in local_addresses else (port == 80 and provisional.routed_http_enabled())
+                    supported = (port == 8888 and provisional.local_probe_enabled()) if destination in local_addresses else (port == 80 and provisional.routed_http_enabled(interface, routed_http_policy))
                     if not supported or tcp.group("src") in local_addresses:
                         captured.pop()
                         continue
