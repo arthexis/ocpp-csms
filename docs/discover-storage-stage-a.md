@@ -69,3 +69,12 @@ The writer-started no-rollback guard remains unchanged.
 
 This CI gate does not certify real EV Ready traffic, connectivity across
 a reboot, routed HTTP opt-in, or any field integration.
+
+
+CI isolation refinement: GitHub-hosted runners already have an eth0 of
+unknown provenance. The fixture **must not** use or alter it. Instead,
+the CI-only playbook targets the unaddressed \`ocppci0\` dummy interface,
+with CSMS bound to loopback. A guarded environment variable is used only
+to compare the test-only Discover unit against the selected storage
+contract; it is never accepted on self-hosted runners. The product
+\`install.yml\` remains unchanged.

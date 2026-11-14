@@ -4,6 +4,8 @@
 - name: Stage A CI-only post-writer interruption
   hosts: all
   gather_facts: true
+  vars:
+    ocpp_csms_host: "127.0.0.1"
   tasks:
     - name: Refuse execution outside the isolated CI fixture
       ansible.builtin.assert:

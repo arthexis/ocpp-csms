@@ -304,9 +304,9 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           python3 -m pip install --user ansible-core
           sudo apt-get update
-          sudo apt-get install -y iproute2 nftables
+          sudo apt-get install -y python3-venv python3-pip iproute2 nftables tcpdump
 
-      - name: Run real Ansible/systemd fixture on unaddressed dummy eth0
+      - name: Run real Ansible/systemd fixture on isolated dummy ocppci0
         shell: bash
         run: bash tests/deployment/discover_systemd_lifecycle.sh
 

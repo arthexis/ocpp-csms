@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
 # CI-only real systemd/Ansible lifecycle on GitHub-hosted disposable VM.
-# Only a dummy unaddressed eth0 is used; no chargers or real interface.
+# Only a dummy unaddressed ocppci0 is used; no chargers or real interface.
 set -euo pipefail
 [[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]] || exit 2
 [[ "$(id -u)" != 0 ]] || exit 2
 fail() { echo "::error::$*" >&2; exit 1; }
-if ip link show dev eth0 >/dev/null 2>&1; then
-  fail "existing eth0 is not a disposable dummy; refusing to run"
+if ip link show dev ocppci0 >/dev/null 2>&1; then
+  fail "existing ocppci0 is not a disposable dummy; refusing to run"
 fi
 [[ ! -e /etc/systemd/system/ocpp-discover.service ]] ||
   fail "preexisting Discover unit; refusing nonfresh runner"
 repo="$(git rev-parse --show-toplevel)"
+export OCPP_STAGE_A_TEST_INTERFACE=ocppci0
 tmp="$(mktemp -d /tmp/ocpp-stage-a.XXXXXX)"
 cleanup() {
   sudo systemctl stop ocpp-discover.service >/dev/null 2>&1 || true
   sudo systemctl reset-failed ocpp-discover.service >/dev/null 2>&1 || true
-  sudo ip link del eth0 >/dev/null 2>&1 || true
+  sudo ip link del ocppci0 >/dev/null 2>&1 || true
   git -C "$repo" worktree remove --force "$tmp/new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 
-sudo ip link add eth0 type dummy
-sudo ip link set eth0 up
-[[ -z "$(ip -o -4 addr show dev eth0)" ]] || fail "dummy has IPv4 address"
+sudo ip link add ocppci0 type dummy
+sudo ip link set ocppci0 up
+[[ -z "$(ip -o -4 addr show dev ocppci0)" ]] || fail "dummy has IPv4 address"
 sudo nft -nn list ruleset >"$tmp/nft-before"
 
 schema_from_source() {
@@ -69,15 +70,15 @@ assert_active() {
     fail "Discover failed after startup"
 }
 
-# Install actual roles on disposable dummy eth0, then prove same-sha no-op.
-./deploy.sh
+# Install actual roles on disposable dummy ocppci0, then prove same-sha no-op.
+ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c local -e ocpp_stage_a_ci_fixture=true
 assert_active
 old_schema="$(schema_from_source src/ocpp_csms/schema.py)"
 [[ "$(csms_dir)" == "$HOME/ocpp-csms-data/schemas/$old_schema" ]] ||
   fail "initial schema mismatch"
 before="$(snapshot)"
 pid="$(discover_pid)"
-./deploy.sh
+ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c local -e ocpp_stage_a_ci_fixture=true
 assert_active
 [[ "$(discover_pid)" == "$pid" ]] || fail "Discover restarted in no-op redeploy"
 [[ "$(snapshot)" == "$before" ]] || fail "no-op modified Discover persistent state"
@@ -141,7 +142,7 @@ sudo systemctl reset-failed ocpp-discover.service || true
 [[ "$(snapshot)" == "$before" ]] || fail "negative restart changed persistent state"
 
 # Forward repair by the normal product installer at the candidate schema.
-(cd "$tmp/new" && ./deploy.sh)
+(cd "$tmp/new" && ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c local -e ocpp_stage_a_ci_fixture=true)
 [[ "$(csms_dir)" == "$HOME/ocpp-csms-data/schemas/$new_schema" ]] ||
   fail "forward repair changed CSMS schema unexpectedly"
 sudo systemctl is-active --quiet ocpp-discover.service || fail "Discover not restored"
@@ -152,4 +153,4 @@ sudo systemctl is-active --quiet ocpp-discover.service || fail "advanced Discove
 (cd "$tmp/new" && python3 tests/deployment/discover_storage_contract.py)
 [[ "$(snapshot)" == "$before" ]] || fail "forward repair changed durable state"
 assert_nft_unchanged
-echo "PASS: real Discover Ansible/systemd first install, restart, idempotence, old-schema fail-closed, postwriter fail-forward and persistent/network-state preservation on dummy CI eth0"
+echo "PASS: real Discover Ansible/systemd first install, restart, idempotence, old-schema fail-closed, postwriter fail-forward and persistent/network-state preservation on dummy CI ocppci0"

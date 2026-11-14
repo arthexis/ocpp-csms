@@ -45,6 +45,16 @@ def render_unit(selected: Path) -> str:
            "ocpp_csms_service_data_dir": str(selected)}
     for name, value in defaults.items():
         ctx[name] = jinja.from_string(value).render(ctx) if isinstance(value, str) else value
+    # A separate CI-only Ansible playbook targets an unaddressed dummy, never
+    # GitHub's existing physical-facing eth0. No override is available in
+    # ordinary deployment or on self-hosted runners.
+    ci_interface = os.environ.get("OCPP_STAGE_A_TEST_INTERFACE")
+    if ci_interface is not None:
+        if not (os.environ.get("GITHUB_ACTIONS") == "true"
+                and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+                and ci_interface == "ocppci0"):
+            raise AssertionError("unsafe CI interface override")
+        ctx["ocpp_discover_interface"] = ci_interface
     template = (REPO / "ansible/roles/ocpp_discover/templates/ocpp-discover.service.j2").read_text()
     return jinja.from_string(template).render(ctx)
 
