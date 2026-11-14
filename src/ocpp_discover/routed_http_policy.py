@@ -75,6 +75,12 @@ def load_policy(
         for position, component in enumerate(parts[:-1]):
             try:
                 child = os.open(component, directory_flags, dir_fd=descriptor)
+            except FileNotFoundError as exc:
+                # An uninstalled Discover has no policy directory. Preserve
+                # default-off only for that exact absent final parent.
+                if file == DEFAULT_POLICY_PATH and position == len(parts) - 2:
+                    return RoutedHttpPolicy(enabled=False)
+                raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory") from exc
             except OSError as exc:
                 raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory") from exc
             os.close(descriptor)
