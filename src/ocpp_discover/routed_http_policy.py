@@ -60,7 +60,7 @@ def load_policy(
     """
     file = Path(path)
     if file.exists() or file.is_symlink():
-        parent = file.parent.lstat()
+        parent = os.stat(file.parent, follow_symlinks=False)
         if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != owner_uid
                 or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
             raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory")
