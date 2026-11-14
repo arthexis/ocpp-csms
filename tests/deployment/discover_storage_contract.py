@@ -115,10 +115,22 @@ def main() -> None:
     if (ROOT / "ocpp-csms.sqlite3").exists():
         raise AssertionError("unexpected unversioned fallback database")
 
-    if Path("/sys/class/net/eth0").exists():
+    ci_interface = os.environ.get("OCPP_STAGE_A_TEST_INTERFACE")
+    interface_name = ci_interface if ci_interface else "eth0"
+    if (Path("/sys/class/net") / interface_name).exists():
         installed = Path("/etc/systemd/system/ocpp-discover.service")
-        if not installed.is_file() or installed.read_text() != rendered:
-            raise AssertionError("installed Discover unit differs from selected schema")
+        if not installed.is_file():
+            raise AssertionError("installed Discover unit missing")
+        actual = installed.read_text()
+        if actual != rendered:
+            from difflib import unified_diff
+            diff = "".join(unified_diff(
+                rendered.splitlines(keepends=True),
+                actual.splitlines(keepends=True),
+                fromfile="expected-selected-schema",
+                tofile="installed-discover-service",
+            ))
+            raise AssertionError("installed Discover unit differs from selected schema:\n" + diff)
         subprocess.run(["systemctl", "is-active", "--quiet", "ocpp-discover.service"], check=True)
         print(f"PASS: installed Discover and CSMS use {active}")
     else:
