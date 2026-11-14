@@ -24,6 +24,8 @@ before_data="$(active_data_dir)"
 test -d "$before_data" || die "cannot locate service storage directory"
 test -f "$before_data/ocpp-csms.sqlite3" || die "missing active SQLite database"
 
+python3 tests/deployment/discover_storage_contract.py
+
 # The same-commit no-op must preserve the service, release and actual
 # database bytes/identity; an application-owned archive is preserved too.
 db_identity="$(stat -c '%d:%i' "$before_data/ocpp-csms.sqlite3")"
@@ -35,6 +37,7 @@ archive_hash="$(sha256sum "$archive" | cut -d' ' -f1)"
 test "$(readlink -f "$current")" = "$before_release" || die "same commit switched release"
 test "$(pid)" = "$before_pid" || die "same commit restarted service"
 test "$(active_data_dir)" = "$before_data" || die "same schema changed data directory"
+python3 tests/deployment/discover_storage_contract.py
 test "$(stat -c '%d:%i' "$before_data/ocpp-csms.sqlite3")" = "$db_identity" || die "same schema replaced database"
 test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$archive_hash" || die "same schema changed archive"
 
@@ -43,6 +46,7 @@ test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$archive_hash" || die "same sc
 test "$(pid)" = "$before_pid" || die "stage-only interrupted service"
 test "$(readlink -f "$current")" = "$before_release" || die "stage-only switched release"
 test "$(stat -c '%d:%i' "$before_data/ocpp-csms.sqlite3")" = "$db_identity" || die "stage-only replaced database"
+python3 tests/deployment/discover_storage_contract.py
 
 # Argument validation must fail before invoking Ansible or interrupting the
 # running service. This is not a substitute for an injected Ansible failure.
