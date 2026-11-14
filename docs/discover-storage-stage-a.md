@@ -78,3 +78,11 @@ with CSMS bound to loopback. A guarded environment variable is used only
 to compare the test-only Discover unit against the selected storage
 contract; it is never accepted on self-hosted runners. The product
 \`install.yml\` remains unchanged.
+
+
+The CI firewall check compares the canonical JSON structure of live
+nftables tables, chains and rules, ignoring volatile packet/byte counters
+and handle identifiers from the disposable runner. It separately asserts
+that \`table ip ocpp_field_redirect\` never exists during Stage A. A
+structural rule change is a test failure; dynamic traffic counters alone
+are not.

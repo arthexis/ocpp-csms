@@ -25,7 +25,28 @@ trap cleanup EXIT
 sudo ip link add ocppci0 type dummy
 sudo ip link set ocppci0 up
 [[ -z "$(ip -o -4 addr show dev ocppci0)" ]] || fail "dummy has IPv4 address"
-sudo nft -nn list ruleset >"$tmp/nft-before"
+# The GitHub runner's iptables-nft counters change naturally as it downloads
+# packages; compare deterministic rule structure, not packet/byte counters.
+normalized_ruleset() {
+  sudo nft -j -nn list ruleset | python3 -c '
+import json,sys
+def stable(x):
+    if isinstance(x, list):
+        return [stable(item) for item in x]
+    if isinstance(x, dict):
+        return {key: stable(value) for key,value in x.items()
+                if key not in ("packets", "bytes", "handle")}
+    return x
+print(json.dumps(stable(json.load(sys.stdin)), sort_keys=True, separators=(",", ":")))
+'
+}
+assert_no_discover_redirect() {
+  if sudo nft list table ip ocpp_field_redirect >/dev/null 2>&1; then
+    fail "Discover installed an unexpected live redirect table"
+  fi
+}
+assert_no_discover_redirect
+normalized_ruleset >"$tmp/nft-before"
 
 schema_from_source() {
   python3 - "$1" <<'PY'
@@ -57,8 +78,10 @@ for path in sorted(paths):
 PY
 }
 assert_nft_unchanged() {
-  sudo nft -nn list ruleset >"$tmp/nft-after"
-  cmp "$tmp/nft-before" "$tmp/nft-after" || fail "kernel nftables changes detected"
+  assert_no_discover_redirect
+  normalized_ruleset >"$tmp/nft-after"
+  diff -u "$tmp/nft-before" "$tmp/nft-after" ||
+    fail "kernel nftables rule structure changed in isolated CI"
 }
 assert_active() {
   sudo systemctl is-active --quiet ocpp-csms.service || fail "CSMS is inactive"
