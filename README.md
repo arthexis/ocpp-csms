@@ -19,7 +19,7 @@ ocpp-csms status
 ocpp-csms --help
 ```
 
-Installation uses `ansible/playbooks/install.yml`; Discover is installed when `eth0` exists. Public WSS exposure is **a separate authenticated deployment step**. See [operations](docs/operations.md#installation-exposure-and-enrollment) before exposing a port or enrolling a production charger.
+Installation uses `ansible/playbooks/install.yml`; Discover is installed when `eth0` exists, but requires the **active schema-selected CSMS data directory** and read-only startup validation against the running CSMS writer. An installed or active Discover service does not imply routed HTTP is enabled, that an endpoint adaptation was proven, or that a physical charger is healthy. See [Discover operations](docs/operations.md#ocpp-discover). Public WSS exposure is **a separate authenticated deployment step**. See [operations](docs/operations.md#installation-exposure-and-enrollment) before exposing a port or enrolling a production charger.
 
 ## First diagnostics
 
