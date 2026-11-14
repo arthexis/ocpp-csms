@@ -3,7 +3,8 @@
 ## Scope and storage authority
 
 Discover inherits `ocpp_csms_service_data_dir` from the Ansible CSMS
-storage selection. It must use the **running CSMS writer's** versioned
+candidate storage selection, while the *active* CSMS directory is determined
+independently from systemd MainPID, `/proc` argv and the installed unit. It must use the **running CSMS writer's** versioned
 directory, not the unversioned storage parent or a hardcoded `schemas/8`.
 Before modifying Discover's stable command, persistent integration or
 systemd unit, its role executes a read-only storage preflight. The installed
@@ -81,3 +82,5 @@ transaction history, production firewall rules, or production
 deployments are implied by Stage A acceptance.
 
 SQLite WAL checkpoints may change database file bytes during normal restart. Moreover, CSMS deliberately appends `server_started` and `server_stopped` audit rows to `runtime_events`. The pre-writer fixture requires the **same SQLite inode**, a successful read-only `integrity_check`, unchanged schema/version, **every prior row unchanged** and **every non-runtime-events table identical**. Only new, higher-ID startup/shutdown audit rows may appear; transaction, event, source identity and previously recorded runtime rows cannot change.
+
+A prepared-but-unused candidate `schemas/9` is **not** active merely because `storage-plan` selects `action=reuse`. The separate read-only `ocpp_csms.active_storage` probe must establish that the running CSMS MainPID and installed systemd unit agree on the previous schema path; existing but inactive/uninspectable services fail closed. This prevents skipping Discover quiescence on retry after a pre-writer fault. The deterministic candidate schema plan remains unchanged.

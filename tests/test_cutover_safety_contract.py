@@ -63,3 +63,15 @@ def test_recovery_only_restores_discover_after_old_csms_and_before_writer():
     restore = restore.split("- name: Report unsuccessful pre-activation handoff", 1)[0]
     assert "ocpp_csms_discover_was_active | default(false) | bool" in restore
     assert "ocpp_csms_current_state.stat.islnk | default(false)" in restore
+
+
+def test_prepared_candidate_is_not_live_storage_authority():
+    storage = (ROLE / "tasks/storage_plan.yml").read_text()
+    assert "python" in storage and "ocpp_csms.active_storage" in storage
+    assert storage.index("Resolve actual active CSMS writer directory") < storage.index(
+        "Capture active storage directory for preflight and handoff"
+    )
+    assert "ocpp_csms_live_storage_info.active" in storage
+    assert "ocpp_csms_storage_selection.active | default" not in storage
+    cutover = (ROLE / "tasks/cutover.yml").read_text()
+    assert "ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target" in cutover

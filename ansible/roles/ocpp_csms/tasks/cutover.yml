@@ -116,8 +116,9 @@
       ansible.builtin.assert:
         that:
           - ocpp_csms_storage_selection.action in ['create', 'reuse']
-          - ocpp_csms_storage_selection.action == 'reuse' or
-            ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+          - ocpp_csms_live_storage_info.active is none or
+            ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target or
+            ocpp_csms_storage_selection.action == 'reuse'
         fail_msg: Storage handoff has an invalid active/candidate selection.
 
     # Verify the already prepared candidate while all writers are stopped.

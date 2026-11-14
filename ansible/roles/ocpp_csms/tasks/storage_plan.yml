@@ -16,12 +16,32 @@
   ansible.builtin.set_fact:
     ocpp_csms_storage_selection: "{{ ocpp_csms_storage_plan.stdout | from_json }}"
 
-# The selected current-schema target is the only candidate. Historical databases
-# are never opened or migrated by storage planning.
+# A prepared candidate can be reused without being the active writer.
+# Only the live systemd MainPID and installed unit establish active storage.
+# A prepared schema directory is only a candidate; its existence does not
+# make it active. The running writer and its installed unit must agree.
+# Fail closed if an existing service cannot be inspected unambiguously.
+- name: Resolve actual active CSMS writer directory independently of candidate
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_csms_release_venv }}/bin/python"
+      - -m
+      - ocpp_csms.active_storage
+      - --service
+      - "{{ ocpp_csms_service_name }}"
+      - --storage-root
+      - "{{ ocpp_csms_data_dir }}"
+  register: ocpp_csms_live_storage
+  changed_when: false
+
+- name: Capture actual live writer storage for cutover
+  ansible.builtin.set_fact:
+    ocpp_csms_live_storage_info: "{{ ocpp_csms_live_storage.stdout | from_json }}"
+
 - name: Capture active storage directory for preflight and handoff
   ansible.builtin.set_fact:
     ocpp_csms_active_data_dir: >-
-      {{ ocpp_csms_storage_selection.active | default(ocpp_csms_data_dir, true) }}
+      {{ ocpp_csms_live_storage_info.active | default(ocpp_csms_data_dir, true) }}
 
 - name: Assert new schema preparation never reuses active storage
   ansible.builtin.assert:
