@@ -1,0 +1,37 @@
+---
+# Test-only real installation, on a disposable GitHub-hosted VM with its
+# own unaddressed dummy interface. Never use the runner's existing eth0.
+- name: Real Stage A CSMS/Discover lifecycle on disposable dummy interface
+  hosts: all
+  gather_facts: true
+  vars:
+    ocpp_csms_host: "127.0.0.1"
+  tasks:
+    - name: Require an explicitly authorized CI-only execution
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'GITHUB_ACTIONS') == 'true'
+          - lookup('ansible.builtin.env', 'RUNNER_ENVIRONMENT') == 'github-hosted'
+          - ocpp_stage_a_ci_fixture | default(false) | bool
+        fail_msg: Stage A lifecycle is restricted to a disposable CI VM.
+
+    - name: Inspect isolated dummy interface
+      ansible.builtin.stat:
+        path: /sys/class/net/ocppci0
+      register: ci_dummy_interface
+
+    - name: Require dedicated dummy interface before either role
+      ansible.builtin.assert:
+        that:
+          - ci_dummy_interface.stat.exists
+        fail_msg: CI dummy interface is missing; refusing any deployment.
+
+    - name: Converge real CSMS role with loopback-only listener
+      ansible.builtin.include_role:
+        name: ocpp_csms
+
+    - name: Converge real Discover role on isolated dummy interface
+      ansible.builtin.include_role:
+        name: ocpp_discover
+      vars:
+        ocpp_discover_interface: ocppci0

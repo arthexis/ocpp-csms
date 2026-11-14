@@ -6,6 +6,7 @@
       - ocpp_discover_interface | length > 0
       - ocpp_discover_port | int >= 1
       - ocpp_discover_port | int <= 65535
+      - ocpp_csms_service_data_dir is defined
     fail_msg: >-
       OCPP Discover requires a Debian-family appliance with a valid charger-facing
       interface and listener port.
@@ -51,6 +52,15 @@
       OCPP Discover command is missing from the active CSMS release at
       {{ ocpp_discover_runtime_command }}.
 
+- name: Assert Discover follows the selected CSMS service storage
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_service_data_dir is defined
+      - ocpp_discover_data_dir == ocpp_csms_service_data_dir
+    fail_msg: >-
+      Discover must use the active CSMS schema-selected data directory.
+      Converge the ocpp_csms role first; do not supply an independent Discover data path.
+
 - name: Inspect shared OCPP CSMS data directory
   ansible.builtin.stat:
     path: "{{ ocpp_discover_data_dir }}"
@@ -64,6 +74,16 @@
     fail_msg: >-
       OCPP Discover requires the CSMS data directory at
       {{ ocpp_discover_data_dir }}. Converge the ocpp_csms role first.
+
+- name: Verify running CSMS storage and read-only evidence database before Discover mutation
+  ansible.builtin.command:
+    argv:
+      - "{{ ocpp_discover_python }}"
+      - -m
+      - ocpp_discover.storage_contract
+      - --data-dir
+      - "{{ ocpp_discover_data_dir }}"
+  changed_when: false
 
 - name: Install stable OCPP Discover command
   become: true
