@@ -56,6 +56,8 @@ PY
   old_identity="$(stat -c '%d:%i:%s' "$old_db")"
   old_hash="$(sha256sum "$old_db" | cut -d' ' -f1)"
   ./deploy.sh
+  # Read-only Stage A integration of the installed writer and rendered Discover unit.
+  python3 tests/deployment/discover_storage_contract.py
   test -f "$new_db"
   test "$(stat -c '%d:%i:%s' "$old_db")" = "$old_identity"
   test "$(sha256sum "$old_db" | cut -d' ' -f1)" = "$old_hash"
@@ -173,6 +175,7 @@ test "$snapshot_before" = "$snapshot_after" || {
   echo "::error::Same-schema upgrade changed export/v1 source_id, cursor, or durable events" >&2
   exit 1
 }
+python3 tests/deployment/discover_storage_contract.py
 echo "PASS: same-schema upgrade preserves SQLite WAL/integrity, allocator, transactions, source_id, cursor and events"
 sudo systemctl is-active --quiet ocpp-csms.service
 sudo systemctl is-enabled --quiet ocpp-csms.service

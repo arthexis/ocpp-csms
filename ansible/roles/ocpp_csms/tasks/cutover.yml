@@ -58,6 +58,51 @@
       changed_when: false
       when: ocpp_csms_timing_file is defined
 
+    # A running Discover process may observe the retiring database. Stop it
+    # only for effective schema changes, before the old writer is stopped.
+    - name: Check whether Discover is running before schema switch
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - ocpp-discover.service
+      register: ocpp_csms_discover_before_switch
+      changed_when: false
+      failed_when: false
+      when: ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+
+    - name: Remember active Discover for pre-writer recovery
+      ansible.builtin.set_fact:
+        ocpp_csms_discover_was_active: "{{ (ocpp_csms_discover_before_switch.rc | default(1)) == 0 }}"
+      when: ocpp_csms_active_data_dir != ocpp_csms_storage_selection.target
+
+    - name: Quiesce Discover before changing CSMS schema
+      become: true
+      ansible.builtin.systemd_service:
+        name: ocpp-discover.service
+        state: stopped
+      when: ocpp_csms_discover_was_active | default(false) | bool
+
+    - name: Inspect Discover after quiescence
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - --quiet
+          - ocpp-discover.service
+      register: ocpp_csms_discover_stopped
+      changed_when: false
+      failed_when: false
+      when: ocpp_csms_discover_was_active | default(false) | bool
+
+    - name: Refuse writer handoff while Discover remains active
+      ansible.builtin.assert:
+        that:
+          - ocpp_csms_discover_stopped.rc != 0
+        fail_msg: Discover remained active; refusing schema handoff.
+      when: ocpp_csms_discover_was_active | default(false) | bool
+
     - name: Stop existing OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -251,6 +296,18 @@
         enabled: true
         state: started
       when:
+        - ocpp_csms_current_state.stat.islnk | default(false)
+        - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    # The rescue's first assertion prevents this after candidate writer start.
+    # Only restore the old Discover process after the previous CSMS is running.
+    - name: Restore prior Discover after safe pre-writer CSMS recovery
+      become: true
+      ansible.builtin.systemd_service:
+        name: ocpp-discover.service
+        state: started
+      when:
+        - ocpp_csms_discover_was_active | default(false) | bool
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
 
