@@ -57,7 +57,7 @@ The fixture proves real systemd installation, initial activation,
 `ExecStartPre`, restart, idempotent reconvergence and selected data-dir.
 It injects a failure **inside cutover, after Discover quiescence but
 before writer start**, and verifies actual restoration of **both**
-services, the old schema, CSMS release/systemd unit, SQLite inode/hash
+services, the old schema, CSMS release/systemd unit, SQLite inode, integrity and logical-row snapshot
 and Discover receipts. Separately, a failure **after the new writer
 starts but before Discover convergence** verifies that Discover stays
 stopped, the obsolete unit fails at `ExecStartPre`, and managed
@@ -79,3 +79,5 @@ opt-in/default-off, and Stage B/C remain separate acceptance stages.
 No changes to OCPP wire semantics, SQLite v8, source identities,
 transaction history, production firewall rules, or production
 deployments are implied by Stage A acceptance.
+
+SQLite is in WAL mode: a clean writer stop/restart can checkpoint WAL pages and change the main database file's byte hash without changing logical records. The pre-writer fixture therefore checks the **same database inode**, read-only `PRAGMA integrity_check`, and a digest of the complete logical SQL dump before/after recovery; the physical byte hash is not a sound no-write invariant across WAL checkpoints.

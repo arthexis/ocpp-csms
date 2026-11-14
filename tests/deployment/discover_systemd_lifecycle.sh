@@ -66,6 +66,24 @@ csms_dir() {
     grep -oE -- '--data-dir[ =][^ ;}]+' | head -1 | sed -E 's/^--data-dir[ =]//'
 }
 discover_pid() { sudo systemctl show ocpp-discover.service -p MainPID --value; }
+sqlite_logical_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+from pathlib import Path
+import sqlite3
+import sys
+database = Path(sys.argv[1]).resolve(strict=True)
+connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=5)
+try:
+    connection.execute("PRAGMA query_only=ON")
+    if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise SystemExit("SQLite integrity_check failed")
+    snapshot = "\n".join(connection.iterdump()).encode("utf-8")
+    print(hashlib.sha256(snapshot).hexdigest())
+finally:
+    connection.close()
+PY
+}
 snapshot() {
   sudo python3 - <<'PY'
 from hashlib import sha256
@@ -144,7 +162,7 @@ old_csms_unit="$(sudo sha256sum /etc/systemd/system/ocpp-csms.service | cut -d' 
 old_discover_unit="$(sudo sha256sum /etc/systemd/system/ocpp-discover.service | cut -d' ' -f1)"
 old_db="$HOME/ocpp-csms-data/schemas/$old_schema/ocpp-csms.sqlite3"
 old_db_inode="$(stat -c '%d:%i' "$old_db")"
-old_db_hash="$(sha256sum "$old_db" | cut -d' ' -f1)"
+old_db_logical="$(sqlite_logical_snapshot "$old_db")"
 # Both managed services must be healthy before this fault is injected.
 assert_active
 git worktree add --detach "$tmp/pre" "$(git -C "$tmp/new" rev-parse HEAD)"
@@ -190,11 +208,11 @@ assert_active
   fail "pre-writer recovery changed the old Discover unit"
 [[ "$(stat -c '%d:%i' "$old_db")" == "$old_db_inode" ]] ||
   fail "pre-writer recovery replaced the old SQLite database"
-[[ "$(sha256sum "$old_db" | cut -d' ' -f1)" == "$old_db_hash" ]] ||
-  fail "pre-writer recovery modified the old SQLite database"
+[[ "$(sqlite_logical_snapshot "$old_db")" == "$old_db_logical" ]] ||
+  fail "pre-writer recovery changed SQLite logical contents or integrity"
 [[ "$(snapshot)" == "$before" ]] || fail "pre-writer recovery modified Discover receipts"
 assert_nft_unchanged
-echo "PASS: pre-writer fault after active Discover quiesce restores CSMS and Discover, old schema, SQLite inode/hash, receipts and nftables"
+echo "PASS: pre-writer fault after active Discover quiesce restores CSMS and Discover, old schema, SQLite inode/logical contents, receipts and nftables"
 
 # Deliberately fail between successful CSMS writer handoff and Discover role.
 if (cd "$tmp/new" && ansible-playbook ansible/playbooks/ci-discover-postwriter.yml \
