@@ -1,0 +1,22 @@
+---
+# Disposable GitHub-hosted fixture: execute the real CSMS handoff, then inject
+# a failure *before* Discover convergence, without modifying product playbooks.
+- name: Stage A CI-only post-writer interruption
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Refuse execution outside the isolated CI fixture
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'GITHUB_ACTIONS') == 'true'
+          - lookup('ansible.builtin.env', 'RUNNER_ENVIRONMENT') == 'github-hosted'
+          - ocpp_stage_a_ci_fixture | default(false) | bool
+        fail_msg: Stage A fixture is restricted to an explicitly gated CI VM.
+
+    - name: Perform real CSMS-only schema handoff
+      ansible.builtin.include_role:
+        name: ocpp_csms
+
+    - name: Inject post-writer failure before Discover convergence
+      ansible.builtin.fail:
+        msg: CI_STAGE_A_POST_WRITER_BOUNDARY

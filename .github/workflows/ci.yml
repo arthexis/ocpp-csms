@@ -284,6 +284,36 @@ jobs:
         run: sudo journalctl -u ocpp-csms.service --no-pager -n 100 || true
 
 
+  discover_systemd:
+    name: Discover real systemd and Ansible isolated lifecycle
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install disposable runner prerequisites
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          python3 -m pip install --user ansible-core
+          sudo apt-get update
+          sudo apt-get install -y iproute2 nftables
+
+      - name: Run real Ansible/systemd fixture on unaddressed dummy eth0
+        shell: bash
+        run: bash tests/deployment/discover_systemd_lifecycle.sh
+
+      - name: Inspect isolated service logs on failure
+        if: failure()
+        run: sudo journalctl -u ocpp-csms.service -u ocpp-discover.service --no-pager -n 120 || true
+
   ci:
     name: CI
     needs:
@@ -294,6 +324,7 @@ jobs:
       - ansible
       - ansible_integration
       - ansible_schema_advance
+      - discover_systemd
     if: always()
     runs-on: ubuntu-latest
 
@@ -309,6 +340,7 @@ jobs:
           ANSIBLE_RESULT: ${{ needs.ansible.result }}
           ANSIBLE_INTEGRATION_RESULT: ${{ needs.ansible_integration.result }}
           ANSIBLE_SCHEMA_ADVANCE_RESULT: ${{ needs.ansible_schema_advance.result }}
+          DISCOVER_SYSTEMD_RESULT: ${{ needs.discover_systemd.result }}
         run: |
           set -euo pipefail
 
@@ -342,6 +374,11 @@ jobs:
 
           if [[ "$ANSIBLE_SCHEMA_ADVANCE_RESULT" != "success" ]]; then
             echo "Schema isolation and downgrade protection did not succeed: $ANSIBLE_SCHEMA_ADVANCE_RESULT"
+            exit 1
+          fi
+
+          if [[ "$DISCOVER_SYSTEMD_RESULT" != "success" ]]; then
+            echo "Isolated Discover systemd lifecycle failed: $DISCOVER_SYSTEMD_RESULT"
             exit 1
           fi
 

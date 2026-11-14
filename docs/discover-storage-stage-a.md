@@ -45,3 +45,27 @@ the installed unit and its active state. Full field acceptance is separate.
 
 Stage B/C, routed HTTP opt-in (default off), nftables rules, OCPP wire
 semantics, SQLite v8, source identity and customer transactions are unchanged.
+
+
+## Real disposable systemd/Ansible Stage A gate
+
+The CI-only \`discover_systemd\` job runs on a fresh GitHub-hosted VM.
+Its fixture refuses existing eth0 or installed Discover, creates a Linux
+dummy eth0 with no address or peer, and installs the **actual product roles**
+with systemd. It checks successful first start, idempotent redeploy, real
+restart, persistent receipt/configuration preservation and unchanged **live**
+nftables ruleset. The runner is discarded after CI; no field appliance,
+real network connection, or physical charger is accessed.
+
+A test-only playbook executes the CSMS role on a temporary schema+1
+commit, deliberately fails after its real writer handoff, and does **not**
+converge the Discover role. Stage A quiesces a previously active Discover
+before the old schema writer stops; the test checks that the old Discover
+remains stopped and its stale systemd unit fails ExecStartPre. A subsequent
+normal managed candidate deploy repairs forward and validates the updated
+Discover unit and restart. Failed pre-writer CSMS handoffs restore the
+previously running Discover only after the old CSMS service is restored.
+The writer-started no-rollback guard remains unchanged.
+
+This CI gate does not certify real EV Ready traffic, connectivity across
+a reboot, routed HTTP opt-in, or any field integration.
