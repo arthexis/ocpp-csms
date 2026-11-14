@@ -59,18 +59,31 @@ def load_policy(
     raises, so callers must fail closed rather than enable interception.
     """
     file = Path(path)
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
-        info = file.lstat()
+        # Bind validation and the read to ONE descriptor. O_NOFOLLOW rejects
+        # symlink substitution immediately before open; fstat authenticates
+        # precisely the inode supplying the JSON, not a prior pathname lookup.
+        descriptor = os.open(file, flags)
     except FileNotFoundError:
         return RoutedHttpPolicy(enabled=False)
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid:
-        raise RoutedHttpPolicyError("untrusted_routed_http_policy_file")
-    if stat.S_IMODE(info.st_mode) != 0o600:
-        raise RoutedHttpPolicyError("insecure_routed_http_policy_permissions")
-    if info.st_size > 4096:
-        raise RoutedHttpPolicyError("oversized_routed_http_policy")
+    except OSError as exc:
+        raise RoutedHttpPolicyError("untrusted_routed_http_policy_file") from exc
+
     try:
-        # Fail closed on duplicate keys, which JSON normally silently accepts.
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid:
+                raise RoutedHttpPolicyError("untrusted_routed_http_policy_file")
+            if stat.S_IMODE(info.st_mode) != 0o600:
+                raise RoutedHttpPolicyError("insecure_routed_http_policy_permissions")
+            if info.st_size > 4096:
+                raise RoutedHttpPolicyError("oversized_routed_http_policy")
+            # Do not trust st_size alone: a concurrent writer may grow the
+            # file after fstat. Never buffer more than the bounded 4097 bytes.
+            raw = stream.read(4097)
+        if len(raw) > 4096:
+            raise RoutedHttpPolicyError("oversized_routed_http_policy")
         def strict_pairs(pairs):
             output = {}
             for key, value in pairs:
@@ -78,9 +91,7 @@ def load_policy(
                     raise RoutedHttpPolicyError("duplicate_routed_http_policy_key")
                 output[key] = value
             return output
-
-        with file.open("r", encoding="utf-8") as stream:
-            payload = json.load(stream, object_pairs_hook=strict_pairs)
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=strict_pairs)
     except (UnicodeError, OSError, json.JSONDecodeError) as exc:
         raise RoutedHttpPolicyError("unreadable_routed_http_policy") from exc
     return parse_policy(payload)

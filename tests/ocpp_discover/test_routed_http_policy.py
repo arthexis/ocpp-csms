@@ -116,3 +116,109 @@ def test_source_has_no_host_mutating_operations():
     assert "nft " not in source
     assert "os.replace" not in source
     assert "mkdir(" not in source
+
+
+def test_pre_open_substitution_with_symlink_fails_closed(tmp_path, monkeypatch):
+    """The open must reject the path after an attacker swaps it to a link."""
+    from unittest.mock import patch
+    path = tmp_path / "config"
+    target = tmp_path / "target"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    target.write_text(json.dumps(payload()))
+    target.chmod(0o600)
+    real_open = os.open
+
+    def replace_then_open(candidate, flags, *args, **kwargs):
+        if os.fspath(candidate) == os.fspath(path):
+            path.unlink()
+            path.symlink_to(target)
+        return real_open(candidate, flags, *args, **kwargs)
+
+    with patch.object(policy.os, "open", side_effect=replace_then_open):
+        with pytest.raises(policy.RoutedHttpPolicyError, match="untrusted"):
+            policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_path_replacement_after_open_never_reads_new_file(tmp_path):
+    """A verified descriptor must not be changed by a subsequent path swap."""
+    from unittest.mock import patch
+    path = tmp_path / "config"
+    substitute = tmp_path / "substitute"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    substitute.write_text(json.dumps(payload()))
+    substitute.chmod(0o600)
+    real_open = os.open
+    calls = []
+
+    def replace_after_open(candidate, flags, *args, **kwargs):
+        fd = real_open(candidate, flags, *args, **kwargs)
+        calls.append(os.fspath(candidate))
+        if os.fspath(candidate) == os.fspath(path):
+            path.unlink()
+            path.symlink_to(substitute)
+        return fd
+
+    with patch.object(policy.os, "open", side_effect=replace_after_open):
+        result = policy.load_policy(path, owner_uid=os.getuid())
+    assert not result.enabled
+    assert not result.authorizes("eth0")
+    assert calls == [os.fspath(path)]
+    assert path.is_symlink()
+
+
+def test_verified_descriptor_catches_post_open_mode_swap(tmp_path):
+    """Changes after open but before fstat must be checked on the descriptor."""
+    from unittest.mock import patch
+    path = tmp_path / "config"
+    path.write_text(json.dumps(payload()))
+    path.chmod(0o600)
+    real_open = os.open
+
+    def change_mode(candidate, flags, *args, **kwargs):
+        fd = real_open(candidate, flags, *args, **kwargs)
+        os.fchmod(fd, 0o644)
+        return fd
+
+    with patch.object(policy.os, "open", side_effect=change_mode):
+        with pytest.raises(policy.RoutedHttpPolicyError, match="permissions"):
+            policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_post_open_growth_exceeding_limit_is_rejected(tmp_path):
+    from unittest.mock import patch
+    path = tmp_path / "config"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    real_open = os.open
+    real_fstat = os.fstat
+
+    def grow_after_stat(fd):
+        info = real_fstat(fd)
+        with path.open("ab") as stream:
+            stream.write(b" " * 5000)
+        return info
+
+    with patch.object(policy.os, "open", side_effect=real_open):
+        with patch.object(policy.os, "fstat", side_effect=grow_after_stat):
+            with pytest.raises(policy.RoutedHttpPolicyError, match="oversized"):
+                policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_fifo_is_rejected_without_blocking(tmp_path):
+    import stat
+    path = tmp_path / "fifo"
+    os.mkfifo(path, 0o600)
+    path.chmod(0o600)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="untrusted"):
+        policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_no_path_lstat_or_path_reopen():
+    source = Path(policy.__file__).read_text()
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "stream.read(4097)" in source
+    assert ".lstat(" not in source
+    assert "file.open(" not in source
