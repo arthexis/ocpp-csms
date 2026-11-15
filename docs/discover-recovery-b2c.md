@@ -21,6 +21,49 @@ durable recovery journal or authorization capability is created by B2-C.
 The classifier treats ownership evidence as an *input*, not as a newly
 invented proof. It never grants permission to add, replace or remove rules.
 
+## Canonical semantic adaptation identity v1 (specification, not code)
+
+An Artifact.digest represents SHA-256 of the **same normalized redirect
+scope**, not SHA-256 of the different raw byte encodings of an nftables
+table, a configuration fragment and a JSON receipt. Before setting
+ownership=owned, a future independently trusted read-only observer must
+verify that it controls the **entire exact rule scope** and that no extra
+or contradictory rules or unknown ownership are present. Digest agreement
+never substitutes for this ownership check.
+
+For future interoperable implementations, scope v1 is the following
+typed record, normalized by parsing each representation into the same
+semantic fields:
+
+- version: integer 1
+- family: literal string ip
+- table: literal string ocpp_field_redirect
+- ingress_interface: exact Linux interface name (iifname)
+- source_ipv4: canonical IPv4 source (ip saddr)
+- destination_ipv4: deduplicated ascending numeric IPv4 array (ip daddr)
+- tcp_destination_port: integer original destination TCP port (tcp dport)
+- redirect_port: integer local TCP redirect port (redirect to :port)
+
+The future observer must reject absent/ambiguous fields, unexpected
+additional rules, invalid IPs/ports, differing scopes and any unverified
+ownership. If implemented later, the digest serialization is UTF-8 JSON
+with precisely those keys, keys sorted lexicographically, no insignificant
+whitespace, standard decimal integers and canonical dotted-quad IPv4
+addresses; hash those serialized bytes. **This patch neither computes
+nor verifies such hashes**, and it does not mint trust or capabilities.
+Host/path, charger ID, WebSocket identity and proof of a fresh OCPP
+session are not present in the live nftables rule and **cannot** be inferred
+from this digest. They require separate trusted evidence and session
+correlation before any future field promotion.
+
+A known Origin.SYNTHETIC is UNCERTAIN/OPERATOR_REQUIRED, never
+PERSISTENT/PRESERVE in Phase.NONE or Phase.COMPLETE, even when all
+three artifacts are labeled owned with identical digests. Historical
+Origin.UNKNOWN retains the read-only preservation classification only
+when independent ownership and scope consistency have already been
+established; that classification is **not** permission to activate or
+persist a field adaptation.
+
 The optional phase is also externally supplied: none, preparing,
 provisional, proven, committing, reconciling, complete or unknown.
 No journal is written in this stage. The interruption label (SIGKILL,
@@ -34,7 +77,7 @@ only to describe injected test snapshots.
 | absent | All artifacts absent, no active phase | Observe only |
 | provisional | Only live table owned; explicit provisional phase | Operator required; do not auto-delete |
 | proven | Only live table owned; explicit proven phase plus field session evidence | Operator required; never auto-persist |
-| persistent | Live table, fragment and receipt independently owned, matching digest; no intermediate phase | Preserve |
+| persistent | Three independently owned artifacts with matching **canonical semantic scope** digest, no intermediate phase, and origin **not explicitly synthetic** | Preserve only |
 | reconciling | Explicit committing or reconciling phase with noncontradictory known evidence | Operator required; no replay |
 | uncertain | Unknown ownership/phase, contradiction, orphan, missing durable file or unsupported phase | Operator required |
 | foreign | Any foreign artifact | Operator required; never touch foreign rules |
@@ -73,6 +116,8 @@ B2-D owns synthetic identity/destination nonpromotion and complete lab
 isolation. Stage C owns real EV Ready physical network, gateway,
 routing, forwarding, WebSocket/OCPP evidence and field reboot tests.
 A fabricated field-origin flag or session proof cannot authorize any
-real persistence in B2-C. The existing CSMS versioned storage, SQLite,
+real persistence in B2-C. Explicitly synthetic origin never yields a
+preserved field adaptation, even if a synthetic snapshot claims completed
+persistence. The existing CSMS versioned storage, SQLite,
 transactions, evidence, receipts, local 8888 opt-in and deployed firewall
 state are untouched.

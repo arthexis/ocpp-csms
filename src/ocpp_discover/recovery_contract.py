@@ -2,6 +2,9 @@
 
 Artifact ownership must be independently established by a future trusted
 observer. A matching name, file or SHA-256 digest is not ownership proof.
+The digest correlates a canonical *semantic redirect scope*, never raw bytes
+of dissimilar nftables, fragment and JSON receipt representations. Canonical
+scope v1 is specified in docs/discover-recovery-b2c.md; no adapter exists here.
 """
 from dataclasses import dataclass
 from enum import Enum
@@ -59,7 +62,11 @@ class Decision(str, Enum):
 
 @dataclass(frozen=True)
 class Artifact:
-    """Digest is correlation data, NOT authority or physical isolation proof."""
+    """Digest correlates canonical semantic redirect scope v1, NOT raw bytes.
+
+    A separately trusted observer must independently prove ownership and
+    normalize each representation. No such observer is provided here.
+    """
     ownership: Ownership
     digest: str | None = None
 
@@ -119,6 +126,12 @@ def assess(snapshot: Snapshot) -> Assessment:
     empty = ownership == (Ownership.ABSENT,) * 3
     complete = ownership == (Ownership.OWNED,) * 3
     provisional = ownership == (Ownership.OWNED, Ownership.ABSENT, Ownership.ABSENT)
+    # Known synthetic evidence is never a persistent field adaptation, even
+    # if three independently labeled artifacts share a correlation digest.
+    # Historical UNKNOWN origin remains readable when ownership is verified.
+    if (complete and snapshot.origin is Origin.SYNTHETIC
+            and snapshot.phase in (Phase.NONE, Phase.COMPLETE)):
+        return _uncertain("synthetic_origin_cannot_be_persistent")
     if snapshot.phase is Phase.NONE:
         if empty:
             return Assessment(State.ABSENT, Decision.OBSERVE_ONLY, "no_adaptation")

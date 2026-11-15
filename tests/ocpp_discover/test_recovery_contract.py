@@ -32,6 +32,46 @@ def test_consistent_owned_persistent_state_is_only_preserved(phase):
     assert result.decision is Decision.PRESERVE
 
 
+
+@pytest.mark.parametrize("phase", [Phase.NONE, Phase.COMPLETE])
+@pytest.mark.parametrize("session", [False, True])
+def test_known_synthetic_complete_evidence_never_preserved(phase, session):
+    # All three separately marked owned + identical digest is insufficient
+    # for known synthetic origin, regardless of claimed session proof.
+    result = assess(sample(A, A, A, phase=phase, origin=Origin.SYNTHETIC,
+                           session=session))
+    assert result == Assessment(State.UNCERTAIN, Decision.OPERATOR_REQUIRED,
+                                "synthetic_origin_cannot_be_persistent")
+
+
+@pytest.mark.parametrize("phase", [Phase.NONE, Phase.COMPLETE])
+def test_legacy_unknown_origin_preserves_verified_existing_artifacts(phase):
+    # Historical artifacts may predate an origin field. Do not erase their
+    # read-only preservation status; ownership is a separate trusted input.
+    result = assess(sample(A, A, A, phase=phase, origin=Origin.UNKNOWN))
+    assert result.state is State.PERSISTENT
+    assert result.decision is Decision.PRESERVE
+
+
+@pytest.mark.parametrize("phase", [Phase.NONE, Phase.COMPLETE])
+@pytest.mark.parametrize("different", ["live", "fragment", "receipt"])
+def test_canonical_scope_digest_disagreement_never_preserves(phase, different):
+    # Digests are assumed to identify canonical *scope*, not source file
+    # bytes. Different supplied scopes can never describe one adaptation.
+    artifacts = {"live": A, "fragment": A, "receipt": A}
+    artifacts[different] = B
+    result = assess(sample(**artifacts, phase=phase, origin=Origin.FIELD))
+    assert result == Assessment(State.UNCERTAIN, Decision.OPERATOR_REQUIRED,
+                                "contradictory_artifact_identity")
+
+
+@pytest.mark.parametrize("phase", [Phase.NONE, Phase.COMPLETE])
+def test_missing_independent_ownership_is_not_supplied_by_equal_digests(phase):
+    # Matching known peers cannot certify an unverified third artifact.
+    result = assess(sample(A, A, U, phase=phase, origin=Origin.FIELD))
+    assert result.state is State.UNCERTAIN
+    assert result.decision is Decision.OPERATOR_REQUIRED
+
 def test_explicit_provisional_is_not_automatically_removed():
     assert assess(sample(A, phase=Phase.PROVISIONAL)) == Assessment(
         State.PROVISIONAL, Decision.OPERATOR_REQUIRED, "provisional_hold"
