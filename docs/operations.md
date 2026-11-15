@@ -533,13 +533,78 @@ observed     current charger traffic and CSMS evidence
 
 The persistent nftables fragment contains the exact narrow redirect that should exist after reboot. Debian loads that fragment normally; Discover does not replay the global ruleset or restart nftables at runtime.
 
+### Installed storage and startup validation
+
+The Ansible-managed CSMS storage root (normally `~/ocpp-csms-data`) is **not**
+necessarily the running evidence database directory. The CSMS role selects a
+versioned service directory under `schemas/<version>` and assigns it to
+`ocpp_csms_service_data_dir`; Discover takes its `ocpp_discover_data_dir`
+from that selected value, not an independent parent fallback. A prepared
+schema directory is a candidate until the running CSMS writer and installed
+unit establish which directory is active. Do not hardcode schema 8.
+
+Before installing Discover integration, Ansible requires matching selected
+CSMS/Discover directories and calls the read-only
+`ocpp_discover.storage_contract` validator. It checks the live CSMS
+`MainPID` and its unambiguous `serve --data-dir`, the real directory and
+the existing readable SQLite evidence database, including essential event and
+session-link tables and a valid schema version. The Discover unit repeats that
+check with `ExecStartPre` on startup/restart, failing before capture or new
+redirect work when the storage contract cannot be established. Validation
+does not initialize or migrate SQLite, and failure does not authorize
+discarding Discover's existing persistent adaptation or firewall state.
+
+An enabled or active `ocpp-discover.service` is **not** proof of correct
+field connectivity. Compare the installed revision and both effective
+service configurations with actual runtime health before claiming a deployed
+fix. The earlier gway-004 parent-directory mismatch in
+[issue #355](https://github.com/arthexis/ocpp-csms/issues/355) is historical
+field evidence; the merged source changes alone do not establish that a
+particular node has been upgraded.
+
 ### First discovery
 
 When no proven adaptation exists, Discover waits for qualifying first-contact evidence.
 
-For first contact, Discover ignores local SSH, HTTPS and other local service probes. Two matching SYN attempts within 30 seconds to a non-local IPv4 destination on TCP/80 can trigger a **temporary**, exact-source-and-destination redirect. The Ethernet connection must deliver the packets to this host (for example, the charger must use it as its gateway). A SYN does not identify OCPP; ordinary HTTP can also trigger a temporary redirect, so use a dedicated charger-facing interface. Two SYNs are only a rate/consistency filter, not an application-layer proof. Do not enable this first-contact mode on a shared general-purpose HTTP uplink: the first redirected HTTP request may be disrupted before WebSocket validation rejects it. A matching charger ID plus a fresh inbound OCPP event is identity-level evidence, not proof that the event originated on the exact observed TCP/WebSocket session; simultaneous connections using the same ID remain an unresolved ambiguity. Treat this mode as provisional and require session-level correlation before claiming cryptographic or transport-session attribution. The redirect is removed if a matching plaintext WebSocket request and CSMS charger identity are not proven.
+On a properly isolated charger-facing interface, two matching SYN attempts
+within 30 seconds to a non-local IPv4 TCP/80 destination can select one
+**temporary**, exact-interface/source/destination/port redirect when routed
+HTTP is explicitly authorized. Traffic must actually reach this host (for
+example, by the charger's gateway configuration). A SYN is not OCPP proof:
+unrelated HTTP could be disrupted during the temporary redirect. Never
+authorize this on a shared general-purpose HTTP network. Local SSH, HTTPS
+and TLS/WSS traffic must not be intercepted.
 
-Routed external TCP/80 interception is now **disabled by default**. Only on an operator-verified dedicated charger-facing network may it be explicitly enabled with `OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80=1`. This is a manual trust assertion, not automatic detection or a guarantee against unrelated HTTP; do not enable on shared interfaces. No session-level OCPP/WebSocket proof is currently available from the event schema, so a same-ID concurrent session remains a merge blocker for deployments requiring exact-session attribution.
+**Routed external TCP/80 remains disabled by default.** The legacy
+`OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80` environment variable is **not** an
+authorization mechanism. The current service loads an optional persistent
+`/etc/ocpp-discover/routed-http-policy.json` at startup. Its exact v1 JSON
+fields are `version` (integer `1`), `enabled` (boolean), `interface`
+(a matching interface name) and `dedicated_charger_network_verified`
+(boolean operator attestation). Enabling requires an explicit positive
+attestation, not automatic network detection. Missing file means disabled;
+malformed, untrusted or mismatched policy fails closed. The file must be a
+root-owned regular file with mode `0600`, bounded UTF-8 JSON, and a trusted
+immediate parent directory. The loader uses no-follow file opening and
+checks the opened descriptor; it neither creates nor enables the policy.
+
+Full ancestor-path hardening for the policy file was merged in
+[PR #359](https://github.com/arthexis/ocpp-csms/pull/359) and is used by
+the startup policy loader. That PR also added a **pure offline**
+dedicated-network topology evaluator; runtime topology validation and
+physical field acceptance remain separate #355 stages. Do not infer that
+opt-in alone makes routed discovery safe for a particular field network;
+physical EV Ready acceptance remains unverified.
+
+After a provisional redirect, Discover must observe the matching plaintext
+WebSocket upgrade and charger path identity, correlate its source TCP peer
+with **one unambiguous** CSMS session, and find a fresh inbound OCPP event
+linked to that session after the pre-redirect watermark. A charger identity
+or SYN alone cannot prove the observed connection. Missing/legacy session
+links, reused peer tuples, timeouts and mismatches are not accepted as
+session proof. The temporary redirect is removed on unsuccessful proof;
+see [Provisional WebSocket session evidence](#provisional-websocket-session-evidence-pr-328)
+for the limits of this correlation.
 
 The earlier provisional redirect for a host-local TCP/8888 endpoint is disabled by default because unrelated local probes can select it. An operator who has isolated that network and confirmed the endpoint can explicitly set `OCPP_DISCOVER_ALLOW_LOCAL_8888=1` in the Discover service environment. This does not enable local port 80, SSH or TLS interception. Existing proven persistent adaptations remain governed by their own validation and recovery flow.
 
@@ -940,19 +1005,28 @@ revoke them explicitly. The published set is a snapshot at grant time: repeat
 
 ### Provisional WebSocket session evidence (PR #328)
 
-The CSMS records a random per-WebSocket `session_id` and the observed remote TCP
-IP/port in `discovery_sessions`. Every inbound OCPP event, including atomic
-StartTransaction, StopTransaction and MeterValues writes, is linked through
-`discovery_event_sessions`. These tables are created idempotently alongside
-the existing schema v8 without changing `PRAGMA user_version` or modifying
-historical event rows. Historical events remain unlinked and **cannot** prove
-a new discovery session. Discover requires a matching plaintext WebSocket
-upgrade's source TCP port and an inbound event linked to the same recorded
-session and peer IP/port, after its event watermark. Concurrent chargers with
-the same path identity but different TCP source ports cannot cross-prove.
+CSMS records a random per-WebSocket `session_id` and the observed remote
+TCP IP/port in `discovery_sessions`. Each inbound OCPP event, including
+atomically persisted StartTransaction, StopTransaction and MeterValues,
+is linked to that session through `discovery_event_sessions`. The
+additive evidence tables are initialized idempotently alongside SQLite
+schema v8 without changing `PRAGMA user_version` or historical event rows.
+Historical unlinked events **cannot** prove a new discovery session.
 
-This proves the observed source peer tuple only when the CSMS sees the same
-source IP and port (no intermediate source-NAT/proxy rewriting). If the path
-passes through a proxy or NAT changing the peer tuple, discovery must fail
-closed; do not bypass the check. TCP port reuse and captures lacking a
-complete plaintext upgrade require additional operational validation.
+For a temporary redirect, Discover captures a matching plaintext WebSocket
+upgrade, source IP/port and charger path identity. It first snapshots the
+inbound-event watermark. The SQLite proof requires **exactly one** matching
+`discovery_sessions` row for the observed charger/peer tuple and at least
+one later inbound event joined through `discovery_event_sessions` to
+that same session, peer IP/port and charger ID. Concurrent sessions with
+the same charger ID but different peer ports cannot cross-prove; duplicate
+matching tuples (including port reuse) are ambiguous and rejected.
+Missing legacy tables/linkage and absent fresh events fail closed.
+
+This is **observed transport peer/session correlation**, not cryptographic
+identity or independent physical-charger attribution. A proxy or source NAT
+that rewrites the source peer tuple prevents this proof and must not be
+bypassed. TCP port reuse, incomplete plaintext upgrades and captures that
+cannot establish the peer remain limitations. Successful source-level
+tests do not establish an installed node's revision, network isolation or
+physical EV Ready field acceptance.
