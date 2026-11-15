@@ -110,7 +110,10 @@ def _run_local_syn_discovery(*, initial_evidence: str, candidate: provisional.Lo
         signal.signal(signal.SIGTERM, terminate)
     applied = False
     try:
-        provisional.apply(candidate)
+        if candidate.destination_port == 80:
+            provisional.apply(candidate, routed_http_authorization=kwargs.get("routed_http_authorization"))
+        else:
+            provisional.apply(candidate)
         applied = True
         # The SYN that justified the provisional rule was already rejected by the host.
         # Keep capture open for one configured reconnect window plus the ordinary TCP
@@ -186,6 +189,7 @@ def run_discovery(*, initial_evidence: str, **kwargs):
         return _run_local_syn_discovery(
             initial_evidence=initial_evidence,
             candidate=candidate,
+            routed_http_authorization=policy,
             **kwargs,
         )
 

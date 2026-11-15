@@ -5,7 +5,8 @@ import os
 from dataclasses import dataclass
 
 from ocpp_discover import discover, redirect
-from ocpp_discover.routed_http_policy import RoutedHttpPolicy
+from ocpp_discover import routed_http_runtime
+from ocpp_discover.routed_http_runtime import EffectiveRoutedHttpAuthorization
 
 
 @dataclass(frozen=True)
@@ -17,9 +18,9 @@ class LocalSynCandidate:
     listen_port: int
 
 
-def routed_http_enabled(interface: str, policy: RoutedHttpPolicy | None = None) -> bool:
+def routed_http_enabled(interface: str, policy: EffectiveRoutedHttpAuthorization | None = None) -> bool:
     """The legacy environment variable cannot authorize routed HTTP."""
-    return policy is not None and policy.authorizes(interface)
+    return type(policy) is EffectiveRoutedHttpAuthorization and policy.authorizes(interface)
 
 
 def local_probe_enabled() -> bool:
@@ -27,7 +28,7 @@ def local_probe_enabled() -> bool:
     return os.environ.get("OCPP_DISCOVER_ALLOW_LOCAL_8888") == "1"
 
 
-def local_syn_candidate(text: str, *, interface: str, listen_port: int, routed_http_policy: RoutedHttpPolicy | None = None) -> LocalSynCandidate | None:
+def local_syn_candidate(text: str, *, interface: str, listen_port: int, routed_http_policy: EffectiveRoutedHttpAuthorization | None = None) -> LocalSynCandidate | None:
     """Return one unambiguous supported plaintext endpoint, local or routed."""
     if not discover._INTERFACE.fullmatch(interface):
         raise ValueError("invalid_interface")
@@ -91,8 +92,11 @@ def _ruleset(candidate: LocalSynCandidate) -> str:
     )
 
 
-def apply(candidate: LocalSynCandidate) -> str:
-    """Install an exact-match temporary redirect derived only from one observed SYN."""
+def apply(candidate: LocalSynCandidate, *, routed_http_authorization: EffectiveRoutedHttpAuthorization | None = None) -> str:
+    """Install only an exact-match redirect; routed TCP/80 must reprove topology."""
+    if candidate.destination_port == 80:
+        if not routed_http_runtime.still_authorized(routed_http_authorization, candidate.interface):
+            raise RuntimeError("routed_http_topology_unverified")
     redirect.require_root()
     if not redirect.listener_available(candidate.listen_port):
         raise RuntimeError("listener_unavailable")
