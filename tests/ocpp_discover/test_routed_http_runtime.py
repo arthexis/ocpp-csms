@@ -113,3 +113,65 @@ def test_routed_candidate_needs_effective_authority(monkeypatch):
     for port in (22, 443):
         other = line.replace(".80:", f".{port}:")
         assert provisional.local_syn_candidate(other, interface="eth0", listen_port=9000, routed_http_policy=authority) is None
+
+def test_operstate_down_after_authorization_fails_before_any_firewall_call(tmp_path, monkeypatch):
+    """A link going down after authorization must deny before root or nft calls.
+
+    This test fabricates only peer exclusivity for the authorization branch;
+    interface facts are always reread through the actual sysfs/procfs collector.
+    It is not evidence of a physically dedicated charger network.
+    """
+    net = tmp_path / "net"
+    iface = net / "eth0"
+    iface.mkdir(parents=True)
+    for name, value in {
+        "ifindex": "7", "iflink": "7", "type": "1", "operstate": "up"
+    }.items():
+        (iface / name).write_text(value)
+    (iface / "device").mkdir()
+    route = tmp_path / "route"
+    route.write_text(
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+        "eth0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\n"
+    )
+    monkeypatch.setattr(runtime, "_SYS_NET", net)
+    monkeypatch.setattr(runtime, "_PROC_ROUTE", route)
+
+    actual_collector = runtime.collect_kernel_observation
+
+    def with_synthetic_peer_proof(interface):
+        observed = actual_collector(interface)
+        if observed is None:
+            return None
+        return replace(
+            observed,
+            topology=replace(
+                observed.topology, shared_subnet=False, non_charger_peers=False
+            ),
+            peer_exclusivity_proven=True,
+        )
+
+    monkeypatch.setattr(runtime, "collect_kernel_observation", with_synthetic_peer_proof)
+    authorization = runtime.authorize_routed_http(RoutedHttpPolicy(True, "eth0"), "eth0")
+    assert authorization is not None
+    assert authorization.ifindex == 7
+    assert runtime.still_authorized(authorization, "eth0")
+
+    # Identity is unchanged; only the live interface state drifts.
+    (iface / "operstate").write_text("down")
+    assert (iface / "ifindex").read_text() == "7"
+    assert (iface / "iflink").read_text() == "7"
+    assert not runtime.still_authorized(authorization, "eth0")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("firewall/root operation reached after operstate drift")
+
+    monkeypatch.setattr(provisional.redirect, "require_root", forbidden)
+    monkeypatch.setattr(provisional.redirect, "listener_available", forbidden)
+    monkeypatch.setattr(provisional.redirect, "table_exists", forbidden)
+    monkeypatch.setattr(provisional.redirect, "_run_nft", forbidden)
+    candidate = provisional.LocalSynCandidate(
+        "eth0", "192.168.129.2", "192.0.2.4", 80, 9000
+    )
+    with pytest.raises(RuntimeError, match="^routed_http_topology_unverified$"):
+        provisional.apply(candidate, routed_http_authorization=authorization)
