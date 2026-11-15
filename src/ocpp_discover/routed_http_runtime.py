@@ -2,7 +2,7 @@
 
 Kernel interface facts alone do not establish physical peer exclusivity.
 Until independent field evidence can be verified in Stage C, no live routed
-HTTP authorization can be issued. No CLI, syscalls to mutate, or nft calls.
+HTTP authorization can be issued. No CLI, syscalls to mutate, or firewall operations.
 """
 from __future__ import annotations
 

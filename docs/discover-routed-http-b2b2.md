@@ -25,3 +25,7 @@ Port 8888 local opt-in remains unchanged. SSH/TLS are never routed through
 this path. Existing durable receipt, nftables persistence, handoff and
 reconciliation are not modified. No node/deployment or physical validation
 is claimed by this Draft implementation.
+
+An in-process seal is a routing contract, **not** a security boundary against
+arbitrary Python execution in the privileged service. Independently trusted
+physical-peer evidence is intentionally unavailable in this stage.
