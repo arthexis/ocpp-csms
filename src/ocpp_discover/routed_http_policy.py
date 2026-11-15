@@ -59,24 +59,60 @@ def load_policy(
     raises, so callers must fail closed rather than enable interception.
     """
     file = Path(path)
-    if file.exists() or file.is_symlink():
-        parent = os.stat(file.parent, follow_symlinks=False)
-        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != owner_uid
-                or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
-            raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory")
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    if not file.is_absolute():
+        raise RoutedHttpPolicyError("routed_http_policy_path_not_absolute")
+
+    # Follow the entire path through pinned descriptors, refusing symlinks at
+    # every level. A trusted sticky root-owned /tmp is permitted for hermetic
+    # tests, but every non-sticky writable ancestor is refused.
+    directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_DIRECTORY
     try:
-        # Bind validation and the read to ONE descriptor. O_NOFOLLOW rejects
-        # symlink substitution immediately before open; fstat authenticates
-        # precisely the inode supplying the JSON, not a prior pathname lookup.
-        descriptor = os.open(file, flags)
-    except FileNotFoundError:
-        return RoutedHttpPolicy(enabled=False)
+        descriptor = os.open("/", directory_flags)
     except OSError as exc:
-        raise RoutedHttpPolicyError("untrusted_routed_http_policy_file") from exc
+        raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory") from exc
+    try:
+        parts = file.parts[1:]
+        for position, component in enumerate(parts[:-1]):
+            try:
+                child = os.open(component, directory_flags, dir_fd=descriptor)
+            except FileNotFoundError as exc:
+                # An uninstalled Discover has no policy directory. Preserve
+                # default-off only for that exact absent final parent.
+                if file == DEFAULT_POLICY_PATH and position == len(parts) - 2:
+                    return RoutedHttpPolicy(enabled=False)
+                raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory") from exc
+            except OSError as exc:
+                raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory") from exc
+            os.close(descriptor)
+            descriptor = child
+            directory_info = os.fstat(descriptor)
+            final_parent = position == len(parts) - 2
+            owner_valid = (
+                directory_info.st_uid == owner_uid if final_parent
+                else directory_info.st_uid in (0, owner_uid)
+            )
+            writable = bool(directory_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH))
+            trusted_sticky = (
+                not final_parent
+                and directory_info.st_uid == 0
+                and bool(directory_info.st_mode & stat.S_ISVTX)
+            )
+            if (not stat.S_ISDIR(directory_info.st_mode) or not owner_valid
+                    or (writable and not trusted_sticky)):
+                raise RoutedHttpPolicyError("untrusted_routed_http_policy_directory")
+
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        try:
+            policy_fd = os.open(parts[-1], flags, dir_fd=descriptor)
+        except FileNotFoundError:
+            return RoutedHttpPolicy(enabled=False)
+        except OSError as exc:
+            raise RoutedHttpPolicyError("untrusted_routed_http_policy_file") from exc
+    finally:
+        os.close(descriptor)
 
     try:
-        with os.fdopen(descriptor, "rb") as stream:
+        with os.fdopen(policy_fd, "rb") as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid:
                 raise RoutedHttpPolicyError("untrusted_routed_http_policy_file")
@@ -84,11 +120,10 @@ def load_policy(
                 raise RoutedHttpPolicyError("insecure_routed_http_policy_permissions")
             if info.st_size > 4096:
                 raise RoutedHttpPolicyError("oversized_routed_http_policy")
-            # Do not trust st_size alone: a concurrent writer may grow the
-            # file after fstat. Never buffer more than the bounded 4097 bytes.
             raw = stream.read(4097)
         if len(raw) > 4096:
             raise RoutedHttpPolicyError("oversized_routed_http_policy")
+
         def strict_pairs(pairs):
             output = {}
             for key, value in pairs:
@@ -96,6 +131,7 @@ def load_policy(
                     raise RoutedHttpPolicyError("duplicate_routed_http_policy_key")
                 output[key] = value
             return output
+
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=strict_pairs)
     except (UnicodeError, OSError, json.JSONDecodeError) as exc:
         raise RoutedHttpPolicyError("unreadable_routed_http_policy") from exc
