@@ -157,6 +157,12 @@ class IsolationAssessment:
     decision: IsolationDecision
     reason: str
 
+    def __post_init__(self) -> None:
+        if type(self.decision) is not IsolationDecision:
+            raise ValueError("invalid_isolation_decision")
+        if type(self.reason) is not str or not self.reason:
+            raise ValueError("invalid_isolation_reason")
+
 
 def assess_isolation(evidence: ProvenanceEvidence) -> IsolationAssessment:
     """Classify only; no outcome authorizes field persistence.

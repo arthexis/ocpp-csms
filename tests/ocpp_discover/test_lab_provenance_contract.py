@@ -227,3 +227,35 @@ def test_field_reviewer_claims_cannot_create_persistence_permission():
         assessment = lab.assess_isolation(candidate)
         assert assessment.decision.value != "allow_persist"
         assert isinstance(assessment.decision, Enum)
+
+@pytest.mark.parametrize("decision", [
+    "allow_persist", "field_review_required", "", None, True, 0, object(),
+])
+def test_isolation_assessment_rejects_forged_decisions(decision):
+    with pytest.raises(ValueError, match="invalid_isolation_decision"):
+        lab.IsolationAssessment(decision, "forged")
+
+
+@pytest.mark.parametrize("reason", ["", None, 0, True, (), object()])
+def test_isolation_assessment_rejects_invalid_reasons(reason):
+    with pytest.raises(ValueError, match="invalid_isolation_reason"):
+        lab.IsolationAssessment(lab.IsolationDecision.LAB_ONLY, reason)
+
+
+@pytest.mark.parametrize("origin,expected", [
+    (Origin.SYNTHETIC, lab.IsolationDecision.LAB_ONLY),
+    (Origin.UNKNOWN, lab.IsolationDecision.DENY_NEW_PERSISTENCE),
+    (Origin.FIELD, lab.IsolationDecision.FIELD_REVIEW_REQUIRED),
+])
+def test_assess_isolation_keeps_all_three_typed_decisions(origin, expected):
+    result = lab.assess_isolation(evidence(origin))
+    assert type(result) is lab.IsolationAssessment
+    assert type(result.decision) is lab.IsolationDecision
+    assert result.decision is expected
+    assert type(result.reason) is str and result.reason
+
+
+def test_isolation_assessment_accepts_valid_typed_value():
+    result = lab.IsolationAssessment(lab.IsolationDecision.LAB_ONLY, "tested")
+    assert result.decision is lab.IsolationDecision.LAB_ONLY
+    assert result.reason == "tested"
