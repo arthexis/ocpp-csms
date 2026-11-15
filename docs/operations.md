@@ -588,12 +588,13 @@ root-owned regular file with mode `0600`, bounded UTF-8 JSON, and a trusted
 immediate parent directory. The loader uses no-follow file opening and
 checks the opened descriptor; it neither creates nor enables the policy.
 
-At this revision, full ancestor-path hardening and dedicated-network
-topology evaluation are **not** runtime enforcement. They are separate
-work in [Draft PR #359](https://github.com/arthexis/ocpp-csms/pull/359)
-and later #355 stages. Do not infer that opt-in alone makes routed discovery
-safe for a particular field network; physical EV Ready acceptance remains
-unverified.
+Full ancestor-path hardening for the policy file was merged in
+[PR #359](https://github.com/arthexis/ocpp-csms/pull/359) and is used by
+the startup policy loader. That PR also added a **pure offline**
+dedicated-network topology evaluator; runtime topology validation and
+physical field acceptance remain separate #355 stages. Do not infer that
+opt-in alone makes routed discovery safe for a particular field network;
+physical EV Ready acceptance remains unverified.
 
 After a provisional redirect, Discover must observe the matching plaintext
 WebSocket upgrade and charger path identity, correlate its source TCP peer
