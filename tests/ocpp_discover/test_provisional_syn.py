@@ -133,8 +133,8 @@ def test_external_plaintext_syn_becomes_exact_scoped_candidate(monkeypatch):
     monkeypatch.setattr(provisional.discover, "host_addresses", lambda: {"192.168.129.1"})
     line = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
     candidate = provisional.local_syn_candidate(line, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "eth0"))
-    assert candidate.destination_ip == "198.18.0.1"
-    assert "ip daddr 198.18.0.1 tcp dport 80 redirect to :9000" in provisional._ruleset(candidate)
+    assert candidate is None  # Raw operator policy cannot mint runtime authority
+    assert not provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "eth0"))
 
 
 def test_proof_is_scoped_to_exact_source_and_destination(monkeypatch):
@@ -260,7 +260,7 @@ def test_routed_http_opt_in_requires_exact_value(monkeypatch):
     assert not provisional.routed_http_enabled("eth0")
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
     assert not provisional.routed_http_enabled("eth0")
-    assert provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "eth0"))
+    assert not provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "eth0"))
     assert not provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "wlan0"))
 
 
@@ -302,4 +302,4 @@ def test_routed_http_legacy_env_never_suffices(monkeypatch):
     syn = "12:00:00.000000 IP 192.168.129.184.50000 > 198.18.0.1.80: Flags [S], seq 1\n"
     assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000) is None
     assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "wlan0")) is None
-    assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "eth0")) is not None
+    assert provisional.local_syn_candidate(syn, interface="eth0", listen_port=9000, routed_http_policy=RoutedHttpPolicy(True, "eth0")) is None

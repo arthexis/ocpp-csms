@@ -11,7 +11,7 @@ from typing import NamedTuple
 
 from ocpp_discover import discover, persistence, provisional, redirect
 from ocpp_discover.redirect import RedirectReceipt
-from ocpp_discover.routed_http_policy import RoutedHttpPolicy
+from ocpp_discover.routed_http_runtime import EffectiveRoutedHttpAuthorization
 
 
 class Configuration(NamedTuple):
@@ -48,7 +48,7 @@ def inspect_configuration(
     return Configuration(configured_matches, redirect.table_exists())
 
 
-def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None, routed_http_policy: RoutedHttpPolicy | None = None) -> DiscoveryEvidence:
+def wait_for_discovery_evidence(interface: str, *, expected: RedirectReceipt | None = None, routed_http_policy: EffectiveRoutedHttpAuthorization | None = None) -> DiscoveryEvidence:
     """Block until positive charger-side evidence appears, without mutating the host.
 
     First contact requires two matching plaintext SYN attempts within 30 seconds;

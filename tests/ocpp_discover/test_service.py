@@ -145,7 +145,7 @@ def test_service_loads_and_threads_disabled_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(service.discover, "run_discovery", lambda **kw: observed.append(kw["routed_http_policy"]) or discovery_result())
     monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args: None)
     service.run_service(data_dir=tmp_path, persistent_dir=tmp_path / "persistent", max_cycles=1)
-    assert observed == [RoutedHttpPolicy(False, "eth0")] * 2
+    assert observed == [None, None]  # Offline topology never mints runtime authority
 
 
 def test_invalid_policy_fails_before_capture(tmp_path, monkeypatch):

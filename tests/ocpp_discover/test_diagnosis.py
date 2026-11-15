@@ -164,9 +164,8 @@ def test_first_contact_skips_ssh_and_tls_but_accepts_http(monkeypatch):
     ssh = "12:00:00.000000 IP 192.168.129.184.50001 > 192.168.129.1.22: Flags [S], seq 1\n"
     tls = "12:00:01.000000 IP 192.168.129.184.50002 > 192.168.129.1.443: Flags [S], seq 1\n"
     http = "12:00:02.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
-    evidence, command, _ = _run_observer(monkeypatch, [ssh, tls, http, http], policy=RoutedHttpPolicy(True, "enp7s0"))
-    assert evidence.capture == http + http
-    assert "-p" in command
+    with pytest.raises(RuntimeError, match="passive_observer_stopped"):
+        _run_observer(monkeypatch, [ssh, tls, http, http], policy=RoutedHttpPolicy(True, "enp7s0"))
 
 
 def test_observer_legacy_env_never_suffices(monkeypatch):
@@ -174,5 +173,5 @@ def test_observer_legacy_env_never_suffices(monkeypatch):
     line = "12:00:00.000000 IP 192.168.129.184.50003 > 198.18.0.1.80: Flags [S], seq 1\n"
     with pytest.raises(RuntimeError, match="passive_observer_stopped"):
         _run_observer(monkeypatch, [line, line])
-    evidence, _, _ = _run_observer(monkeypatch, [line, line], policy=RoutedHttpPolicy(True, "enp7s0"))
-    assert evidence.capture == line + line
+    with pytest.raises(RuntimeError, match="passive_observer_stopped"):
+        _run_observer(monkeypatch, [line, line], policy=RoutedHttpPolicy(True, "enp7s0"))
