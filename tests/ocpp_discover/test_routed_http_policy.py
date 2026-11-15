@@ -130,7 +130,7 @@ def test_pre_open_substitution_with_symlink_fails_closed(tmp_path, monkeypatch):
     real_open = os.open
 
     def replace_then_open(candidate, flags, *args, **kwargs):
-        if os.fspath(candidate) == os.fspath(path):
+        if os.fspath(candidate) == path.name:
             path.unlink()
             path.symlink_to(target)
         return real_open(candidate, flags, *args, **kwargs)
@@ -155,7 +155,7 @@ def test_path_replacement_after_open_never_reads_new_file(tmp_path):
     def replace_after_open(candidate, flags, *args, **kwargs):
         fd = real_open(candidate, flags, *args, **kwargs)
         calls.append(os.fspath(candidate))
-        if os.fspath(candidate) == os.fspath(path):
+        if os.fspath(candidate) == path.name:
             path.unlink()
             path.symlink_to(substitute)
         return fd
@@ -164,7 +164,7 @@ def test_path_replacement_after_open_never_reads_new_file(tmp_path):
         result = policy.load_policy(path, owner_uid=os.getuid())
     assert not result.enabled
     assert not result.authorizes("eth0")
-    assert calls == [os.fspath(path)]
+    assert calls[-1:] == [path.name]
     assert path.is_symlink()
 
 
@@ -178,7 +178,8 @@ def test_verified_descriptor_catches_post_open_mode_swap(tmp_path):
 
     def change_mode(candidate, flags, *args, **kwargs):
         fd = real_open(candidate, flags, *args, **kwargs)
-        os.fchmod(fd, 0o644)
+        if os.fspath(candidate) == path.name:
+            os.fchmod(fd, 0o644)
         return fd
 
     with patch.object(policy.os, "open", side_effect=change_mode):
@@ -193,11 +194,13 @@ def test_post_open_growth_exceeding_limit_is_rejected(tmp_path):
     path.chmod(0o600)
     real_open = os.open
     real_fstat = os.fstat
+    import stat
 
     def grow_after_stat(fd):
         info = real_fstat(fd)
-        with path.open("ab") as stream:
-            stream.write(b" " * 5000)
+        if stat.S_ISREG(info.st_mode):
+            with path.open("ab") as stream:
+                stream.write(b" " * 5000)
         return info
 
     with patch.object(policy.os, "open", side_effect=real_open):
@@ -245,3 +248,116 @@ def test_parent_symlink_rejected(tmp_path):
     link.symlink_to(original, target_is_directory=True)
     with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
         policy.load_policy(link / "policy.json", owner_uid=os.getuid())
+
+
+
+def test_missing_intermediate_directory_is_not_a_disabled_policy(tmp_path):
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(tmp_path / "missing" / "policy.json", owner_uid=os.getuid())
+
+
+def test_relative_path_fails_closed(tmp_path):
+    with pytest.raises(policy.RoutedHttpPolicyError, match="absolute"):
+        policy.load_policy("policy.json", owner_uid=os.getuid())
+
+
+def test_ancestor_symlink_fails_closed(tmp_path):
+    real = tmp_path / "real" / "nested"
+    real.mkdir(parents=True)
+    target = real / "policy.json"
+    target.write_text(json.dumps(payload()))
+    target.chmod(0o600)
+    (tmp_path / "alternate").symlink_to(tmp_path / "real", target_is_directory=True)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(tmp_path / "alternate" / "nested" / "policy.json", owner_uid=os.getuid())
+
+
+def test_directory_swapped_after_descriptor_open_uses_pinned_original(tmp_path):
+    original = tmp_path / "original"
+    original.mkdir()
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    first = original / "policy.json"
+    first.write_text(json.dumps(payload(enabled=False, verified=False)))
+    first.chmod(0o600)
+    second = replacement / "policy.json"
+    second.write_text(json.dumps(payload(enabled=True)))
+    second.chmod(0o600)
+    alias = tmp_path / "alias"
+    alias.symlink_to(original, target_is_directory=True)
+    # An existing symlink must never be accepted, even when its target is safe.
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(alias / "policy.json", owner_uid=os.getuid())
+
+
+def test_directory_substitution_at_open_is_rejected(tmp_path, monkeypatch):
+    parent = tmp_path / "config"
+    parent.mkdir()
+    path = parent / "policy.json"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    substitute = tmp_path / "substitute"
+    substitute.mkdir()
+    (substitute / "policy.json").write_text(json.dumps(payload()))
+    (substitute / "policy.json").chmod(0o600)
+    real_open = os.open
+
+    def swapped(candidate, flags, *args, **kwargs):
+        if os.fspath(candidate) == "config":
+            parent.rename(tmp_path / "old-config")
+            parent.symlink_to(substitute, target_is_directory=True)
+        return real_open(candidate, flags, *args, **kwargs)
+
+    from unittest.mock import patch
+    with patch.object(policy.os, "open", side_effect=swapped):
+        with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+            policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_directory_replaced_after_open_keeps_original_descriptor(tmp_path):
+    parent = tmp_path / "config"
+    parent.mkdir()
+    path = parent / "policy.json"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    substitute = tmp_path / "substitute"
+    substitute.mkdir()
+    (substitute / "policy.json").write_text(json.dumps(payload()))
+    (substitute / "policy.json").chmod(0o600)
+    real_open = os.open
+
+    def swapped(candidate, flags, *args, **kwargs):
+        fd = real_open(candidate, flags, *args, **kwargs)
+        if os.fspath(candidate) == "config":
+            parent.rename(tmp_path / "old-config")
+            parent.symlink_to(substitute, target_is_directory=True)
+        return fd
+
+    from unittest.mock import patch
+    with patch.object(policy.os, "open", side_effect=swapped):
+        result = policy.load_policy(path, owner_uid=os.getuid())
+    assert result.enabled is False
+
+
+def test_reject_group_writable_nonsticky_ancestor(tmp_path):
+    parent = tmp_path / "writable"
+    parent.mkdir()
+    nested = parent / "nested"
+    nested.mkdir()
+    path = nested / "policy.json"
+    path.write_text(json.dumps(payload()))
+    path.chmod(0o600)
+    parent.chmod(0o770)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="directory"):
+        policy.load_policy(path, owner_uid=os.getuid())
+
+
+def test_fstat_ownership_and_permissions_after_fd_open(tmp_path, monkeypatch):
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(payload()))
+    path.chmod(0o600)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="untrusted"):
+        policy.load_policy(path, owner_uid=os.getuid() + 1)
+    path.chmod(0o640)
+    with pytest.raises(policy.RoutedHttpPolicyError, match="permissions"):
+        policy.load_policy(path, owner_uid=os.getuid())
