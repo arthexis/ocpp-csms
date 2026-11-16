@@ -47,18 +47,19 @@ def stop(transaction_id):
     }
 
 
-def archives(root):
+def _json_records(root, directory):
     return [
         json.loads(p.read_text(encoding="utf-8"))
-        for p in (root / "transactions").glob("*/*.json")
+        for p in (root / directory).glob("*/*.json")
     ]
+
+
+def archives(root):
+    return _json_records(root, "transactions")
 
 
 def unresolved(root):
-    return [
-        json.loads(p.read_text(encoding="utf-8"))
-        for p in (root / "transactions-unresolved").glob("*/*.json")
-    ]
+    return _json_records(root, "transactions-unresolved")
 
 
 @pytest.mark.asyncio

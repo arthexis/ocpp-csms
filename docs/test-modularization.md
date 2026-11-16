@@ -107,6 +107,18 @@ The retained original module tests derived status, connection liveness, schema r
 
 **Audit boundary:** this is a focused conftest-fixture audit, **not** a claim that all inline helpers across the complete test suite are duplicate-free. No parameterization is introduced: do not group cases on superficial similarity when their identity, event ordering, SQLite/transaction semantics or negative checks differ. Subsequent work may inspect module-local helpers with one independently reviewable change per proven equivalent group. Keep #336 OPEN and this change Draft until separately authorized acceptance.
 
+## Stage I: audit and consolidate local diagnostic JSON readers
+
+At baseline `1a7c350af4ac8ec2b5c8cbaed8919706723c1138`, the local helpers `archives(root)` and `unresolved(root)` in `tests/transactions/test_simplified_contract.py` have **the same algorithm**: list `*/*.json` from a root subdirectory, read as UTF-8 and `json.loads` each file, preserving the unsorted `Path.glob` iteration and native decode/IO errors. Their **only variable** is the subdirectory (`transactions` vs `transactions-unresolved`). Introduce one module-private `_json_records(root, directory)` and preserve both original wrapper names and signatures; this is a local helper deduplication, **not** a merge of resolved and unresolved evidence.
+
+Selected additional module-local helper audit:
+- `tests/transactions/test_archive.py::records(root)` uses the same diagnostic JSON traversal as `archives(root)`, but is retained as a test-module-local helper. Do not introduce a shared `tests.transactions` package or import identity across non-package pytest modules merely to remove a few lines.
+- `tests/transactions/test_query.py::start_payload` vs `tests/status/test_status.py::start_payload` vs `tests/transactions/test_simplified_contract.py::start` differ in meter-start defaults, timestamps, identity configurability and contract context. **Not behaviorally equivalent; do not consolidate or blindly parametrize.**
+- `tests/transactions/test_query.py::stop_payload` vs `tests/transactions/test_simplified_contract.py::stop` differ in meter-stop values and configurability; preserve both.
+- Discover's autouse nftables safety fixture and SQLite authority/error-path helpers are outside this change; preserve their isolation, negative paths and error messages.
+
+**Acceptance:** exact two-path tests/docs diff, no test-name, fixture, parametrization or collection changes; both wrapper names and call sites retained. Automatic Python 3.11/3.13 CSMS, Discover, schema-isolation and Ansible CI must match prior pass/skip totals at exact HEAD. No source, SQLite v8, export-v1, security, GitHub workflow, real Ansible, AgentOps, nodes or deployments. Keep #336 OPEN and PR Draft until independently authorized Ready/merge.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
