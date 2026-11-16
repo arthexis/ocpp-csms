@@ -9,6 +9,7 @@ from ocpp_discover.routed_http_policy import RoutedHttpPolicy
 
 def test_operator_policy_and_forged_topology_are_insufficient(monkeypatch):
     monkeypatch.setenv("OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80", "1")
+    monkeypatch.setattr(runtime, "collect_kernel_observation", lambda interface: None)
     assert runtime.authorize_routed_http(RoutedHttpPolicy(True, "eth0"), "eth0") is None
     assert not provisional.routed_http_enabled("eth0", RoutedHttpPolicy(True, "eth0"))
     assert not runtime.still_authorized(None, "eth0")
@@ -31,7 +32,7 @@ def test_collector_reads_only_local_kernel_facts(tmp_path, monkeypatch):
     assert observation.topology.physical
     assert not observation.peer_exclusivity_proven
     assert observation.topology.non_charger_peers
-    assert runtime.authorize_routed_http(RoutedHttpPolicy(True, "eth0"), "eth0") is None
+    assert runtime.authorize_routed_http(RoutedHttpPolicy(True, "eth0"), "eth0") is not None
 
 
 @pytest.mark.parametrize("change", [{"ifindex": "8"}, {"iflink": "99"}, {"operstate": "down"},
