@@ -54,6 +54,12 @@ def test_invalid_policy_is_rejected(change):
         policy.parse_policy(data)
 
 
+def test_minimal_v1_policy_without_obsolete_attestation_is_supported():
+    configured = payload()
+    del configured["dedicated_charger_network_verified"]
+    assert policy.parse_policy(configured).authorizes("eth0")
+
+
 def test_legacy_unverified_attestation_no_longer_blocks_explicit_enable():
     assert policy.parse_policy(payload(verified=False)).authorizes("eth0")
 
