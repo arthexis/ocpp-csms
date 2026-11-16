@@ -65,17 +65,25 @@ def sandbox_command(python_executable: str, parent_netns: str, *, parent_mntns: 
 
 def require_sandbox() -> None:
     """A forged environment variable cannot by itself authorize a lab."""
-    parent = os.environ.get(_PARENT_NETNS, "")
-    current = os.readlink("/proc/self/ns/net")
-    if not parent.startswith("net:[") or current == parent:
-        raise RuntimeError("lab_network_namespace_not_isolated")
-    if not all(os.path.ismount(path) for path in _TMPFS_PATHS):
-        raise RuntimeError("lab_writable_state_not_tmpfs")
-    # Require a read-only root, not a caller-controlled label/flag.
-    root = next((line for line in Path("/proc/self/mountinfo").read_text().splitlines()
-                 if line.split()[4] == "/"), "")
-    if not root or "ro" not in root.split(" - ", 1)[0].split()[5].split(","):
+    identities = (("net", _PARENT_NETNS), ("mnt", _PARENT_MNTNS),
+                  ("user", _PARENT_USERNS))
+    for kind, variable in identities:
+        parent = os.environ.get(variable, "")
+        if not re.fullmatch(rf"{kind}:\\[[0-9]+\\]", parent):
+            raise RuntimeError("lab_parent_namespace_not_attested")
+        if os.readlink(f"/proc/self/ns/{kind}") == parent:
+            raise RuntimeError("lab_" + kind + "_namespace_not_isolated")
+    mounts = {}
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        before, sep, after = line.partition(" - ")
+        parts, fs = before.split(), after.split()
+        if not sep or len(parts) < 6 or not fs:
+            raise RuntimeError("lab_mountinfo_invalid")
+        mounts[parts[4]] = (set(parts[5].split(",")), fs[0])
+    if "ro" not in mounts.get("/", (set(), ""))[0]:
         raise RuntimeError("lab_host_root_not_read_only")
+    if any(mounts.get(path, (set(), ""))[1] != "tmpfs" for path in _TMPFS_PATHS):
+        raise RuntimeError("lab_writable_state_not_tmpfs")
     if Path("/var/lib/ocpp-discover/discovered.json").exists():
         raise RuntimeError("lab_field_state_visible")
 
