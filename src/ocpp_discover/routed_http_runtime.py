@@ -1,8 +1,8 @@
-"""B2-B2: read-only kernel observations and fail-closed routed HTTP authority.
+"""Read-only configured-interface identity checks for routed TCP/80.
 
-Kernel interface facts alone do not establish physical peer exclusivity.
-Until independent field evidence can be verified in Stage C, no live routed
-HTTP authorization can be issued. No CLI, syscalls to mutate, or firewall operations.
+Physical peer exclusivity is neither inferred nor required. Authority is scoped
+to an observed physical Ethernet interface and a pinned ifindex, checked again
+before redirect. No host-mutating operations are performed here.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ocpp_discover.routed_http_policy import RoutedHttpPolicy
-from ocpp_discover.routed_http_topology import InterfaceTopology, dedicated_interface_verified
+from ocpp_discover.routed_http_topology import InterfaceTopology
 
 _SYS_NET = Path("/sys/class/net")
 _PROC_ROUTE = Path("/proc/net/route")
@@ -37,11 +37,7 @@ class EffectiveRoutedHttpAuthorization:
 
 
 def collect_kernel_observation(interface: str) -> KernelObservation | None:
-    """Read local kernel facts only; never trust supplied InterfaceTopology objects.
-
-    This conservative collector does NOT certify external switch/peer isolation.
-    Any missing, unreadable, virtual, shared, or ambiguous topology is denied.
-    """
+    """Read local interface facts; no external-peer conclusions or mutations."""
     if not interface or "/" in interface or interface in {".", ".."}:
         return None
     directory = _SYS_NET / interface
@@ -74,13 +70,13 @@ def collect_kernel_observation(interface: str) -> KernelObservation | None:
 
 
 def authorize_routed_http(policy: RoutedHttpPolicy, interface: str) -> EffectiveRoutedHttpAuthorization | None:
-    """No opt-in or asserted topology may independently create authority."""
+    """Authorize only the configured, observed physical Ethernet interface."""
     if type(policy) is not RoutedHttpPolicy or not policy.authorizes(interface):
         return None
     observed = collect_kernel_observation(interface)
     if (observed is None or observed.interface != interface or observed.ifindex <= 0
-            or not observed.peer_exclusivity_proven
-            or not dedicated_interface_verified(observed.topology)):
+            or not observed.topology.physical or observed.topology.kind != "ethernet"
+            or observed.topology.master is not None):
         return None
     return EffectiveRoutedHttpAuthorization(interface, observed.ifindex, _SEAL)
 
@@ -91,5 +87,6 @@ def still_authorized(auth: EffectiveRoutedHttpAuthorization | None, interface: s
         return False
     observed = collect_kernel_observation(interface)
     return bool(observed is not None and observed.ifindex == auth.ifindex
-                and observed.interface == interface and observed.peer_exclusivity_proven
-                and dedicated_interface_verified(observed.topology))
+                and observed.interface == interface and observed.topology.physical
+                and observed.topology.kind == "ethernet"
+                and observed.topology.master is None)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import time
 from pathlib import Path
 
 from ocpp_discover import diagnosis, first_contact as discover, handoff, reconcile, routed_http_policy, routed_http_runtime
+from ocpp_discover.lab_provenance_contract import _LAB_NETWORKS
 from ocpp_csms.install_cutover import connection_markers, wait_for_reconnect
 
 _DEFAULT_PERSISTENT_DIR = "/var/lib/ocpp-discover"
@@ -14,7 +16,11 @@ _DEFAULT_RUNTIME_DIR = "/run/ocpp-discover"
 _DEFAULT_BOOT_TIMEOUT = 180.0
 _DEFAULT_DIAGNOSIS_SECONDS = 5.0
 _LOG = logging.getLogger("ocpp-discover")
-_DEFERRED_ARP_REASONS = frozenset({"no_unresolved_arp_candidate", "ambiguous_arp_candidates"})
+_DEFERRED_REASONS = frozenset({
+    "no_unresolved_arp_candidate", "ambiguous_arp_candidates",
+    "no_plaintext_websocket_upgrade", "secure_or_opaque_traffic",
+    "provisional_redirect_unproven",
+})
 _MAX_PASSIVE_RETRY_SECONDS = 60.0
 
 
@@ -59,6 +65,17 @@ def _observe_persistent(data_dir: str | Path, persistent_dir: str | Path, *, boo
     return _wait_for_recovery(data_dir, persistent_dir, receipt, diagnosis_seconds=diagnosis_seconds, timeout=validation_timeout)
 
 
+def _reject_known_lab_destination(receipt: object) -> None:
+    """Refuse to promote RFC test/benchmark destinations to durable field state.
+
+    This is defense in depth, NOT physical-origin attestation or a substitute for
+    an isolated synthetic runner. The service must not itself run synthetic tests.
+    """
+    for address in getattr(receipt, "destination_ips", ()):
+        if any(ipaddress.ip_address(address) in network for network in _LAB_NETWORKS):
+            raise RuntimeError("synthetic_destination_cannot_be_persisted")
+
+
 def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persistent_dir: str | Path, interface: str, listen_port: int, grace_seconds: float, arp_seconds: float, tcp_seconds: float, connect_timeout: float, policy: routed_http_runtime.EffectiveRoutedHttpAuthorization | None = None) -> dict[str, object]:
     """Wait silently for first charger evidence, prove it, and promote it to durable state."""
     evidence = diagnosis.wait_for_discovery_evidence(interface, routed_http_policy=policy)
@@ -78,8 +95,24 @@ def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persis
     charger_id = getattr(result, "charger_id", None)
     if receipt is None or charger_id is None:
         raise RuntimeError("discovery_did_not_produce_proven_adaptation")
+    _reject_known_lab_destination(receipt)
     handoff._promote_persistent_adaptation(persistent_dir, receipt)
     return {"status": "discovered", "chargers": [charger_id], "result": result.to_json()}
+
+
+def _configured_link_is_down(interface: str) -> bool:
+    """Only defer passive observation while a present configured link is down.
+
+    Missing/virtual interfaces cannot authorize routed HTTP but must retain
+    the pre-existing ARP/local diagnosis behavior, including hermetic tests.
+    """
+    if not routed_http_policy._INTERFACE.fullmatch(interface):
+        return False
+    state = Path("/sys/class/net") / interface / "operstate"
+    try:
+        return state.read_text(encoding="ascii").strip() in {"down", "dormant", "lowerlayerdown"}
+    except OSError:
+        return False
 
 
 def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR, persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR, interface: str = "eth0", listen_port: int = 9000, grace_seconds: float = 10.0, arp_seconds: float = 15.0, tcp_seconds: float = 15.0, connect_timeout: float = 30.0, boot_timeout: float = _DEFAULT_BOOT_TIMEOUT, wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS, max_cycles: int | None = None):
@@ -89,9 +122,9 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     leave it unset, so successful discovery/validation never terminates the service.
     """
     cycles = 0
-    policy = routed_http_policy.load_policy()
-    # Only a locally collected, independently proven topology can mint authority.
-    # Stage C does not yet certify physical peer exclusivity: default is denied.
+    policy = routed_http_policy.load_policy(default_interface=interface)
+    # An explicit operator disable overrides default-on; a pinned ifindex still
+    # guards the configured physical interface at the redirect boundary.
     authorization = routed_http_runtime.authorize_routed_http(policy, interface)
 
     if handoff.discovered_path(persistent_dir).exists():
@@ -99,12 +132,25 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     else:
         retry_seconds = max(1.0, wait_interval)
         while True:
+            # Link state may be down during boot. Retry the read-only interface
+            # observation rather than blocking forever with no TCP/80 authority.
+            # Explicit operator disable still follows the ordinary passive path.
+            if policy.enabled:
+                authorization = routed_http_runtime.authorize_routed_http(policy, interface)
+                if authorization is None and _configured_link_is_down(interface):
+                    cycles += 1
+                    if max_cycles is not None and cycles >= max_cycles:
+                        return {"status": "deferred", "reason": "routed_http_interface_unavailable", "chargers": []}
+                    _LOG.info("Discover configured interface %s unavailable; retry in %.0fs", interface, retry_seconds)
+                    time.sleep(retry_seconds)
+                    retry_seconds = min(retry_seconds * 2, _MAX_PASSIVE_RETRY_SECONDS)
+                    continue
             try:
                 outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout, policy=authorization)
                 break
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 reason = str(exc)
-                if reason not in _DEFERRED_ARP_REASONS:
+                if reason not in _DEFERRED_REASONS:
                     raise
                 cycles += 1
                 # Expected, inconclusive evidence is not a service failure. Never

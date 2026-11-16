@@ -575,26 +575,34 @@ unrelated HTTP could be disrupted during the temporary redirect. Never
 authorize this on a shared general-purpose HTTP network. Local SSH, HTTPS
 and TLS/WSS traffic must not be intercepted.
 
-**Routed external TCP/80 remains disabled by default.** The legacy
-`OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80` environment variable is **not** an
-authorization mechanism. The current service loads an optional persistent
-`/etc/ocpp-discover/routed-http-policy.json` at startup. Its exact v1 JSON
-fields are `version` (integer `1`), `enabled` (boolean), `interface`
-(a matching interface name) and `dedicated_charger_network_verified`
-(boolean operator attestation). Enabling requires an explicit positive
-attestation, not automatic network detection. Missing file means disabled;
-malformed, untrusted or mismatched policy fails closed. The file must be a
-root-owned regular file with mode `0600`, bounded UTF-8 JSON, and a trusted
-immediate parent directory. The loader uses no-follow file opening and
-checks the opened descriptor; it neither creates nor enables the policy.
+**Routed plaintext TCP/80 is enabled by default** for the Discover
+service's configured charger-facing physical Ethernet interface when no policy
+file exists. The legacy `OCPP_DISCOVER_ALLOW_ROUTED_HTTP_80` environment
+variable does not grant authority. An existing private policy file at
+`/etc/ocpp-discover/routed-http-policy.json` takes precedence: v1 requires
+`version: 1`, boolean `enabled`, and exact `interface`. The optional
+legacy boolean `dedicated_charger_network_verified` is accepted but no
+longer grants or blocks permission. An explicit `enabled: false` remains
+disabled. Invalid/malformed/untrusted policy fails closed, and the policy
+loader retains root ownership, mode `0600`, no-follow and ancestor checks.
 
-Full ancestor-path hardening for the policy file was merged in
-[PR #359](https://github.com/arthexis/ocpp-csms/pull/359) and is used by
-the startup policy loader. That PR also added a **pure offline**
-dedicated-network topology evaluator; runtime topology validation and
-physical field acceptance remain separate #355 stages. Do not infer that
-opt-in alone makes routed discovery safe for a particular field network;
-physical EV Ready acceptance remains unverified.
+At runtime, permission additionally requires a readable, active physical
+Ethernet interface with the configured name; the kernel `ifindex` is pinned
+and reread immediately before applying a provisional redirect. Kernel
+observations do not prove external peer exclusivity and are not used as an
+impossible mandatory gate. The selected interface must be charger-facing;
+no management interface or route is automatically modified. Existing strict
+TCP/80 matching and session evidence checks still apply. Unexpected errors
+remain visible, while inconclusive first-contact evidence is deferred with
+bounded exponential backoff (maximum 60 seconds per delay).
+
+Known benchmark and documentation-only destination ranges are blocked from
+field persistence as defense in depth. **This does not by itself isolate a
+synthetic replay or prove physical origin.** Realistic simulator runs require
+a separate disposable network namespace, CSMS database and temporary firewall
+state; cloud hermetic tests must not touch live accounting or production rules.
+The physical EV Ready connection, forwarding and reboot recovery remain
+unverified in issue #355.
 
 After a provisional redirect, Discover must observe the matching plaintext
 WebSocket upgrade and charger path identity, correlate its source TCP peer
