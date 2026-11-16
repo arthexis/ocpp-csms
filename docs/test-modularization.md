@@ -76,6 +76,19 @@ Two additional root-level tests are relocated **byte-for-byte**, without changin
 
 The schema verification suite covers fail-closed schema/WAL checks and transaction/export identity preservation; the charger-ratings suite covers nominal rating metadata and its export representation, **not** measured power or charging control. These are categorization changes only. Both destination directories are non-package test directories without nested `conftest.py`, so root `tests/conftest.py` remains in scope; no changes to `ocpp_csms` source, SQLite v8, `ocpp-csms/export/v1`, or test code. The CI workflow continues to collect `tests/` recursively. Compare exact Git blobs, full pytest node-ID multisets with only these two path prefixes normalized, and pass/skip counts against the exact `main` baseline `80e257aec446fb08db0bae309a80a48ac3366b71` under Python 3.11/3.13. Keep #334/#335 independent and #336 open; PR remains Draft until separately authorized.
 
+## Stage G: split status presentation checks by behavior
+
+Split the oversized `tests/status/test_status.py` at the exact boundary before `test_status_last_seen_omits_microseconds_and_aligns_long_ids`. Move exactly four complete test functions, **without editing their bodies or names**, into `tests/status/test_status_formatting.py`:
+
+- `test_status_last_seen_omits_microseconds_and_aligns_long_ids`
+- `test_timestamp_presentation_preserves_raw_evidence`
+- `test_connected_duration_formats_seconds_minutes_hours_and_days`
+- `test_status_table_displays_connection_age_not_boolean`
+
+The retained original module tests derived status, connection liveness, schema reporting and filtering; the new module tests only presentation (timestamp, duration and table layout). Each moved test retains its own local imports. No shared helpers, fixtures, assertions, test parameters or monkeypatch targets are moved or changed. Both modules inherit `tests/conftest.py` with no new `__init__.py` or `conftest.py`.
+
+**Acceptance:** compare the complete pytest collected node-ID multiset, normalizing only these four node IDs from `tests/status/test_status_formatting.py` back to their original `tests/status/test_status.py` prefix; run Python 3.11/3.13 CSMS+Discover and Ansible contract CI at the exact PR head, verify pass/skip counts and no new failures. Compare test bodies byte-for-byte. No production code, SQL, schema v8, export/v1, deployment, workflow or field operations. Keep #336 open and the PR Draft pending separate acceptance.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
