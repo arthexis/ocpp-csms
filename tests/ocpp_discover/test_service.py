@@ -140,17 +140,17 @@ def test_service_fails_closed_when_discovered_receipt_is_invalid(tmp_path, monke
 def test_service_loads_and_threads_disabled_policy(tmp_path, monkeypatch):
     from ocpp_discover.routed_http_policy import RoutedHttpPolicy
     observed = []
-    monkeypatch.setattr(service.routed_http_policy, "load_policy", lambda: RoutedHttpPolicy(False, "eth0"))
+    monkeypatch.setattr(service.routed_http_policy, "load_policy", lambda **kwargs: RoutedHttpPolicy(False, "eth0"))
     monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda interface, **kw: observed.append(kw["routed_http_policy"]) or diagnosis.DiscoveryEvidence("candidate", "arp"))
     monkeypatch.setattr(service.discover, "run_discovery", lambda **kw: observed.append(kw["routed_http_policy"]) or discovery_result())
     monkeypatch.setattr(service.handoff, "_promote_persistent_adaptation", lambda *args: None)
     service.run_service(data_dir=tmp_path, persistent_dir=tmp_path / "persistent", max_cycles=1)
-    assert observed == [None, None]  # Offline topology never mints runtime authority
+    assert observed == [None, None]  # Explicit disable must not mint runtime authority
 
 
 def test_invalid_policy_fails_before_capture(tmp_path, monkeypatch):
     from ocpp_discover.routed_http_policy import RoutedHttpPolicyError
-    def denied():
+    def denied(**kwargs):
         raise RoutedHttpPolicyError("invalid_policy")
     monkeypatch.setattr(service.routed_http_policy, "load_policy", denied)
     monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence", lambda *args, **kw: pytest.fail("must not capture"))
