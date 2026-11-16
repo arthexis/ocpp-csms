@@ -186,13 +186,20 @@ def isolated_probe() -> dict[str, object]:
         delete_args = ["delete", "table", "ip", "ocpp_field_redirect"]
         if _nft_table_exists():
             raise RuntimeError("lab_redirect_table_preexists")
+        installed = False
         try:
-            _nft(["-f", "-"], text=ruleset)
+            try:
+                _nft(["-f", "-"], text=ruleset)
+                installed = True
+            except BaseException:
+                # Apply can fail after partially creating the table.
+                if _nft_table_exists():
+                    _nft(delete_args)
+                raise
             _nft(table_args)
         finally:
-            # nft -f can fail *after* partially installing its table.
-            # Check even if the apply command raised; remove only our table.
-            if _nft_table_exists():
+            # Inspection failure cannot prevent removal after a successful apply.
+            if installed:
                 _nft(delete_args)
         if Path("/var/lib/ocpp-discover/discovered.json").exists():
             raise RuntimeError("lab_field_state_modified")
