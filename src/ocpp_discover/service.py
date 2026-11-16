@@ -14,7 +14,11 @@ _DEFAULT_RUNTIME_DIR = "/run/ocpp-discover"
 _DEFAULT_BOOT_TIMEOUT = 180.0
 _DEFAULT_DIAGNOSIS_SECONDS = 5.0
 _LOG = logging.getLogger("ocpp-discover")
-_DEFERRED_ARP_REASONS = frozenset({"no_unresolved_arp_candidate", "ambiguous_arp_candidates"})
+_DEFERRED_REASONS = frozenset({
+    "no_unresolved_arp_candidate", "ambiguous_arp_candidates",
+    "no_plaintext_websocket_upgrade", "secure_or_opaque_traffic",
+    "provisional_redirect_unproven",
+})
 _MAX_PASSIVE_RETRY_SECONDS = 60.0
 
 
@@ -89,9 +93,9 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     leave it unset, so successful discovery/validation never terminates the service.
     """
     cycles = 0
-    policy = routed_http_policy.load_policy()
-    # Only a locally collected, independently proven topology can mint authority.
-    # Stage C does not yet certify physical peer exclusivity: default is denied.
+    policy = routed_http_policy.load_policy(default_interface=interface)
+    # An explicit operator disable overrides default-on; a pinned ifindex still
+    # guards the configured physical interface at the redirect boundary.
     authorization = routed_http_runtime.authorize_routed_http(policy, interface)
 
     if handoff.discovered_path(persistent_dir).exists():
@@ -102,9 +106,9 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
             try:
                 outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout, policy=authorization)
                 break
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 reason = str(exc)
-                if reason not in _DEFERRED_ARP_REASONS:
+                if reason not in _DEFERRED_REASONS:
                     raise
                 cycles += 1
                 # Expected, inconclusive evidence is not a service failure. Never
