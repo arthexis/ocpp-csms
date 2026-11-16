@@ -89,6 +89,24 @@ The retained original module tests derived status, connection liveness, schema r
 
 **Acceptance:** compare the complete pytest collected node-ID multiset, normalizing only these four node IDs from `tests/status/test_status_formatting.py` back to their original `tests/status/test_status.py` prefix; run Python 3.11/3.13 CSMS+Discover and Ansible contract CI at the exact PR head, verify pass/skip counts and no new failures. Compare test bodies byte-for-byte. No production code, SQL, schema v8, export/v1, deployment, workflow or field operations. Keep #336 open and the PR Draft pending separate acceptance.
 
+## Stage H: bounded duplicate-fixture audit and canonical CLI parser reuse
+
+**Scope at baseline `aba0bdf0317c5212ce17091c661551a2e1671a35`:** inspect the existing four pytest configuration files (`tests/conftest.py`, `tests/cli/conftest.py`, `tests/control/conftest.py` and `tests/ocpp_discover/conftest.py`) and consolidate only the one demonstrably equivalent fixture override.
+
+| Fixture / file | Finding | Decision |
+| --- | --- | --- |
+| `cli_parser` in `tests/conftest.py` and `tests/cli/conftest.py` | Both are default function-scoped and return the first result of the same `ocpp_csms.cli.build_parser()` call; the nested fixture shadows the root one in CLI tests | Remove **only** the nested duplicate and its now-unused import; let CLI tests inherit the root fixture |
+| `parse_cli` and `profile_control` in `tests/cli/conftest.py` | CLI parsing wrapper and scoped patched control stub; no identical equivalent in the other inspected conftests | Keep unchanged, including fixture dependency on `cli_parser` |
+| `record_runtime_event` in `tests/conftest.py` | Deliberate SQLite insert helper bound to `tmp_path`, not equivalent to parser/session fixtures | Keep unchanged; preserve transaction/DB authority semantics |
+| `charge_point_session` in `tests/control/conftest.py` | Domain-specific session with archive, event store and fake transport; no equivalent fixture was found among the four conftests | Keep unchanged |
+| `isolate_default_persistent_nftables` in `tests/ocpp_discover/conftest.py` | Autouse safety isolation, redirects nftables file effects to temporary paths and prevents host network state mutation; not a generic fixture | Keep unchanged, **never** move to the test root |
+
+**Safety and scope:** fixture discovery for `tests/cli/` still walks up to `tests/conftest.py`. No other fixture names, declarations, scopes, autouse policies, test functions, IDs, assertions, mocks, parametrizations, imports in the tests, or runtime code change. The root canonical fixture still constructs a fresh parser per dependent test. Search of current repository tests shows no explicit use of `tests.cli.conftest` as an import path; the parser fixture remains accessible as `cli_parser`.
+
+**Acceptance:** exact two-path diff (`tests/cli/conftest.py` and this roadmap), compare the count and names of collected pytest node IDs unchanged, the same pass/skip totals in Debian 12/Python 3.11, Debian 13/Python 3.13 and Ubuntu 24.04/Python 3.13, plus Discover and Ansible hermetic CI. CI must complete at exact PR head. No local/network/hardware testing and no deployment.
+
+**Audit boundary:** this is a focused conftest-fixture audit, **not** a claim that all inline helpers across the complete test suite are duplicate-free. No parameterization is introduced: do not group cases on superficial similarity when their identity, event ordering, SQLite/transaction semantics or negative checks differ. Subsequent work may inspect module-local helpers with one independently reviewable change per proven equivalent group. Keep #336 OPEN and this change Draft until separately authorized acceptance.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
