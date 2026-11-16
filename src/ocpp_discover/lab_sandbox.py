@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -22,6 +23,8 @@ from ocpp_discover import first_contact, provisional
 from ocpp_discover.websocket import _websocket_receipt
 
 _PARENT_NETNS = "OCPP_DISCOVER_LAB_PARENT_NETNS"
+_PARENT_MNTNS = "OCPP_DISCOVER_LAB_PARENT_MNTNS"
+_PARENT_USERNS = "OCPP_DISCOVER_LAB_PARENT_USERNS"
 _TMPFS_PATHS = ("/tmp", "/run", "/var/lib", "/etc")
 _CHARGER = "EVREADY_G3_SYNTHETIC"
 _SOURCE = "198.18.0.12"
@@ -29,7 +32,7 @@ _DESTINATION = "198.18.0.1"
 _PORT = 49152
 
 
-def sandbox_command(python_executable: str, parent_netns: str) -> list[str]:
+def sandbox_command(python_executable: str, parent_netns: str, *, parent_mntns: str | None = None, parent_userns: str | None = None) -> list[str]:
     """Build immutable, read-only-host isolation; no shell, sudo or host nft.
 
     bwrap --unshare-all also creates a new user/net/mount/IPC/PID namespace.
@@ -38,14 +41,20 @@ def sandbox_command(python_executable: str, parent_netns: str) -> list[str]:
     """
     if not Path(python_executable).is_absolute():
         raise ValueError("lab_python_must_be_absolute")
-    if not parent_netns.startswith("net:[") or not parent_netns.endswith("]"):
+    if not re.fullmatch(r"net:\[[0-9]+\]", parent_netns):
         raise ValueError("invalid_parent_network_namespace")
+    if parent_mntns is not None and not re.fullmatch(r"mnt:\[[0-9]+\]", parent_mntns):
+        raise ValueError("invalid_parent_mount_namespace")
+    if parent_userns is not None and not re.fullmatch(r"user:\[[0-9]+\]", parent_userns):
+        raise ValueError("invalid_parent_user_namespace")
     command = ["bwrap", "--die-with-parent", "--new-session", "--unshare-all",
                "--clearenv", "--ro-bind", "/", "/"]
     for directory in _TMPFS_PATHS:
         command += ["--tmpfs", directory]
     command += ["--proc", "/proc", "--dev", "/dev", "--chdir", "/tmp",
                 "--setenv", _PARENT_NETNS, parent_netns,
+                "--setenv", _PARENT_MNTNS, parent_mntns or "",
+                "--setenv", _PARENT_USERNS, parent_userns or "",
                 "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
                 "--setenv", "PYTHONNOUSERSITE", "1",
                 "--setenv", "HOME", "/tmp",
@@ -177,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
         if shutil.which(binary) is None:
             raise RuntimeError("lab_dependency_missing_" + binary)
     parent = os.readlink("/proc/self/ns/net")
-    command = sandbox_command(sys.executable, parent)
+    command = sandbox_command(sys.executable, parent,
+                              parent_mntns=os.readlink("/proc/self/ns/mnt"),
+                              parent_userns=os.readlink("/proc/self/ns/user"))
     return subprocess.run(command, check=False, timeout=120).returncode
 
 
