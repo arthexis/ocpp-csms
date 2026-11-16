@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 import ocpp_csms.cli.profile as profile_cli
-from ocpp_csms.cli import build_parser
 
 
 class ProfileControlStub:
@@ -14,12 +13,6 @@ class ProfileControlStub:
     async def __call__(self, data_dir, request):
         self.calls.append((data_dir, request))
         return self.response
-
-
-@pytest.fixture
-def cli_parser():
-    parser, _ = build_parser()
-    return parser
 
 
 @pytest.fixture
