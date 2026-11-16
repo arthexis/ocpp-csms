@@ -57,6 +57,7 @@ def test_interface_down_at_boot_then_up_mints_scoped_authority(tmp_path, monkeyp
     from ocpp_discover import handoff
     seen = []
     delayed = iter([None, None, None, _physical("eth0", 7)])
+    monkeypatch.setattr(service, "_configured_link_is_down", lambda interface: True)
     monkeypatch.setattr(service.routed_http_policy, "load_policy",
                         lambda **kwargs: RoutedHttpPolicy(True, "eth0"))
     monkeypatch.setattr(service.routed_http_runtime, "authorize_routed_http",
@@ -81,6 +82,7 @@ def test_missing_interface_remains_deferred_with_bounded_attempts(tmp_path, monk
                         lambda **kwargs: RoutedHttpPolicy(True, "eth0"))
     monkeypatch.setattr(service.routed_http_runtime, "authorize_routed_http",
                         lambda policy, interface: None)
+    monkeypatch.setattr(service, "_configured_link_is_down", lambda interface: True)
     monkeypatch.setattr(service.diagnosis, "wait_for_discovery_evidence",
                         lambda *a, **kw: pytest.fail("must not wait without permission"))
     monkeypatch.setattr(service.time, "sleep", lambda interval: delays.append(interval))
