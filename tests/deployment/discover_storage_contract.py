@@ -42,7 +42,8 @@ def render_unit(selected: Path) -> str:
     jinja = Environment(undefined=StrictUndefined)
     jinja.filters["mandatory"] = lambda value: value
     ctx = {"ansible_env": {"HOME": str(Path.home())},
-           "ocpp_csms_service_data_dir": str(selected)}
+           "ocpp_csms_service_data_dir": str(selected),
+           "ocpp_csms_release_id": (Path.home() / ".local/share/ocpp-csms/current").resolve(strict=True).name}
     for name, value in defaults.items():
         ctx[name] = jinja.from_string(value).render(ctx) if isinstance(value, str) else value
     # A separate CI-only Ansible playbook targets an unaddressed dummy, never
