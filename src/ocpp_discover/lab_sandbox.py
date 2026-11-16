@@ -69,7 +69,7 @@ def require_sandbox() -> None:
                   ("user", _PARENT_USERNS))
     for kind, variable in identities:
         parent = os.environ.get(variable, "")
-        if not re.fullmatch(rf"{kind}:\\[[0-9]+\\]", parent):
+        if not re.fullmatch(rf"{kind}:\[[0-9]+\]", parent):
             raise RuntimeError("lab_parent_namespace_not_attested")
         if os.readlink(f"/proc/self/ns/{kind}") == parent:
             raise RuntimeError("lab_" + kind + "_namespace_not_isolated")
