@@ -63,15 +63,14 @@ def test_interface_down_at_boot_then_up_mints_scoped_authority(tmp_path, monkeyp
                         lambda policy, interface: delayed.__next__())
     monkeypatch.setattr(service, "_wait_then_discover",
                         lambda **kwargs: seen.append(kwargs["policy"]) or
-                        SimpleNamespace(charger_id="CP7", receipt=object(),
-                                        to_json=lambda: {"status": "connected"}))
+                        {"status": "discovered", "chargers": ["CP7"]})
     monkeypatch.setattr(service.handoff, "discovered_path",
                         lambda persistent_dir: tmp_path / "no-persistence")
     # _wait_then_discover is stubbed to return a result without actual persistence.
     monkeypatch.setattr(service.time, "sleep", lambda interval: seen.append(interval))
     result = service.run_service(data_dir=tmp_path, persistent_dir=tmp_path / "state",
                                  wait_interval=1, max_cycles=3)
-    assert result["status"] == "connected"
+    assert result["status"] == "discovered"
     assert seen[:2] == [1.0, 2.0]
     assert isinstance(seen[2], runtime.KernelObservation)
 
