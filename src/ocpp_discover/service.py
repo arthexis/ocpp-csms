@@ -117,6 +117,19 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
     else:
         retry_seconds = max(1.0, wait_interval)
         while True:
+            # Link state may be down during boot. Retry the read-only interface
+            # observation rather than blocking forever with no TCP/80 authority.
+            # Explicit operator disable still follows the ordinary passive path.
+            if policy.enabled:
+                authorization = routed_http_runtime.authorize_routed_http(policy, interface)
+                if authorization is None:
+                    cycles += 1
+                    if max_cycles is not None and cycles >= max_cycles:
+                        return {"status": "deferred", "reason": "routed_http_interface_unavailable", "chargers": []}
+                    _LOG.info("Discover configured interface %s unavailable; retry in %.0fs", interface, retry_seconds)
+                    time.sleep(retry_seconds)
+                    retry_seconds = min(retry_seconds * 2, _MAX_PASSIVE_RETRY_SECONDS)
+                    continue
             try:
                 outcome = _wait_then_discover(data_dir=data_dir, runtime_dir=runtime_dir, persistent_dir=persistent_dir, interface=interface, listen_port=listen_port, grace_seconds=grace_seconds, arp_seconds=arp_seconds, tcp_seconds=tcp_seconds, connect_timeout=connect_timeout, policy=authorization)
                 break
