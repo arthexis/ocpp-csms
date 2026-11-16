@@ -45,7 +45,6 @@ def test_disabled_config_never_authorizes(tmp_path):
     {"enabled": "true"}, {"enabled": 1}, {"version": True},
     {"version": 2}, {"interface": "lo"}, {"interface": "eth0;reboot"},
     {"interface": "x" * 16}, {"dedicated_charger_network_verified": "true"},
-    {"dedicated_charger_network_verified": False},
     {"surprise": True},
 ])
 def test_invalid_policy_is_rejected(change):
@@ -53,6 +52,26 @@ def test_invalid_policy_is_rejected(change):
     data.update(change)
     with pytest.raises(policy.RoutedHttpPolicyError):
         policy.parse_policy(data)
+
+
+def test_legacy_unverified_attestation_no_longer_blocks_explicit_enable():
+    assert policy.parse_policy(payload(verified=False)).authorizes("eth0")
+
+
+def test_missing_policy_with_configured_interface_is_default_on(tmp_path):
+    missing = tmp_path / "missing.json"
+    loaded = policy.load_policy(missing, owner_uid=os.getuid(), default_interface="eth0")
+    assert loaded.authorizes("eth0")
+    assert not loaded.authorizes("wlan0")
+    assert not missing.exists()
+
+
+def test_explicit_disable_wins_over_default_on(tmp_path):
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(payload(enabled=False, verified=False)))
+    path.chmod(0o600)
+    loaded = policy.load_policy(path, owner_uid=os.getuid(), default_interface="eth0")
+    assert not loaded.authorizes("eth0")
 
 
 def test_missing_required_property_is_rejected():
