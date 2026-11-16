@@ -14,7 +14,8 @@ import stat
 
 DEFAULT_POLICY_PATH = Path("/etc/ocpp-discover/routed-http-policy.json")
 _INTERFACE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
-_KEYS = frozenset({"version", "enabled", "interface", "dedicated_charger_network_verified"})
+_REQUIRED_KEYS = frozenset({"version", "enabled", "interface"})
+_LEGACY_ATTESTATION = "dedicated_charger_network_verified"
 
 
 class RoutedHttpPolicyError(ValueError):
@@ -32,13 +33,15 @@ class RoutedHttpPolicy:
 
 def parse_policy(payload: object) -> RoutedHttpPolicy:
     """Require a minimal, exact v1 declaration; no implicit boolean coercion."""
-    if type(payload) is not dict or set(payload) != _KEYS:
+    if (type(payload) is not dict or not _REQUIRED_KEYS.issubset(payload)
+            or set(payload) - (_REQUIRED_KEYS | {_LEGACY_ATTESTATION})):
         raise RoutedHttpPolicyError("invalid_routed_http_policy_keys")
     if type(payload["version"]) is not int or payload["version"] != 1:
         raise RoutedHttpPolicyError("invalid_routed_http_policy_version")
     if type(payload["enabled"]) is not bool:
         raise RoutedHttpPolicyError("invalid_routed_http_policy_enabled")
-    if type(payload["dedicated_charger_network_verified"]) is not bool:
+    if (_LEGACY_ATTESTATION in payload
+            and type(payload[_LEGACY_ATTESTATION]) is not bool):
         raise RoutedHttpPolicyError("invalid_dedicated_network_attestation")
     interface = payload["interface"]
     if not isinstance(interface, str) or not _INTERFACE.fullmatch(interface) or interface == "lo":
