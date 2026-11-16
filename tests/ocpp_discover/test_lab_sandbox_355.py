@@ -14,7 +14,9 @@ from ocpp_discover import lab_sandbox
 def test_launcher_requires_all_isolation_layers():
     cmd = lab_sandbox.sandbox_command("/usr/bin/python3", "net:[4026532000]")
     assert cmd[:4] == ["bwrap", "--die-with-parent", "--new-session", "--unshare-all"]
-    assert ["--ro-bind", "/", "/"] == cmd[4:7]
+    assert cmd[4] == "--clearenv"
+    assert ["--ro-bind", "/", "/"] == cmd[5:8]
+    assert ["--setenv", "HOME", "/tmp"] == cmd[cmd.index("HOME") - 1:cmd.index("HOME") + 2]
     for path in ("/tmp", "/run", "/var/lib", "/etc"):
         assert cmd.count("--tmpfs") == 4
         position = cmd.index(path)
