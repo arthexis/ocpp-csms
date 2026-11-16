@@ -41,12 +41,15 @@ def sandbox_command(python_executable: str, parent_netns: str) -> list[str]:
     if not parent_netns.startswith("net:[") or not parent_netns.endswith("]"):
         raise ValueError("invalid_parent_network_namespace")
     command = ["bwrap", "--die-with-parent", "--new-session", "--unshare-all",
-               "--ro-bind", "/", "/"]
+               "--clearenv", "--ro-bind", "/", "/"]
     for directory in _TMPFS_PATHS:
         command += ["--tmpfs", directory]
     command += ["--proc", "/proc", "--dev", "/dev", "--chdir", "/tmp",
                 "--setenv", _PARENT_NETNS, parent_netns,
                 "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
+                "--setenv", "PYTHONNOUSERSITE", "1",
+                "--setenv", "HOME", "/tmp",
+                "--setenv", "PATH", "/usr/sbin:/usr/bin:/sbin:/bin",
                 "--", python_executable, "-m", "ocpp_discover.lab_sandbox", "--inside"]
     return command
 
