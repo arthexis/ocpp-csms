@@ -93,6 +93,18 @@ def _nft(arguments: list[str], *, text: str | None = None) -> subprocess.Complet
                           capture_output=True, check=True, timeout=10)
 
 
+def _nft_table_exists() -> bool:
+    """Read-only existence check; errors other than missing table remain fatal."""
+    try:
+        _nft(["list", "table", "ip", "ocpp_field_redirect"])
+        return True
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").lower()
+        if "no such file or directory" in detail or "does not exist" in detail:
+            return False
+        raise
+
+
 def isolated_probe() -> dict[str, object]:
     """Real nft operations are allowed exclusively in the isolated netns.
 
@@ -168,14 +180,20 @@ def isolated_probe() -> dict[str, object]:
                 or "ip daddr " + _DESTINATION not in ruleset):
             raise RuntimeError("lab_redirect_scope_broadened")
         _nft(["-c", "-f", "-"], text=ruleset)
-        installed = False
+        # A fresh network namespace must contain no pre-existing Discover table.
+        # Never delete a table that this probe did not first prove absent.
+        table_args = ["list", "table", "ip", "ocpp_field_redirect"]
+        delete_args = ["delete", "table", "ip", "ocpp_field_redirect"]
+        if _nft_table_exists():
+            raise RuntimeError("lab_redirect_table_preexists")
         try:
             _nft(["-f", "-"], text=ruleset)
-            installed = True
-            _nft(["list", "table", "ip", "ocpp_field_redirect"])
+            _nft(table_args)
         finally:
-            if installed:
-                _nft(["delete", "table", "ip", "ocpp_field_redirect"])
+            # nft -f can fail *after* partially installing its table.
+            # Check even if the apply command raised; remove only our table.
+            if _nft_table_exists():
+                _nft(delete_args)
         if Path("/var/lib/ocpp-discover/discovered.json").exists():
             raise RuntimeError("lab_field_state_modified")
         return {"isolated": True, "temporary_nft_cleaned": True,
