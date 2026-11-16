@@ -100,6 +100,21 @@ def _wait_then_discover(*, data_dir: str | Path, runtime_dir: str | Path, persis
     return {"status": "discovered", "chargers": [charger_id], "result": result.to_json()}
 
 
+def _configured_link_is_down(interface: str) -> bool:
+    """Only defer passive observation while a present configured link is down.
+
+    Missing/virtual interfaces cannot authorize routed HTTP but must retain
+    the pre-existing ARP/local diagnosis behavior, including hermetic tests.
+    """
+    if not routed_http_policy._INTERFACE.fullmatch(interface):
+        return False
+    state = Path("/sys/class/net") / interface / "operstate"
+    try:
+        return state.read_text(encoding="ascii").strip() in {"down", "dormant", "lowerlayerdown"}
+    except OSError:
+        return False
+
+
 def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNTIME_DIR, persistent_dir: str | Path = _DEFAULT_PERSISTENT_DIR, interface: str = "eth0", listen_port: int = 9000, grace_seconds: float = 10.0, arp_seconds: float = 15.0, tcp_seconds: float = 15.0, connect_timeout: float = 30.0, boot_timeout: float = _DEFAULT_BOOT_TIMEOUT, wait_interval: float = _DEFAULT_DIAGNOSIS_SECONDS, max_cycles: int | None = None):
     """Continuously observe, diagnose, and reconcile the proven charger adaptation.
 
@@ -122,7 +137,7 @@ def run_service(*, data_dir: str | Path, runtime_dir: str | Path = _DEFAULT_RUNT
             # Explicit operator disable still follows the ordinary passive path.
             if policy.enabled:
                 authorization = routed_http_runtime.authorize_routed_http(policy, interface)
-                if authorization is None:
+                if authorization is None and _configured_link_is_down(interface):
                     cycles += 1
                     if max_cycles is not None and cycles >= max_cycles:
                         return {"status": "deferred", "reason": "routed_http_interface_unavailable", "chargers": []}
