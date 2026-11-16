@@ -111,9 +111,9 @@ def isolated_probe() -> dict[str, object]:
         capture = (
             f"12:00:00.000001 IP {_SOURCE}.{_PORT} > {_DESTINATION}.80: "
             "Flags [P.], seq 1, length 180\n"
-            f"GET /ocpp/{_CHARGER} HTTP/1.1\r\n"
-            f"Host: {_DESTINATION}\r\n"
-            "Upgrade: websocket\r\nConnection: keep-alive, Upgrade\r\n\r\n"
+            f"GET /ocpp/{_CHARGER} HTTP/1.1\n"
+            f"Host: {_DESTINATION}\n"
+            "Upgrade: websocket\nConnection: keep-alive, Upgrade\n\n"
         )
         receipt = _websocket_receipt(
             capture, interface="eth0", listen_port=9000,
