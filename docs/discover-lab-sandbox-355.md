@@ -12,12 +12,14 @@ Watchtower, or with a live charger's credentials**:
 python -m ocpp_discover.lab_sandbox
 ```
 
-The launcher uses a fresh user/network/mount/PID/IPC namespace via
-`bwrap --unshare-all`, a read-only mount of the host root, separate tmpfs
-mounts for `/tmp`, `/run`, `/var/lib`, and `/etc`, a new `/proc` and
-`/dev`, no shared network, no shell and no host firewall command. The
-child checks that its network namespace differs from the parent and its
-writable state is mounted separately, otherwise refusing to proceed. A
+The launcher uses fresh user/network/mount/PID/IPC namespaces via
+`bwrap --unshare-all --clearenv`, a read-only mount of the host root, private
+tmpfs mounts for `/tmp`, `/run`, `/var/lib`, and `/etc`, a new `/proc`
+and `/dev`, and no shared network or shell. The child checks that its
+network, mount and user namespaces differ from recorded parent identities;
+`/proc/self/mountinfo` must also confirm an actual read-only root and
+`tmpfs` filesystem types for every writable state mount. An arbitrary
+`--inside` invocation without these properties fails closed. A
 disposable schema-8 SQLite file is created under the private `/tmp` and
 removed by namespace teardown. No CSMS account or actual production DB
 is opened for writing.
@@ -28,7 +30,7 @@ and one fresh inbound OCPP event bound to a unique session. The lab checks
 that pre-event evidence is rejected and reused TCP peer tuples are
 ambiguous. A scoped `nft` table is validated, installed, inspected, then
 deleted **inside the new network namespace only**, including cleanup after
-inspection errors. It never calls field promotion or persistence writers.
+inspection errors or a partially failed nft apply. It never calls field promotion or persistence writers.
 
 The CI tests in `test_lab_sandbox_355.py` do **not** create namespaces or
 execute nftables. They monkeypatch nft and the sandbox guard and test the
