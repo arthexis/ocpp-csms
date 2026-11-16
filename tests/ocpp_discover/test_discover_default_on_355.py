@@ -56,7 +56,7 @@ def test_unexpected_first_contact_error_remains_visible(tmp_path, monkeypatch):
 def test_interface_down_at_boot_then_up_mints_scoped_authority(tmp_path, monkeypatch):
     from ocpp_discover import handoff
     seen = []
-    delayed = iter([None, None, _physical("eth0", 7)])
+    delayed = iter([None, None, None, _physical("eth0", 7)])
     monkeypatch.setattr(service.routed_http_policy, "load_policy",
                         lambda **kwargs: RoutedHttpPolicy(True, "eth0"))
     monkeypatch.setattr(service.routed_http_runtime, "authorize_routed_http",
