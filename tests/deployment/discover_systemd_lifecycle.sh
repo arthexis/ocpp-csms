@@ -19,6 +19,7 @@ cleanup() {
   sudo ip link del ocppci0 >/dev/null 2>&1 || true
   git -C "$repo" worktree remove --force "$tmp/pre" >/dev/null 2>&1 || true
   git -C "$repo" worktree remove --force "$tmp/new" >/dev/null 2>&1 || true
+  git -C "$repo" worktree remove --force "$tmp/same-schema" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -197,6 +198,21 @@ ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c loc
 assert_active
 [[ "$(discover_pid)" == "$pid" ]] || fail "Discover restarted in no-op redeploy"
 [[ "$(snapshot)" == "$before" ]] || fail "no-op modified Discover persistent state"
+assert_nft_unchanged
+
+# A new release with the same schema must replace the running Python process;
+# a subsequent deploy of that same release must leave it undisturbed.
+git worktree add --detach "$tmp/same-schema" HEAD
+git -C "$tmp/same-schema" -c user.name='Stage A CI' -c user.email='ci@example.invalid' \
+    commit --allow-empty -qm 'fixture: same-schema release upgrade'
+old_pid="$(discover_pid)"
+(cd "$tmp/same-schema" && ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c local -e ocpp_stage_a_ci_fixture=true)
+assert_active
+[[ "$(discover_pid)" != "$old_pid" ]] || fail "same-schema release left old Discover process running"
+pid="$(discover_pid)"
+(cd "$tmp/same-schema" && ansible-playbook ansible/playbooks/ci-discover-isolated.yml -i localhost, -c local -e ocpp_stage_a_ci_fixture=true)
+[[ "$(discover_pid)" == "$pid" ]] || fail "same-release redeploy restarted Discover"
+[[ "$(snapshot)" == "$before" ]] || fail "same-schema upgrade changed Discover persistent state"
 assert_nft_unchanged
 
 # Actual systemd-managed positive restart, not a mocked subprocess.

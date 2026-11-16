@@ -1,4 +1,7 @@
 [Unit]
+# Bind this unit to the installed release so an upgrade restarts the existing
+# Python process even when the executable's stable current symlink is unchanged.
+# OCPP CSMS release: {{ ocpp_csms_release_id }}
 Description=OCPP Discover
 Wants=network-online.target ocpp-csms.service
 After=network-online.target ocpp-csms.service
