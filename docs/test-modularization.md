@@ -119,6 +119,58 @@ Selected additional module-local helper audit:
 
 **Acceptance:** exact two-path tests/docs diff, no test-name, fixture, parametrization or collection changes; both wrapper names and call sites retained. Automatic Python 3.11/3.13 CSMS, Discover, schema-isolation and Ansible CI must match prior pass/skip totals at exact HEAD. No source, SQLite v8, export-v1, security, GitHub workflow, real Ansible, AgentOps, nodes or deployments. Keep #336 OPEN and PR Draft until independently authorized Ready/merge.
 
+## Stage J: isolate export snapshot and concurrent-writer contracts
+
+At baseline `fec4830682a08e363dccc5dd003a8fd1c774d6cb`, move **exactly four complete test functions**, in their existing order and with byte-identical bodies, from `tests/export/test_export_contract.py` to `tests/export/test_export_snapshot.py`:
+
+1. `test_export_uses_one_sqlite_snapshot_for_events_and_transactions`
+2. `test_export_reader_does_not_block_concurrent_charger_commit`
+3. `test_export_status_uses_same_sqlite_snapshot_as_events`
+4. `test_failed_export_releases_snapshot_and_preserves_following_evidence`
+
+The new module needs only `EventStore` as a top-level import; all other imports in these tests were already local. Preserve every assertion, timeout, concurrent-writer barrier, monkeypatch target, cleanup sequence and expected exception. Neither a package initializer nor new `conftest.py` is added. Keep the other 14 `test_export_contract.py` tests in place.
+
+### Closure matrix — objectives A–J
+
+| Stage | Accepted scope | Residual obligation |
+| --- | --- | --- |
+| A | Four export modules relocated to `tests/export/`, byte-identical (PR #337) | None within Stage A |
+| B | Status and energy groups initialized (PR #338) | None within Stage B |
+| C | Remaining selected root-level status tests grouped (PR #339) | None within Stage C |
+| D | Three schema/WAL modules grouped (PR #340) | Location-sensitive export fingerprint remains intentionally at root |
+| E | Node identity and config-report grouped (PR #341) | Location-sensitive/packaged evidence tests intentionally unchanged |
+| F | Schema-verification and nominal rating modules grouped (PR #342) | None within Stage F |
+| G | Four presentation tests split into status formatting module, bodies unchanged (PR #371) | None within Stage G |
+| H | Duplicate `cli_parser` fixture removed; inherited root parser is canonical (PR #372) | Module-specific fixture overrides preserved |
+| I | Local JSON readers combined behind two unchanged transaction-diagnostic wrappers (PR #373) | Cross-module archive helper consolidation deferred |
+| J | Four export snapshot/concurrent-reader tests moved into `tests/export/test_export_snapshot.py`; final fixture/helper audit documented (this Draft) | Exact-head CI and normalized node-ID/parity acceptance still required |
+
+### Final fixture and helper inventory
+
+- Root `tests/conftest.py`: `record_runtime_event` (SQLite event insertion) and canonical `cli_parser` (fresh real CLI parser per test). No identical duplicate remains in `tests/cli/conftest.py`.
+- `tests/cli/conftest.py`: `parse_cli` (parser wrapper) and `profile_control` (patched control stub). `tests/cli/test_control.py` intentionally shadows `parse_cli` to parse the special `start/stop` grammar before delegating other commands; **not an equivalent duplicate**.
+- `tests/control/conftest.py`: `charge_point_session` domain-specific event/session/transport fixture; retain its scope and lifecycle.
+- `tests/ocpp_discover/conftest.py`: autouse `isolate_default_persistent_nftables`, a critical temporary-path and host-network-isolation boundary. **Never** promote it to root.
+- Module-local fixtures: `event_feed`, `reservation_events`, `receiver`, `config_diff_harness`, `preflight_evidence`, `invoke_cli`, `captured_queries` and the special `parse_cli`; they have distinct scopes and side effects and are intentionally not merged.
+- `tests/transactions/test_archive.py::records` and the Stage I transaction JSON readers share a traversal algorithm but are separated by test-module ownership. Do not introduce cross-module imports for cosmetic deduplication.
+- `start_payload`/`stop_payload`, Discover `candidate`/`receipt`, control `Registry` and diagnostic event builders are *not* interchangeable merely because their names or structure resemble one another. Defaults, fields, failure injections, ordering and authority can differ; parameterize only on independently demonstrated behavioral equivalence.
+- Existing `@pytest.mark.parametrize` cases for homogeneous inputs (e.g. invalid policy inputs, parser grammar, control error envelopes and SQLite PRAGMA failures) are retained as-is. No additional parametrization is justified by this bounded audit.
+
+### Deliberately deferred oversized modules
+
+| Path | Approximate current size | Reason to defer |
+| --- | ---: | --- |
+| `tests/evidence/test_store.py` | 20 KB | Interdependent event-store, transaction allocator, WAL and failure-path assertions |
+| `tests/transactions/test_simplified_contract.py` | 20 KB | SQLite-authoritative transaction vs optional JSON diagnostic boundaries |
+| `tests/rfid/test_report.py` | 19 KB | Reporting/cache/authorization behavior coupled to test-local SQLite adapter |
+| `tests/session/test_integration.py` | 18 KB | Full WebSocket flows and server lifecycle require dedicated acceptance |
+| `tests/evidence/test_timeline_grouping.py` | 16 KB | Conservative OCPP evidence grouping, unmatched messages and boundary cases |
+| `tests/ocpp_discover/test_provisional_syn.py` | 16 KB | Network policy / capture isolation and fail-closed negative cases |
+| `tests/ocpp_discover/test_routed_http_policy.py` | 14 KB | Policy permissions/topology fail-closed matrix |
+| `tests/test_modularization_baseline.py` | 14 KB | Explicit baseline/regression matrix should remain self-contained |
+
+**Acceptance and closure gate:** compare the complete pytest node-ID multiset with baseline `fec4830682a08e363dccc5dd003a8fd1c774d6cb`, normalizing *only* these four moved node-ID prefixes; verify no test bodies, counts or marker changes. Require exact-head terminal CI SUCCESS for Debian 12/Python 3.11, Debian 13/Python 3.13 and Ubuntu 24.04/Python 3.13 (CSMS+Discover), schema/WAL isolation, Ansible syntax/recovery, and expected skip totals. No changes to src, SQLite v8, `ocpp-csms/export/v1`, TLS, Discover authorization/isolation, automation workflows or deployment. **Keep #336 OPEN and this PR Draft** until separately accepted and merged.
+
 ## Proposed follow-up stages (not implemented)
 
 | Domain | Current test locations | Main risk | Acceptance |
