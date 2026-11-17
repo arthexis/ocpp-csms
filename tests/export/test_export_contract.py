@@ -366,3 +366,79 @@ def test_soc_export_metadata_uses_only_measured_valid_samples():
     assert transaction_export_metadata({"meter_values": [
         {"meter_value": None}, {"meter_value": [{"sampled_value": None}]}
     ]})["soc_end"] is None
+
+
+def test_export_preserves_verified_meter_channels_and_unphased_scalars(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "MeterValues", {
+        "connector_id": 1, "transaction_id": 7, "meter_value": [{
+            "timestamp": "2026-10-07T12:01:00Z",
+            "sampled_value": [
+                {"measurand": "Energy.Active.Import.Register", "unit": "kWh", "value": "1.5"},
+                {"measurand": "SoC", "unit": "Percent", "value": "72", "context": "Sample.Clock"},
+                {"measurand": "Voltage", "unit": "V", "value": "220"},
+                {"measurand": "Current.Import", "unit": "A", "value": "21.6"},
+                {"measurand": "Current.Offered", "unit": "A", "value": "32"},
+                {"measurand": "Temperature", "unit": "Celsius", "value": "35"},
+                {"measurand": "Voltage", "unit": "V", "phase": "L1-N", "value": "127"},
+                {"measurand": "Power.Active.Import", "unit": "A", "value": "999"},
+                {"measurand": "RFID", "unit": "Text", "value": "private"},
+            ]}],
+    }, transaction_id=7)
+    [sample] = export_contract(tmp_path)["data"]["energy"]
+    assert sample["energy_wh"] == 1500.0
+    assert sample["power_w"] is None
+    assert sample["soc"] == 72.0
+    assert sample["soc_provenance"] == "ocpp-meter-values"
+    assert sample["voltage_v"] == 220.0  # Never sum voltage phases.
+    assert sample["current_import_a"] == 21.6
+    assert sample["current_offered_a"] == 32.0
+    assert sample["temperature_c"] == 35.0
+    assert len(sample["meter_channels"]) == 6
+    assert sample["meter_channels"][-1]["phase"] == "L1-N"
+    assert sample["meter_channels"][0]["context"] == "Sample.Clock"
+    assert export_contract(tmp_path)["data"]["energy"] == [sample]
+
+
+def test_telemetry_only_and_ambiguous_phases_do_not_infer_power(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "MeterValues", {
+        "connector_id": 2, "transaction_id": 8, "meter_value": [{
+            "timestamp": "2026-10-07T12:02:00Z", "sampled_value": [
+                {"measurand": "Voltage", "unit": "V", "value": "226",
+                 "phase": "L1-N", "location": "Outlet"},
+                {"measurand": "Voltage", "unit": "V", "value": "228", "phase": "L2-N"},
+                {"measurand": "SoC", "unit": "Percent", "value": "101"},
+                {"measurand": "Current.Import", "unit": "A", "value": "4"},
+                {"measurand": "Current.Import", "unit": "A", "value": "6"},
+                {"measurand": "Temperature", "unit": "Fahrenheit", "value": "70"},
+                {"measurand": "Current.Offered", "unit": "A", "value": "0"},
+            ]}],
+    }, transaction_id=8)
+    [sample] = export_contract(tmp_path)["data"]["energy"]
+    assert sample["power_w"] is None and sample["energy_wh"] is None
+    assert sample["current_offered_a"] == 0.0
+    assert "voltage_v" not in sample  # Phase-specific evidence is preserved, not aggregated.
+    assert "current_import_a" not in sample  # Conflicting unphased values.
+    assert "soc" not in sample
+    assert "temperature_c" not in sample
+    assert len(sample["meter_channels"]) == 5
+    assert sample["meter_channels"][0]["location"] == "Outlet"
+
+
+def test_meter_telemetry_rejects_invalid_units_nonfinite_and_malformed_values(tmp_path):
+    from ocpp_csms.export_contract import _sample_channels
+    entry = {"sampled_value": [
+        {"measurand": "Voltage", "unit": "kV", "value": "0.4"},
+        {"measurand": "SoC", "unit": "Percent", "value": "NaN"},
+        {"measurand": "SoC", "unit": "Percent", "value": "-1"},
+        {"measurand": "Temperature", "unit": "Celsius", "value": "-5"},
+        {"measurand": "Current.Import", "unit": "A", "value": True},
+        {"measurand": "Temperature", "unit": "Celsius", "value": "inf"},
+    ]}
+    assert _sample_channels(entry) == {
+        "meter_channels": [
+            {"measurand": "Temperature", "unit": "Celsius", "value": -5.0}
+        ],
+        "temperature_c": -5.0,
+    }
