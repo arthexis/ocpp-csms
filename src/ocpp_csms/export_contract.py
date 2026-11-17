@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ocpp_csms.energy_query import _entry_sample
+from ocpp_csms.energy_query import _entry_sample, _normalized_time
 from ocpp_csms.evidence.contracts import event_record
 from ocpp_csms.output import json_command_result
 from ocpp_csms.schema import DATABASE_FILENAME, source_id
@@ -35,6 +36,68 @@ def _event_rows(connection: sqlite3.Connection, *, after: int, limit: int) -> tu
             (after, limit + 1),
         ).fetchall()
     return rows[:limit], len(rows) > limit
+
+
+# Explicitly measured channels, never an inferred kW, voltage phase, or
+# charger/battery temperature identity. Units are exact OCPP 1.6J spellings.
+_CHANNELS = {
+    "SoC": ("soc", "Percent", 0.0, 100.0),
+    "Voltage": ("voltage_v", "V", 0.0, 1_000_000.0),
+    "Current.Import": ("current_import_a", "A", 0.0, 1_000_000.0),
+    "Current.Offered": ("current_offered_a", "A", 0.0, 1_000_000.0),
+    "Temperature": ("temperature_c", "Celsius", -273.15, 1_000.0),
+}
+
+
+def _sample_channels(entry: dict[str, Any]) -> dict[str, Any]:
+    """Bounded, allowlisted OCPP MeterValues evidence; preserve phase as supplied.
+
+    No unphased scalar is emitted for a phase-specific or ambiguous reading.
+    Unknown measurands and noncanonical units are not interpreted.
+    """
+    sampled = entry.get("sampled_value")
+    if not isinstance(sampled, list):
+        return {}
+    channels: list[dict[str, Any]] = []
+    unphased: dict[str, list[float]] = {}
+    for raw in sampled[:64]:
+        if not isinstance(raw, dict) or raw.get("measurand") not in _CHANNELS:
+            continue
+        name = raw["measurand"]
+        field, unit, minimum, maximum = _CHANNELS[name]
+        if raw.get("unit") != unit:
+            continue
+        try:
+            if isinstance(raw.get("value"), bool):
+                continue
+            value = float(raw["value"])
+        except (TypeError, ValueError, KeyError, OverflowError):
+            continue
+        if not math.isfinite(value) or not minimum <= value <= maximum:
+            continue
+        phase = raw.get("phase")
+        if phase is not None and (not isinstance(phase, str) or not 1 <= len(phase) <= 32):
+            continue
+        channel: dict[str, Any] = {"measurand": name, "unit": unit, "value": value}
+        if phase is not None:
+            channel["phase"] = phase
+        for optional in ("context", "location"):
+            item = raw.get(optional)
+            if isinstance(item, str) and 0 < len(item) <= 64:
+                channel[optional] = item
+        channels.append(channel)
+        if phase is None:
+            unphased.setdefault(field, []).append(value)
+    if not channels:
+        return {}
+    result: dict[str, Any] = {"meter_channels": channels}
+    for field, values in unphased.items():
+        # Multiple conflicting values are evidence, but not a unique scalar.
+        if len(set(values)) == 1:
+            result[field] = values[0]
+    if "soc" in result:
+        result["soc_provenance"] = "ocpp-meter-values"
+    return result
 
 
 def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -71,18 +134,25 @@ def _energy_samples(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
                 transaction_id=int(transaction_id) if transaction_id is not None else None,
                 entry=entry,
             )
-            if sample is None:
+            telemetry = _sample_channels(entry)
+            if sample is None and not telemetry:
+                continue
+            # Telemetry-only frames must not be lost merely because this
+            # charger does not publish Energy.Active.Import.Register.
+            at = sample.at if sample is not None else _normalized_time(entry.get("timestamp"))
+            if at is None:
                 continue
             samples.append(
                 {
                     "source_event_id": int(row["id"]),
                     "sample_index": sample_index,
-                    "at": sample.at,
-                    "charger_id": sample.charger_id,
-                    "connector_id": sample.connector_id,
-                    "transaction_id": sample.transaction_id,
-                    "power_w": sample.power_w,
-                    "energy_wh": sample.energy_wh,
+                    "at": at,
+                    "charger_id": str(row["charger_id"]),
+                    "connector_id": connector_id,
+                    "transaction_id": int(transaction_id) if transaction_id is not None else None,
+                    "power_w": sample.power_w if sample is not None else None,
+                    "energy_wh": sample.energy_wh if sample is not None else None,
+                    **telemetry,
                 }
             )
     return samples
