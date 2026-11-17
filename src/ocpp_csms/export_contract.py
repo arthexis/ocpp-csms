@@ -61,9 +61,11 @@ def _sample_channels(entry: dict[str, Any]) -> dict[str, Any]:
     channels: list[dict[str, Any]] = []
     unphased: dict[str, list[float]] = {}
     for raw in sampled[:64]:
-        if not isinstance(raw, dict) or raw.get("measurand") not in _CHANNELS:
+        if not isinstance(raw, dict):
             continue
-        name = raw["measurand"]
+        name = raw.get("measurand")
+        if not isinstance(name, str) or name not in _CHANNELS:
+            continue
         field, unit, minimum, maximum = _CHANNELS[name]
         if raw.get("unit") != unit:
             continue
