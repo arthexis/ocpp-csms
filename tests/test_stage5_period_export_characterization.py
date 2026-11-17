@@ -11,10 +11,12 @@ from ocpp_csms.reports import build_report
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION, database_path, source_id
 
 
-def test_report_inclusive_utc_bounds_and_preperiod_start_characterization(tmp_path):
+def test_report_utc_text_bounds_and_preperiod_start_characterization(tmp_path):
     """Characterize COALESCE(start_received_at, stop_received_at); no policy change."""
     EventStore(tmp_path)
-    # 16:00..17:00 UTC. A stop inside the period does not select a row whose
+    # 16:00..17:00 UTC. SQL compares the stored 'Z' text to '+00:00'
+    # normalized query bounds lexically, not as equal UTC instants.
+    # A stop inside the period does not select a row whose
     # non-NULL start receipt was before the period.
     cases = [
         (1, "2026-11-16T15:59:00Z", "2026-11-16T16:30:00Z"),
@@ -23,6 +25,7 @@ def test_report_inclusive_utc_bounds_and_preperiod_start_characterization(tmp_pa
         (4, "2026-11-16T17:00:01Z", None),
         (5, None, "2026-11-16T16:20:00Z"),
         (6, "2026-11-16T15:00:00Z", "2026-11-16T18:00:00Z"),
+        (7, "2026-11-16T17:00:00+00:00", None),
     ]
     with sqlite3.connect(database_path(tmp_path)) as conn:
         conn.executemany(
@@ -45,11 +48,15 @@ def test_report_inclusive_utc_bounds_and_preperiod_start_characterization(tmp_pa
     utc_report = build_report(tmp_path, since=utc_start, until=utc_end)
     assert local_report["schema"] == "ocpp-csms/report/v1"
     actual = [row["transaction_id"] for row in local_report["data"]["transactions"]]
-    assert actual == [2, 5, 3]  # inclusive start/end + stop fallback only when start is NULL
+    # Exact upper bound in 'Z' (row 3) is excluded, while the identical
+    # instant written '+00:00' (row 7) is included by the current query.
+    # Characterize this discrepancy; do not alter production SQL in Stage 5.
+    assert actual == [2, 5, 7]
     assert [row["transaction_id"] for row in utc_report["data"]["transactions"]] == actual
     assert local_report["data"]["period"] == utc_report["data"]["period"]
     assert local_report["data"]["subtotal"]["transactions"] == 3
     assert 1 not in actual and 6 not in actual  # started before, stopped during/after
+    assert 3 not in actual  # 'Z' representation is textually greater than '+00:00'
     assert [row["transaction_id"] for row in build_report(
         tmp_path, since=utc_start, until=utc_end, charger_id="CP-OTHER"
     )["data"]["transactions"]] == []
