@@ -219,7 +219,7 @@ ocpp-csms txn start [--cp CHARGE_POINT] [-c N|--connector N] [--rfid TAG]
 ocpp-csms txn stop ID
 ocpp-csms reset [--cp CHARGER] [--hard]
 ocpp-csms events [--cp CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE]
-ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--json]
+ocpp-csms report [--since TIME] [--until TIME] [--cp CHARGE_POINT] [--selection legacy|start|completion|activity] [--json]
 ocpp-csms alerts [CHARGER] [--since TIME] [--until TIME] [-n VALUE|--limit VALUE] [-N] [--json]
 ocpp-csms explain CHARGER --at TIME [--minutes N]
 ```
@@ -350,6 +350,30 @@ correlation are future work.
 
 ### Operational reports
 
+The default `--selection legacy` leaves the existing `ocpp-csms/report/v1`
+JSON structure and historical receipt-time filtering unchanged, including the
+old inclusive upper bound. New `--selection` modes opt in to corrected UTC
+instant comparison and **[since, until)** (end-exclusive) boundaries:
+
+- `start`: receipt of the transaction's start in the period; counts sessions
+  initiated. An open transaction can appear.
+- `completion`: receipt of `StopTransaction` in the period; counts completed
+  sessions, even if they began earlier.
+- `activity`: at least one **persisted inbound StartTransaction, MeterValues,
+  or StopTransaction event** linked by transaction ID and charger, received
+  in the period. It is an **observed-event** criterion, not an assumption
+  that stale historical open transactions were physically charging.
+
+The explicit mode is shown in JSON as `data.period.selection` and
+`data.period.end_exclusive=true`. The optional
+`data.subtotal.energy_basis=full_sessions_not_period_allocated` warns that
+energy and duration are **full-session** totals: a transaction selected by
+activity may appear on multiple days, so **never sum those daily totals as
+daily kWh consumed**. Per-window energy accounting requires separate
+MeterValues-based allocation. Charger health stays a current snapshot,
+and the existing alert filter is unchanged. Naive timestamps are interpreted
+as UTC; offset and `Z` instants are normalized before selection.
+
 `ocpp-csms report` summarizes transactions whose start was received in the selected
 period (default: last day), with individual RFID, charge point, connector, state,
 measured kWh, and duration when available. The **SUBTOTAL** row gives the
@@ -361,6 +385,8 @@ snapshot, not a historical reconstruction.
 ```bash
 ocpp-csms report --since 1d
 ocpp-csms report --since 7d --cp CP001 --json
+ocpp-csms report --since 2026-11-16T00:00:00Z --until 2026-11-17T00:00:00Z --selection completion
+ocpp-csms report --since 1d --selection activity -j
 ```
 
 ### Configuration

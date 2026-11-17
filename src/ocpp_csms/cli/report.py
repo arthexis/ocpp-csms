@@ -14,6 +14,11 @@ def add_report_command(subcommands):
     parser.add_argument("--since", default="1d", help="Period start (default: 1d)")
     parser.add_argument("--until", help="Period end (default: now)")
     parser.add_argument("--cp", "--charger", dest="cp")
+    parser.add_argument(
+        "--selection", choices=("legacy", "start", "completion", "activity"),
+        default="legacy",
+        help="Transaction selector (default: legacy; explicit modes use UTC [since, until))",
+    )
     parser.add_argument("-j", "--json", action="store_true")
     return parser
 
@@ -22,7 +27,8 @@ def report_for_args(args):
     now = datetime.now(timezone.utc)
     since = resolve_time(args.since, now=now)
     until = resolve_time(args.until, now=now) if args.until else now
-    return build_report(args.data_dir, since=since, until=until, charger_id=args.cp)
+    return build_report(args.data_dir, since=since, until=until, charger_id=args.cp,
+                        selection=getattr(args, "selection", "legacy"))
 
 
 def run_report(args):
