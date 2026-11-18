@@ -76,6 +76,26 @@ def test_runtime_events_do_not_advance_replication_cursor(tmp_path):
     assert payload["data"]["cursor"]["next"] == 1
 
 
+
+def test_export_preserves_request_and_response_direction_without_exposing_raw_payload(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_ocpp("charger-a", "Heartbeat", {}, direction="in")
+    store.record_ocpp("charger-a", "Heartbeat", {"current_time": "2026-10-07T12:00:00Z"},
+                      direction="out")
+    store.record_ocpp("charger-a", "StatusNotification",
+                      {"connector_id": 1, "status": "Available", "error_code": "NoError"},
+                      direction="in")
+    store.record_ocpp("charger-a", "StatusNotification", {}, direction="out")
+    first = export_contract(tmp_path, after=0, limit=10)["data"]["events"]
+    assert [(event["action"], event["direction"]) for event in first] == [
+        ("Heartbeat", "in"), ("Heartbeat", "out"),
+        ("StatusNotification", "in"), ("StatusNotification", "out")]
+    assert first[2]["status"] == "Available"
+    assert first[3]["status"] is None
+    assert "payload" not in first[2]
+    assert export_contract(tmp_path, after=0, limit=10)["data"]["events"] == first
+
+
 def test_export_normalizes_meter_values_and_includes_source_event_identity(tmp_path):
     store = EventStore(tmp_path)
     store.record_ocpp(
