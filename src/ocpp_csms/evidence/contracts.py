@@ -37,6 +37,14 @@ def event_record(row: sqlite3.Row) -> dict[str, object]:
         "action": action,
     }
 
+    # Preserve the persisted OCPP direction for UI correlation. A response
+    # is not distinguishable from a request after dropping this field.
+    # Runtime events and legacy rows without direction stay compatible.
+    if row["kind"] == "ocpp" and "direction" in row.keys():
+        direction = row["direction"]
+        if direction in ("in", "out"):
+            base["direction"] = direction
+
     if row["kind"] == "runtime":
         if action == "charger_connected":
             base["kind"] = "charger_connected"
