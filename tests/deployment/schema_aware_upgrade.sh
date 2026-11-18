@@ -146,7 +146,12 @@ import sys
 from ocpp_csms.export_contract import export_contract
 page = export_contract(sys.argv[1], after=0, limit=500)["data"]
 assert page["events"] and page["cursor"]["next"] > 0
-print(json.dumps({k: page[k] for k in ("source_id", "cursor", "events")}, sort_keys=True))
+stable = {k: page[k] for k in ("source_id", "cursor")}
+# The additive event.direction field is a view of existing immutable SQLite
+# evidence, not a change to the event's stable identity or cursor.
+stable["events"] = [{k: value for k, value in event.items() if k != "direction"}
+                    for event in page["events"]]
+print(json.dumps(stable, sort_keys=True))
 PY
 )"
 ./deploy.sh
@@ -168,7 +173,12 @@ import json
 import sys
 from ocpp_csms.export_contract import export_contract
 page = export_contract(sys.argv[1], after=0, limit=500)["data"]
-print(json.dumps({k: page[k] for k in ("source_id", "cursor", "events")}, sort_keys=True))
+stable = {k: page[k] for k in ("source_id", "cursor")}
+# The additive event.direction field is a view of existing immutable SQLite
+# evidence, not a change to the event's stable identity or cursor.
+stable["events"] = [{k: value for k, value in event.items() if k != "direction"}
+                    for event in page["events"]]
+print(json.dumps(stable, sort_keys=True))
 PY
 )"
 test "$snapshot_before" = "$snapshot_after" || {
