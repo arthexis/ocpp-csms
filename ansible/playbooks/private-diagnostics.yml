@@ -1,0 +1,291 @@
+---
+- name: Configure private charger diagnostics receiver
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: true
+  vars:
+    diag_operator: "{{ lookup('env', 'USER') }}"
+    diag_home: "{{ lookup('env', 'HOME') }}"
+    diag_ip: "{{ ansible_eth0.ipv4.address }}"
+    diag_dir: /etc/ocpp-csms/diagnostics-private
+    diag_site: /etc/nginx/conf.d/ocpp-csms-private-diagnostics.conf
+  tasks:
+    - name: Validate local field interface and arguments
+      ansible.builtin.assert:
+        that:
+          - diag_operator not in ['', 'root']
+          - ansible_eth0.active | bool
+    - name: Discover the one directly connected charger from eth0 neighbor table
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import ipaddress,json,subprocess,sys
+            iface = ipaddress.IPv4Interface(sys.argv[1])
+            rows = json.loads(subprocess.check_output(
+                ["ip", "-j", "neigh", "show", "dev", "eth0"], text=True))
+            found = set()
+            for row in rows:
+                try:
+                    peer = ipaddress.IPv4Address(row["dst"])
+                except (KeyError, ValueError):
+                    continue
+                states = row.get("state", [])
+                if isinstance(states, str):
+                    states = [states]
+                if row.get("lladdr") and not ({"FAILED", "INCOMPLETE"} & set(states)) and peer in iface.network and peer != iface.ip:
+                    found.add(str(peer))
+            if len(found) != 1:
+                raise SystemExit("expected exactly one charger on eth0; found " + str(len(found)))
+            print(next(iter(found)))
+          - "{{ ansible_eth0.ipv4.address }}/{{ ansible_eth0.ipv4.netmask }}"
+      register: diag_peer
+      changed_when: false
+    - name: Pin private receiver to discovered charger's IP
+      ansible.builtin.set_fact:
+        diag_charger_ip: "{{ diag_peer.stdout }}"
+    - name: Require charger IP within dedicated eth0 subnet
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import ipaddress,sys
+            ip = ipaddress.IPv4Address(sys.argv[1])
+            network = ipaddress.IPv4Interface(sys.argv[2])
+            if ip not in network.network or ip == network.ip:
+                raise SystemExit("charger must be another host on eth0")
+          - "{{ diag_charger_ip }}"
+          - "{{ ansible_eth0.ipv4.address }}/{{ ansible_eth0.ipv4.netmask }}"
+      changed_when: false
+    - name: Select available or currently managed HTTPS port
+      ansible.builtin.command:
+        argv: "{{ ['python3', playbook_dir + '/../../scripts/private_diagnostics_port.py', '--ip', diag_ip, '--site', diag_site] + (['--port', diag_requested_port | string] if (diag_requested_port | default('') | string | length) else []) }}"
+      register: diag_port_selection
+      changed_when: false
+    - name: Pin selected private HTTPS port
+      ansible.builtin.set_fact:
+        diag_port_num: "{{ diag_port_selection.stdout | int }}"
+    - name: Ensure current CSMS Python environment exists
+      ansible.builtin.stat:
+        path: "{{ diag_home }}/.local/share/ocpp-csms/current/venv/bin/python"
+      register: diag_python
+    - name: Refuse missing CSMS runtime
+      ansible.builtin.assert:
+        that: [diag_python.stat.exists]
+    - name: Make private certificate directory
+      ansible.builtin.file:
+        path: "{{ diag_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+    - name: Check existing cert and key
+      ansible.builtin.stat:
+        path: "{{ diag_dir }}/cert.pem"
+      register: diag_cert
+    - name: Check private key
+      ansible.builtin.stat:
+        path: "{{ diag_dir }}/key.pem"
+      register: diag_key
+    - name: Reject incomplete TLS identity
+      ansible.builtin.assert:
+        that: [diag_cert.stat.exists == diag_key.stat.exists]
+    - name: Generate local IP-SAN certificate once if missing
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - req
+          - -x509
+          - -newkey
+          - rsa:2048
+          - -sha256
+          - -days
+          - "365"
+          - -nodes
+          - -keyout
+          - "{{ diag_dir }}/key.pem"
+          - -out
+          - "{{ diag_dir }}/cert.pem"
+          - -subj
+          - "/CN={{ diag_ip }}"
+          - -addext
+          - "subjectAltName=IP:{{ diag_ip }}"
+      when: not diag_cert.stat.exists
+      no_log: true
+    - name: Restrict private key
+      ansible.builtin.file:
+        path: "{{ diag_dir }}/key.pem"
+        owner: root
+        group: root
+        mode: "0600"
+    - name: Check certificate matches network interface
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ diag_dir }}/cert.pem", -noout, -checkip, "{{ diag_ip }}"]
+      register: diag_check_ip
+      changed_when: false
+      failed_when: "'does match certificate' not in diag_check_ip.stdout"
+    - name: Reject certificate expiring within a day
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ diag_dir }}/cert.pem", -noout, -checkend, "86400"]
+      changed_when: false
+    - name: Create diagnostics parent
+      ansible.builtin.file:
+        path: /var/lib/ocpp-csms
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+    - name: Create upload directory
+      ansible.builtin.file:
+        path: /var/lib/ocpp-csms/diagnostics
+        state: directory
+        owner: "{{ diag_operator }}"
+        group: www-data
+        mode: "2770"
+    - name: Grant inherited upload ACL
+      ansible.builtin.command:
+        argv: [setfacl, -m, "u:{{ diag_operator }}:rwx,d:u:{{ diag_operator }}:rwx,d:g:www-data:rwx", /var/lib/ocpp-csms/diagnostics]
+      changed_when: false
+    - name: Install systemd diagnostic service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ocpp-csms-diagnose.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=OCPP diagnostic POST receiver
+          Requires=ocpp-csms-diagnose.socket
+          After=ocpp-csms-diagnose.socket
+          [Service]
+          Type=simple
+          User={{ diag_operator }}
+          Group=www-data
+          ExecStart={{ diag_home }}/.local/share/ocpp-csms/current/venv/bin/python -m ocpp_csms.diagnose_receiver
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ReadWritePaths=/var/lib/ocpp-csms/diagnostics
+          ProtectHome=read-only
+          MemoryMax=384M
+          TasksMax=32
+    - name: Install diagnostic socket unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ocpp-csms-diagnose.socket
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=OCPP diagnostic POST socket
+          [Socket]
+          ListenStream=/run/ocpp-csms-diagnose.sock
+          SocketMode=0660
+          SocketUser=root
+          SocketGroup=www-data
+          RemoveOnStop=true
+          [Install]
+          WantedBy=sockets.target
+    - name: Activate receiver socket without restarting CSMS
+      ansible.builtin.systemd_service:
+        name: ocpp-csms-diagnose.socket
+        enabled: true
+        state: started
+        daemon_reload: true
+    - name: Inspect existing nginx site
+      ansible.builtin.stat:
+        path: "{{ diag_site }}"
+      register: diag_existing
+    - name: Read existing nginx site when present
+      ansible.builtin.slurp:
+        src: "{{ diag_site }}"
+      register: diag_existing_body
+      when: diag_existing.stat.exists
+    - name: Refuse to overwrite unrelated nginx configuration
+      ansible.builtin.assert:
+        that:
+          - >-
+            ('Managed by ocpp-csms private diagnostics' in (diag_existing_body.content | b64decode))
+            or (('ocpp-csms-diagnose.sock' in (diag_existing_body.content | b64decode))
+                and ('listen ' ~ diag_ip ~ ':443 ssl;' in (diag_existing_body.content | b64decode))
+                and ('allow ' ~ diag_charger_ip ~ ';' in (diag_existing_body.content | b64decode))
+                and ('location / { return 404; }' in (diag_existing_body.content | b64decode))
+                and ('proxy_pass http://127.0.0.1' not in (diag_existing_body.content | b64decode)))
+      when: diag_existing.stat.exists
+    - name: Back up previous nginx site
+      ansible.builtin.copy:
+        src: "{{ diag_site }}"
+        dest: /etc/nginx/conf.d/.ocpp-csms-private-diagnostics.rollback
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      when: diag_existing.stat.exists
+    - name: Configure private nginx HTTPS with rollback
+      block:
+        - name: Render private nginx site
+          ansible.builtin.template:
+            src: ../templates/private-diagnostics-nginx.conf.j2
+            dest: "{{ diag_site }}"
+            owner: root
+            group: root
+            mode: "0644"
+          register: diag_site_changed
+        - name: Validate complete nginx configuration
+          ansible.builtin.command: nginx -t
+          changed_when: false
+        - name: Reload nginx only on change
+          ansible.builtin.systemd_service:
+            name: nginx
+            state: reloaded
+          when: diag_site_changed.changed
+      rescue:
+        - name: Restore previous site when present
+          ansible.builtin.copy:
+            src: /etc/nginx/conf.d/.ocpp-csms-private-diagnostics.rollback
+            dest: "{{ diag_site }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0644"
+          when: diag_existing.stat.exists
+        - name: Remove new site when invalid
+          ansible.builtin.file:
+            path: "{{ diag_site }}"
+            state: absent
+          when: not diag_existing.stat.exists
+        - name: Validate restored nginx
+          ansible.builtin.command: nginx -t
+          changed_when: false
+        - name: Reload restored nginx
+          ansible.builtin.systemd_service:
+            name: nginx
+            state: reloaded
+        - name: Fail after restored nginx
+          ansible.builtin.fail:
+            msg: Private diagnostics deployment failed, nginx site rolled back
+    - name: Verify local receiver socket rejects GET
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import socket
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(8)
+                s.connect("/run/ocpp-csms-diagnose.sock")
+                s.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                response = s.recv(128)
+            if not response.startswith(b"HTTP/1.1 405 "):
+                raise SystemExit("receiver did not reject GET")
+      changed_when: false
+    - name: Publish HTTPS configuration only after successful validation
+      ansible.builtin.copy:
+        dest: /etc/ocpp-csms/diagnostics-https.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: "{{ {'hostname': diag_ip, 'port': (diag_port_num | int)} | to_json }}\n"

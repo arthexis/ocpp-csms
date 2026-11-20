@@ -927,6 +927,45 @@ Use `ocpp-csms faults` to list recent incoming `StatusNotification` faults witho
 
 Charger-scoped commands use `--cp CHARGER` instead of positional charger identifiers. Omit `--cp` where the command supports all-charger inspection or can infer a unique connected charger. Transaction IDs, connector IDs and operation names retain their documented selectors.
 
+## Private diagnostic receiver on field nodes
+
+Run the commands below on the target node as the installation user, not
+root. These do not install/restart CSMS, proxy WSS, or touch unrelated nginx
+sites.
+
+    ./deploy.sh --diagnostics
+    ./deploy.sh --diagnostics --diagnostics-port 9443
+
+This private-only mode infers the listening IP from eth0, accepts exactly
+one detected charger neighbor on that interface (otherwise fails closed),
+and allows uploads only from that charger's address. It reuses the previous
+managed port, or selects the first free port from 8443, 9443, 10443, 11443,
+12443 and 13443. An explicit port (443-65535) must be free unless it is
+already managed by the receiver. Reconfiguration is idempotent. The selected
+port is published in /etc/ocpp-csms/diagnostics-https.json, and validated
+nginx updates roll back on failure. The CSMS service is not restarted.
+
+Uploads are written under /var/lib/ocpp-csms/diagnostics; the socket-activated
+receiver enforces path, size, MIME and overwrite restrictions. This endpoint
+supports native POST and PUT, including the charger's
+upload.bin/<charger-generated-file>.log.tar.gz path variant; all received
+data is normalized to the request-scoped upload.bin file. No requests or
+bearer URL paths are logged by nginx. Uploaded archives are untrusted data.
+
+Certificate trust matters: initial private provisioning creates a local,
+self-signed IP-SAN certificate. The charger's TLS client may reject it. In
+field tests on gway-005 it did reject the certificate; successful HTTP
+uploads are not proof that HTTPS uploads will succeed. Before claiming
+end-to-end HTTPS acceptance, establish a certificate trusted by the charger
+and verify an actual GetDiagnostics upload plus a received local file.
+Do not disable TLS validation on the charger.
+
+Older CLI compatibility: deployed CSMS versions that do not understand
+the optional port property in diagnostics-https.json still generate port
+443 URLs. The port-aware CLI change in this release takes effect when that
+CSMS version is installed. Until then use an explicit diagnose --location
+URL on non-443 ports, without leaking token-bearing URLs into logs.
+
 ## HTTPS charger diagnostic uploads (nginx DAV)
 
 Public `deploy.sh --expose HOSTNAME` provisions a native nginx HTTPS PUT receiver at
