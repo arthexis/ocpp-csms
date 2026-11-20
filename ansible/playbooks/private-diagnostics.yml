@@ -62,7 +62,12 @@
       changed_when: false
     - name: Select available or currently managed HTTPS port
       ansible.builtin.command:
-        argv: "{{ ['python3', playbook_dir + '/../../scripts/private_diagnostics_port.py', '--ip', diag_ip, '--site', diag_site] + (['--port', diag_requested_port | string] if (diag_requested_port | default('') | string | length) else []) }}"
+        argv: >-
+          {{ ['python3', playbook_dir + '/../../scripts/private_diagnostics_port.py',
+              '--ip', diag_ip, '--site', diag_site]
+             + (['--port', diag_requested_port | string]
+                if (diag_requested_port | default('') | string | length)
+                else []) }}
       register: diag_port_selection
       changed_when: false
     - name: Pin selected private HTTPS port
