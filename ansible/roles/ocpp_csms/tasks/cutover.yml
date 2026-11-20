@@ -148,27 +148,12 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    # The selected target was already verified after stopping the old writer.
-    # Do not repeat the same SQLite integrity pass while chargers are offline.
-    - name: Inspect initialized OCPP CSMS database
-      ansible.builtin.stat:
-        path: "{{ ocpp_csms_database_path }}"
-      register: ocpp_csms_database_state
-
-    - name: Inspect initialized OCPP CSMS transaction archive
-      ansible.builtin.stat:
-        path: "{{ ocpp_csms_transactions_dir }}"
-      register: ocpp_csms_transactions_state
-
-    - name: Assert initialized OCPP CSMS storage
-      ansible.builtin.assert:
-        that:
-          - ocpp_csms_database_state.stat.exists | default(false)
-          - ocpp_csms_database_state.stat.isreg | default(false)
-          - ocpp_csms_transactions_state.stat.exists | default(false)
-          - ocpp_csms_transactions_state.stat.isdir | default(false)
-        fail_msg: OCPP CSMS init did not produce expected storage.
-
+    # The post-stop schema verification checks SQLite WAL and integrity.
+    # The following service-identity gate already checks that the same
+    # database is a writable regular file, that both storage directories
+    # exist and are accessible, and that BEGIN IMMEDIATE succeeds. Keep
+    # the authoritative gate, not duplicate Ansible stat probes while
+    # chargers are offline.
     - name: Verify OCPP CSMS storage access as systemd service user
       become: true
       become_user: "{{ ocpp_csms_service_user }}"
