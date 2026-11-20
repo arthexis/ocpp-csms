@@ -32,3 +32,34 @@ def test_forward_only_recovery_remains_in_place():
     assert "ocpp_csms_candidate_writer_may_have_started: true" in source
     assert "Refuse automatic rollback after activation or writer start" in source
     assert "Restore prior Discover after safe pre-writer CSMS recovery" in source
+
+
+def test_authoritative_service_user_gate_replaces_redundant_stat_probes():
+    source = CUTOVER.read_text()
+    offline = source.split("- name: Stop existing OCPP CSMS service", 1)[1].split(
+        "- name: Mark candidate writer as potentially started before service start", 1
+    )[0]
+    assert "Inspect initialized OCPP CSMS database" not in offline
+    assert "Inspect initialized OCPP CSMS transaction archive" not in offline
+    assert "Assert initialized OCPP CSMS storage" not in offline
+    assert "database.is_file()" in offline
+    assert "directory.is_dir()" in offline
+    assert "os.access" in offline
+    assert "?mode=rw" in offline
+    assert "BEGIN IMMEDIATE" in offline
+    assert offline.index("Verify selected storage before service activation") < offline.index(
+        "Verify OCPP CSMS storage access as systemd service user"
+    )
+
+
+def test_live_systemd_unit_must_not_be_reloaded_before_old_writer_stops():
+    source = CUTOVER.read_text()
+    service = (CUTOVER.parents[1] / "templates/ocpp-csms.service.j2").read_text()
+    assert "Restart=always" in service
+    stop = source.index("- name: Stop existing OCPP CSMS service")
+    install = source.index("- name: Install live OCPP CSMS systemd unit")
+    reload = source.index("- name: Apply pending systemd daemon reload")
+    writer = source.index("- name: Mark candidate writer as potentially started before service start")
+    assert stop < install < reload < writer
+    assert source.index("- name: Preserve previous live systemd unit") < stop
+    assert source.index("- name: Restore previous systemd unit before candidate start") > writer
