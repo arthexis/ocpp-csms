@@ -52,12 +52,6 @@
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
-    - name: Start critical handoff timer
-      ansible.builtin.command: date +%s%N
-      register: ocpp_csms_handoff_start
-      changed_when: false
-      when: ocpp_csms_timing_file is defined
-
     # A running Discover process may observe the retiring database. Stop it
     # only for effective schema changes, before the old writer is stopped.
     - name: Check whether Discover is running before schema switch
@@ -103,6 +97,14 @@
         fail_msg: Discover remained active; refusing schema handoff.
       when: ocpp_csms_discover_was_active | default(false) | bool
 
+    # Discover may need quiescence on schema change, but that work precedes
+    # the charger-facing CSMS interruption. Start the clock at the stop request.
+    - name: Start critical handoff timer
+      ansible.builtin.command: date +%s%N
+      register: ocpp_csms_handoff_start
+      changed_when: false
+      when: ocpp_csms_timing_file is defined
+
     - name: Stop existing OCPP CSMS service
       become: true
       ansible.builtin.systemd_service:
@@ -146,17 +148,8 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    - name: Verify initialized database WAL and SQLite integrity
-      ansible.builtin.command:
-        argv:
-          - "{{ ocpp_csms_release_venv }}/bin/python"
-          - -m
-          - ocpp_csms.install_cutover
-          - schema-verify
-          - --data-dir
-          - "{{ ocpp_csms_service_data_dir }}"
-      changed_when: false
-
+    # The selected target was already verified after stopping the old writer.
+    # Do not repeat the same SQLite integrity pass while chargers are offline.
     - name: Inspect initialized OCPP CSMS database
       ansible.builtin.stat:
         path: "{{ ocpp_csms_database_path }}"
