@@ -939,7 +939,8 @@ sites.
 This private-only mode accepts exactly one detected charger neighbor on
 eth0, then queries the connected charge point via GetConfiguration(sDomain).
 It selects that charger-reachable address only if it is a private IPv4
-address actually owned by the node; otherwise it fails closed. This
+address on a field-facing eth0/wlan0 interface (never wlan1 or VPN);
+otherwise it fails closed. This
 matters on appliances with overlapping charger Wi-Fi and Ethernet subnets:
 gway-002 uses 10.42.0.1 even though eth0 is 192.168.129.10, while
 gway-005 uses 192.168.129.10. No charger network parameters are changed.

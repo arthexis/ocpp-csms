@@ -47,6 +47,7 @@ def test_parse_charger_sdomain_and_service_data_dir(tmp_path):
 @pytest.mark.parametrize(("sdomain", "expected"), [
     ("10.42.0.1", "10.42.0.1"),
     ("192.168.129.10", "192.168.129.10"),
+    ("192.168.1.82", None),
 ])
 def test_discover_from_one_connected_charger(tmp_path, monkeypatch, sdomain, expected):
     helper = _load("target_discovery_" + sdomain.replace(".", "_"), "scripts/private_diagnostics_target.py")
@@ -62,6 +63,7 @@ def test_discover_from_one_connected_charger(tmp_path, monkeypatch, sdomain, exp
             return json.dumps([
                 {"ifname": "eth0", "addr_info": [{"family": "inet", "local": "192.168.129.10"}]},
                 {"ifname": "wlan0", "addr_info": [{"family": "inet", "local": "10.42.0.1"}]},
+                {"ifname": "wlan1", "addr_info": [{"family": "inet", "local": "192.168.1.82"}]},
                 {"ifname": "gway", "addr_info": [{"family": "inet", "local": "10.90.0.5"}]},
             ])
         if "status" in argv:
@@ -70,8 +72,12 @@ def test_discover_from_one_connected_charger(tmp_path, monkeypatch, sdomain, exp
             return "KEY\tACCESS\tVALUE\nsDomain\tRW\t" + sdomain + "\n"
         raise AssertionError(argv)
     monkeypatch.setattr(helper.subprocess, "check_output", fake_output)
-    got = helper.discover("/opt/ocpp-csms", "192.168.129.182", proc_root=tmp_path)
-    assert got == {"server_ip": expected, "charger_ip": "192.168.129.182", "charge_point": "CP1"}
+    if expected is None:
+        with pytest.raises(ValueError, match="not assigned locally"):
+            helper.discover("/opt/ocpp-csms", "192.168.129.182", proc_root=tmp_path)
+    else:
+        got = helper.discover("/opt/ocpp-csms", "192.168.129.182", proc_root=tmp_path)
+        assert got == {"server_ip": expected, "charger_ip": "192.168.129.182", "charge_point": "CP1"}
     assert any("sDomain" in a for a in calls)
 
 

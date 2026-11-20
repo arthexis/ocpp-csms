@@ -70,7 +70,7 @@ def discover(cli: str, peer: str, proc_root: Path = Path("/proc")) -> dict[str, 
         ["ip", "-4", "-j", "addr", "show"],
         text=True, timeout=8))
     local_ips = [addr["local"] for iface in ip_info for addr in iface.get("addr_info", [])
-                 if addr.get("family") == "inet" and iface.get("ifname") not in ("lo", "gway")]
+                 if addr.get("family") == "inet" and iface.get("ifname") in ("eth0", "wlan0")]
     server_ip = choose_server_ip(domain, local_ips)
     return {"server_ip": server_ip, "charge_point": online[0], "charger_ip": str(peer_ip)}
 
