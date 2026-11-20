@@ -3,8 +3,8 @@ server {
     listen {{ diag_ip }}:{{ diag_port_num }} ssl;
     server_name {{ diag_ip }};
     server_tokens off;
-    ssl_certificate {{ diag_dir }}/cert.pem;
-    ssl_certificate_key {{ diag_dir }}/key.pem;
+    ssl_certificate {{ diag_cert_path }};
+    ssl_certificate_key {{ diag_key_path }};
     ssl_protocols TLSv1.2 TLSv1.3;
     access_log off;
     client_header_timeout 15s;

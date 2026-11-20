@@ -7,9 +7,10 @@
   vars:
     diag_operator: "{{ lookup('env', 'USER') }}"
     diag_home: "{{ lookup('env', 'HOME') }}"
-    diag_ip: "{{ ansible_eth0.ipv4.address }}"
     diag_dir: /etc/ocpp-csms/diagnostics-private
     diag_site: /etc/nginx/conf.d/ocpp-csms-private-diagnostics.conf
+    diag_cert_path: "{{ diag_dir }}/{{ diag_ip }}.cert.pem"
+    diag_key_path: "{{ diag_dir }}/{{ diag_ip }}.key.pem"
   tasks:
     - name: Validate local field interface and arguments
       ansible.builtin.assert:
@@ -60,6 +61,21 @@
           - "{{ diag_charger_ip }}"
           - "{{ ansible_eth0.ipv4.address }}/{{ ansible_eth0.ipv4.netmask }}"
       changed_when: false
+    - name: Discover reachable local address from connected charger sDomain
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../scripts/private_diagnostics_target.py"
+          - --cli
+          - "{{ diag_home }}/.local/share/ocpp-csms/current/venv/bin/ocpp-csms"
+          - --charger-ip
+          - "{{ diag_charger_ip }}"
+      become: false
+      register: diag_target
+      changed_when: false
+    - name: Bind private receiver to address currently used by charger
+      ansible.builtin.set_fact:
+        diag_ip: "{{ (diag_target.stdout | from_json)['server_ip'] }}"
     - name: Select available or currently managed HTTPS port
       ansible.builtin.command:
         argv: >-
@@ -89,11 +105,11 @@
         mode: "0700"
     - name: Check existing cert and key
       ansible.builtin.stat:
-        path: "{{ diag_dir }}/cert.pem"
+        path: "{{ diag_cert_path }}"
       register: diag_cert
     - name: Check private key
       ansible.builtin.stat:
-        path: "{{ diag_dir }}/key.pem"
+        path: "{{ diag_key_path }}"
       register: diag_key
     - name: Reject incomplete TLS identity
       ansible.builtin.assert:
@@ -111,9 +127,9 @@
           - "365"
           - -nodes
           - -keyout
-          - "{{ diag_dir }}/key.pem"
+          - "{{ diag_key_path }}"
           - -out
-          - "{{ diag_dir }}/cert.pem"
+          - "{{ diag_cert_path }}"
           - -subj
           - "/CN={{ diag_ip }}"
           - -addext
@@ -122,19 +138,19 @@
       no_log: true
     - name: Restrict private key
       ansible.builtin.file:
-        path: "{{ diag_dir }}/key.pem"
+        path: "{{ diag_key_path }}"
         owner: root
         group: root
         mode: "0600"
     - name: Check certificate matches network interface
       ansible.builtin.command:
-        argv: [openssl, x509, -in, "{{ diag_dir }}/cert.pem", -noout, -checkip, "{{ diag_ip }}"]
+        argv: [openssl, x509, -in, "{{ diag_cert_path }}", -noout, -checkip, "{{ diag_ip }}"]
       register: diag_check_ip
       changed_when: false
       failed_when: "'does match certificate' not in diag_check_ip.stdout"
     - name: Reject certificate expiring within a day
       ansible.builtin.command:
-        argv: [openssl, x509, -in, "{{ diag_dir }}/cert.pem", -noout, -checkend, "86400"]
+        argv: [openssl, x509, -in, "{{ diag_cert_path }}", -noout, -checkend, "86400"]
       changed_when: false
     - name: Create diagnostics parent
       ansible.builtin.file:
