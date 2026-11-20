@@ -63,3 +63,45 @@ def test_live_systemd_unit_must_not_be_reloaded_before_old_writer_stops():
     assert stop < install < reload < writer
     assert source.index("- name: Preserve previous live systemd unit") < stop
     assert source.index("- name: Restore previous systemd unit before candidate start") > writer
+
+
+def test_service_identity_gate_preserves_regular_file_and_directory_contract(tmp_path):
+    import sqlite3
+    import subprocess
+    import sys
+    import textwrap
+
+    source = CUTOVER.read_text()
+    gate = source.split(
+        "- name: Verify OCPP CSMS storage access as systemd service user", 1
+    )[1].split("          - |", 1)[1].split(
+        '          - "{{ ocpp_csms_service_data_dir }}"', 1
+    )[0]
+    code = textwrap.dedent(gate)
+    data_dir = tmp_path / "schema"
+    data_dir.mkdir()
+    database = data_dir / "ocpp-csms.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE test_gate (id INTEGER)")
+    archives = data_dir / "transactions"
+    archives.mkdir()
+
+    def check():
+        return subprocess.run(
+            [sys.executable, "-c", code, str(data_dir), str(database), str(archives)],
+            capture_output=True, text=True, timeout=5,
+        )
+
+    assert check().returncode == 0
+    original_database = data_dir / "real.sqlite3"
+    database.rename(original_database)
+    database.symlink_to(original_database)
+    result = check()
+    assert result.returncode != 0 and "cannot access database" in result.stderr
+    database.unlink()
+    original_database.rename(database)
+    original_archives = data_dir / "real-transactions"
+    archives.rename(original_archives)
+    archives.symlink_to(original_archives, target_is_directory=True)
+    result = check()
+    assert result.returncode != 0 and "cannot access directory" in result.stderr
