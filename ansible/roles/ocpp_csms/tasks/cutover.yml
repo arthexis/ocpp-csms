@@ -148,27 +148,12 @@
     - name: Apply pending systemd daemon reload
       ansible.builtin.meta: flush_handlers
 
-    # The selected target was already verified after stopping the old writer.
-    # Do not repeat the same SQLite integrity pass while chargers are offline.
-    - name: Inspect initialized OCPP CSMS database
-      ansible.builtin.stat:
-        path: "{{ ocpp_csms_database_path }}"
-      register: ocpp_csms_database_state
-
-    - name: Inspect initialized OCPP CSMS transaction archive
-      ansible.builtin.stat:
-        path: "{{ ocpp_csms_transactions_dir }}"
-      register: ocpp_csms_transactions_state
-
-    - name: Assert initialized OCPP CSMS storage
-      ansible.builtin.assert:
-        that:
-          - ocpp_csms_database_state.stat.exists | default(false)
-          - ocpp_csms_database_state.stat.isreg | default(false)
-          - ocpp_csms_transactions_state.stat.exists | default(false)
-          - ocpp_csms_transactions_state.stat.isdir | default(false)
-        fail_msg: OCPP CSMS init did not produce expected storage.
-
+    # The post-stop schema verification checks SQLite WAL and integrity.
+    # The following service-identity gate already checks that the same
+    # database is a writable regular file, that both storage directories
+    # exist and are accessible, and that BEGIN IMMEDIATE succeeds. Keep
+    # the authoritative gate, not duplicate Ansible stat probes while
+    # chargers are offline.
     - name: Verify OCPP CSMS storage access as systemd service user
       become: true
       become_user: "{{ ocpp_csms_service_user }}"
@@ -184,9 +169,9 @@
 
             data_dir, database, archives = map(Path, sys.argv[1:])
             for directory in (data_dir, archives):
-                if not directory.is_dir() or not os.access(directory, os.R_OK | os.W_OK | os.X_OK):
+                if directory.is_symlink() or not directory.is_dir() or not os.access(directory, os.R_OK | os.W_OK | os.X_OK):
                     raise SystemExit(f"CSMS service cannot access directory: {directory}")
-            if not database.is_file() or not os.access(database, os.R_OK | os.W_OK):
+            if database.is_symlink() or not database.is_file() or not os.access(database, os.R_OK | os.W_OK):
                 raise SystemExit(f"CSMS service cannot access database: {database}")
             connection = sqlite3.connect(database.resolve().as_uri() + "?mode=rw", uri=True, timeout=1)
             try:
