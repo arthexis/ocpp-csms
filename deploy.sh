@@ -60,6 +60,8 @@ no_certbot=0
 uninstall=0
 dev=0
 stage_only=0
+diagnostics=0
+diagnostics_port=
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -73,11 +75,44 @@ while [ "$#" -gt 0 ]; do
         --uninstall) uninstall=1; shift ;;
         --dev) dev=1; shift ;;
         --stage-only) stage_only=1; shift ;;
+        --diagnostics) diagnostics=1; shift ;;
+        --diagnostics-port)
+            [ "$#" -ge 2 ] || { printf 'Missing value for --diagnostics-port.\n' >&2; exit 2; }
+            [ -z "$diagnostics_port" ] || { printf 'Duplicate diagnostics port.\n' >&2; exit 2; }
+            diagnostics_port=$2; shift 2 ;;
+        --diagnostics-port=*)
+            [ -z "$diagnostics_port" ] || { printf 'Duplicate diagnostics port.\n' >&2; exit 2; }
+            diagnostics_port=\${1#--diagnostics-port=}; shift ;;
         --) shift; break ;;
         -*) printf 'Unknown deployment option: %s\n' "$1" >&2; exit 2 ;;
         *) break ;;
     esac
 done
+
+# One-command private charger diagnostics: no CSMS upgrade, no public exposure.
+# The playbook discovers exactly one charger on isolated eth0; fail closed otherwise.
+if [ "$diagnostics" -eq 1 ]; then
+    if [ -n "$expose" ] || [ -n "$email" ] || [ "$no_certbot" -eq 1 ] ||
+       [ "$uninstall" -eq 1 ] || [ "$dev" -eq 1 ] ||
+       [ "$stage_only" -eq 1 ] || [ "$#" -ne 0 ]; then
+        printf 'Use --diagnostics [--diagnostics-port PORT] (private charger-only receiver).\n' >&2
+        exit 2
+    fi
+    case "$diagnostics_port" in
+        *[!0-9]* ) printf 'Invalid diagnostics port.\n' >&2; exit 2 ;;
+    esac
+    if [ -n "$diagnostics_port" ]; then
+        [ "$diagnostics_port" -ge 443 ] 2>/dev/null &&
+        [ "$diagnostics_port" -le 65535 ] 2>/dev/null || {
+            printf 'Diagnostics port must be 443..65535.\n' >&2; exit 2; }
+        exec ansible-playbook "$ROOT/ansible/playbooks/private-diagnostics.yml" -i localhost, -c local -e "diag_requested_port=$diagnostics_port"
+    fi
+    exec ansible-playbook "$ROOT/ansible/playbooks/private-diagnostics.yml" -i localhost, -c local
+fi
+if [ -n "$diagnostics_port" ]; then
+    printf '%s\n' '--diagnostics-port requires --diagnostics.' >&2
+    exit 2
+fi
 
 if [ "$uninstall" -eq 1 ]; then
     if [ -n "$expose" ] || [ -n "$email" ] || [ "$no_certbot" -eq 1 ] || [ "$dev" -eq 1 ] || [ "$stage_only" -eq 1 ] || [ "$#" -gt 0 ]; then

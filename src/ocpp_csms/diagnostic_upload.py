@@ -35,8 +35,11 @@ def configuration() -> dict:
     host = settings.get("hostname", "")
     if not isinstance(host, str) or not re.fullmatch(r"[a-z0-9.-]+", host):
         raise ValueError("invalid HTTPS diagnostic hostname")
+    port = settings.get("port", 443)
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("invalid HTTPS diagnostic port")
     if not ROOT.is_dir():
-        raise ValueError("HTTPS diagnostic upload directory is missing; redeploy expose")
+        raise ValueError("HTTPS diagnostic upload directory is missing; deploy --diagnostics")
     return settings
 
 
@@ -56,7 +59,9 @@ def prepare(data_dir: str | Path, charger: str | None) -> tuple[dict, str]:
     }
     _save(_records(data_dir) / (token + ".json"), record)
     # nginx only permits a PUT to an existing request directory; unknown IDs fail.
-    url = f"https://{settings['hostname']}/ocpp-diagnose/{token}/upload.bin"
+    port = settings.get("port", 443)
+    authority = settings["hostname"] if port == 443 else f"{settings['hostname']}:{port}"
+    url = f"https://{authority}/ocpp-diagnose/{token}/upload.bin"
     return record, url
 
 
