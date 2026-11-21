@@ -52,17 +52,17 @@ even without a connected charger. Discover redirects supported plaintext
 traffic; it does not terminate TLS.
 
 Diagnostics are now a **default CSMS capability**. An ordinary
-\`./deploy.sh\` provisions the private Unix-socket receiver and secure
+`./deploy.sh` provisions the private Unix-socket receiver and secure
 archive directory on every host. On field nodes with one verified connected
 charger on eth0, the same install also configures a private HTTPS ingress
-by reading that charger's OCPP \`sDomain\` and choosing a safe local bind
-address/port. No \`--diagnostics\` flag is needed for a normal installation.
+by reading that charger's OCPP `sDomain` and choosing a safe local bind
+address/port. No `--diagnostics` flag is needed for a normal installation.
 It never provisions a public diagnostics endpoint implicitly.
 
 If a charger is absent during first boot, the receiver is installed but
 private HTTPS activation is deferred: no unverified TCP listener is created.
-Re-run the *normal* \`./deploy.sh\` once the charger connects; the
-\`--diagnostics\` option is retained only for targeted repair or port
+Re-run the *normal* `./deploy.sh` once the charger connects; the
+`--diagnostics` option is retained only for targeted repair or port
 override. The field bootstrap preinstalls nginx, OpenSSL and ACL; it also
 disables the distribution's default HTTP site if nginx was installed fresh.
 Existing nginx sites are never deleted or replaced by this preflight.
@@ -945,7 +945,7 @@ Charger-scoped commands use `--cp CHARGER` instead of positional charger identif
 
 ## Private diagnostic receiver on field nodes
 
-The normal \`./deploy.sh\` provisions the diagnostics receiver and, when a
+The normal `./deploy.sh` provisions the diagnostics receiver and, when a
 unique connected charger is available, automatically configures a private
 HTTPS endpoint. As an operator, no separate flag is normally needed.
 For **diagnostics-only reconfiguration** without a CSMS install or restart,
