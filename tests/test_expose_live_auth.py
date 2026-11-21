@@ -104,3 +104,34 @@ def test_live_check_precedes_any_exposure_mutation():
     )
     assert "scripts/verify_runtime_basic.py" in text
     assert "ocpp_expose_upstream_port | string" in text
+
+def test_real_websocket_server_distinguishes_live_basic_from_stale_none():
+    """Exercise the *actual* upstream authentication protocol, not mock HTTP."""
+    import asyncio
+
+    import websockets
+
+    from ocpp_csms.server import AuthenticatedWebSocketProtocol
+
+    async def check(config, expect_authorized):
+        async def handler(ws):
+            await ws.wait_closed()
+
+        async with websockets.serve(
+            handler, "127.0.0.1", 0,
+            subprotocols=["ocpp1.6"],
+            create_protocol=lambda *args, **kwargs: AuthenticatedWebSocketProtocol(
+                *args, auth=config, **kwargs
+            ),
+        ) as server:
+            port = server.sockets[0].getsockname()[1]
+            if expect_authorized:
+                await asyncio.to_thread(live.probe, port)
+            else:
+                with pytest.raises(ValueError, match="expected Basic challenge"):
+                    await asyncio.to_thread(live.probe, port)
+
+    # Configured but not restarted: live CSMS still serves anonymous WS.
+    asyncio.run(check({"mode": "none"}, expect_authorized=False))
+    # After restart: no-credential WS is challenged before a session starts.
+    asyncio.run(check({"mode": "basic", "username": "KNOWN-CP"}, expect_authorized=True))
