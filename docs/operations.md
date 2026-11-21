@@ -51,6 +51,22 @@ listens on `0.0.0.0:9000`. Discover is installed whenever `eth0` exists,
 even without a connected charger. Discover redirects supported plaintext
 traffic; it does not terminate TLS.
 
+Diagnostics are now a **default CSMS capability**. An ordinary
+`./deploy.sh` provisions the private Unix-socket receiver and secure
+archive directory on every host. On field nodes with one verified connected
+charger on eth0, the same install also configures a private HTTPS ingress
+by reading that charger's OCPP `sDomain` and choosing a safe local bind
+address/port. No `--diagnostics` flag is needed for a normal installation.
+It never provisions a public diagnostics endpoint implicitly.
+
+If a charger is absent during first boot, the receiver is installed but
+private HTTPS activation is deferred: no unverified TCP listener is created.
+Re-run the *normal* `./deploy.sh` once the charger connects; the
+`--diagnostics` option is retained only for targeted repair or port
+override. The field bootstrap preinstalls nginx, OpenSSL and ACL; it also
+disables the distribution's default HTTP site if nginx was installed fresh.
+Existing nginx sites are never deleted or replaced by this preflight.
+
 Public TLS/WSS is optional and independent of installation:
 
 ```bash
@@ -66,6 +82,17 @@ local upstream destination, **not** a change to the CSMS listener. Port 80
 serves ACME HTTP-01 challenges only. Configure DNS and external firewall rules
 for the desired reachability. Direct WS on port 9000 remains available wherever
 network policy permits it; nginx does not disable direct connections.
+
+Before changing nginx, requesting a certificate, or opening public exposure,
+`--expose` first verifies both the persisted Basic authentication mode and
+the **live CSMS listener**. It sends a single anonymous WebSocket handshake
+to nginx's loopback upstream (default `127.0.0.1:9000`) using a randomized
+non-charger path, and requires HTTP **401** with the CSMS-specific Basic
+challenge. A running process that has not yet loaded new credentials might
+otherwise answer **101 Switching Protocols**; this and any other result
+(including unreachable/timeout) fail closed with no exposure changes.
+The probe never sends credentials or OCPP messages and cannot enroll a charger.
+After `ocpp-csms auth basic`, restart CSMS as shown above before `--expose`.
 
 Use `--no-certbot` only with an already-provisioned compatible certificate.
 Verify `nginx -t`, `certbot renew --dry-run` when applicable, and a full
@@ -929,12 +956,19 @@ Charger-scoped commands use `--cp CHARGER` instead of positional charger identif
 
 ## Private diagnostic receiver on field nodes
 
-Run the commands below on the target node as the installation user, not
-root. These do not install/restart CSMS, proxy WSS, or touch unrelated nginx
-sites.
+The normal `./deploy.sh` provisions the diagnostics receiver and, when a
+unique connected charger is available, automatically configures a private
+HTTPS endpoint. As an operator, no separate flag is normally needed.
+For **diagnostics-only reconfiguration** without a CSMS install or restart,
+run these commands as the installation user, not root:
 
     ./deploy.sh --diagnostics
     ./deploy.sh --diagnostics --diagnostics-port 9443
+
+The diagnostics-only command does not install or restart CSMS, proxy WSS, or
+touch unrelated nginx sites. It requires an already-running CSMS and a
+unique connected charger. An offline fresh install defers the field HTTPS
+listener until another normal deploy is performed with the charger present.
 
 This private-only mode accepts exactly one detected charger neighbor on
 eth0, then queries the connected charge point via GetConfiguration(sDomain).
@@ -989,8 +1023,8 @@ capability: anyone possessing it can attempt to upload before expiry; do not
 paste it into tickets or logs. Requests have a two-hour expiry and an hourly
 pruning timer; nginx denies GET and DELETE, caps request bodies at 100 MiB,
 and rejects overwriting an existing target. Public port 443 is sufficient.
-There is no custom HTTP upload backend. This is available only when the
-public nginx expose role was deployed, not via local install alone.
+The public hostname/443 ingress requires the explicit nginx exposure role;
+the local Unix-socket receiver itself is installed by the ordinary deploy.
 
 Operator workflow after expose:
 ```bash

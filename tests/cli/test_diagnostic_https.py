@@ -81,7 +81,7 @@ def test_private_diagnostics_port_in_url(tmp_path, monkeypatch):
 def test_diagnostics_private_deploy_one_flag_and_no_public_proxy():
     from pathlib import Path
     deploy = Path("deploy.sh").read_text()
-    playbook = Path("ansible/playbooks/private-diagnostics.yml").read_text()
+    playbook = Path("ansible/tasks/private-diagnostics.yml").read_text()
     nginx = Path("ansible/templates/private-diagnostics-nginx.conf.j2").read_text()
     assert "--diagnostics)" in deploy
     assert 'private-diagnostics.yml' in deploy

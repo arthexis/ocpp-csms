@@ -67,7 +67,7 @@ def test_reject_unknown_tokens_get_and_oversized_request(receiver, monkeypatch):
 def test_contract_nginx_socket_activation_and_native_put():
     from pathlib import Path
     site = Path("ansible/roles/ocpp_expose/templates/ocpp-csms-site.conf.j2").read_text()
-    tasks = Path("ansible/roles/ocpp_expose/tasks/main.yml").read_text()
+    tasks = Path("ansible/roles/ocpp_diagnostics_receiver/tasks/main.yml").read_text()
     assert "location @ocpp_diagnose_post" in site
     assert "ocpp-csms-diagnose.sock" in site
     assert "dav_methods PUT;" in site

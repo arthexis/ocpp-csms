@@ -1,0 +1,65 @@
+---
+- name: Create diagnostics parent
+  ansible.builtin.file:
+    path: /var/lib/ocpp-csms
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+- name: Create upload directory
+  ansible.builtin.file:
+    path: /var/lib/ocpp-csms/diagnostics
+    state: directory
+    owner: "{{ ansible_user_id }}"
+    group: www-data
+    mode: "2770"
+- name: Grant inherited upload ACL
+  ansible.builtin.command:
+    argv: [setfacl, -m, "u:{{ ansible_user_id }}:rwx,d:u:{{ ansible_user_id }}:rwx,d:g:www-data:rwx", /var/lib/ocpp-csms/diagnostics]
+  changed_when: false
+- name: Install systemd diagnostic service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnose.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=OCPP diagnostic POST receiver
+      Requires=ocpp-csms-diagnose.socket
+      After=ocpp-csms-diagnose.socket
+      [Service]
+      Type=simple
+      User={{ ansible_user_id }}
+      Group=www-data
+      ExecStart={{ ansible_env.HOME }}/.local/share/ocpp-csms/current/venv/bin/python -m ocpp_csms.diagnose_receiver
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ReadWritePaths=/var/lib/ocpp-csms/diagnostics
+      ProtectHome=read-only
+      MemoryMax=384M
+      TasksMax=32
+- name: Install diagnostic socket unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ocpp-csms-diagnose.socket
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=OCPP diagnostic POST socket
+      [Socket]
+      ListenStream=/run/ocpp-csms-diagnose.sock
+      SocketMode=0660
+      SocketUser=root
+      SocketGroup=www-data
+      RemoveOnStop=true
+      [Install]
+      WantedBy=sockets.target
+- name: Activate receiver socket without restarting CSMS
+  ansible.builtin.systemd_service:
+    name: ocpp-csms-diagnose.socket
+    enabled: true
+    state: started
+    daemon_reload: true
