@@ -20,7 +20,9 @@
     - name: Preflight all appliance runtime packages before CSMS cutover
       become: true
       ansible.builtin.apt:
-        name: "{{ ['python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump', 'acl'] + (['nftables', 'nginx', 'openssl'] if ocpp_eth0.stat.exists else []) }}"
+        name: >-
+          {{ ['python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump', 'acl']
+             + (['nftables', 'nginx', 'openssl'] if ocpp_eth0.stat.exists else []) }}
         state: present
         update_cache: true
         cache_valid_time: 3600
