@@ -84,6 +84,7 @@
       when:
         - ocpp_eth0.stat.exists
         - not (ocpp_csms_stage_only | default(false) | bool)
+        - ocpp_csms_private_diag_probe | default(true) | bool
 
     - name: Configure private diagnostics automatically for connected charger
       ansible.builtin.include_tasks:
@@ -102,6 +103,7 @@
       when:
         - ocpp_eth0.stat.exists
         - not (ocpp_csms_stage_only | default(false) | bool)
+        - ocpp_csms_private_diag_probe | default(true) | bool
         - ocpp_private_diag_ready.rc | default(1) == 0
 
     - name: Report deferred private HTTPS when no charger is connected
@@ -113,4 +115,15 @@
       when:
         - ocpp_eth0.stat.exists
         - not (ocpp_csms_stage_only | default(false) | bool)
+        - ocpp_csms_private_diag_probe | default(true) | bool
         - ocpp_private_diag_ready.rc | default(1) != 0
+
+    - name: Report explicitly skipped live private diagnostics probe
+      ansible.builtin.debug:
+        msg: >-
+          Private diagnostics socket remains installed; live GetConfiguration
+          probing and private HTTPS auto-activation were deliberately skipped.
+      when:
+        - ocpp_eth0.stat.exists
+        - not (ocpp_csms_stage_only | default(false) | bool)
+        - not (ocpp_csms_private_diag_probe | default(true) | bool)

@@ -61,6 +61,7 @@ uninstall=0
 dev=0
 stage_only=0
 diagnostics=0
+private_diag_probe=1
 diagnostics_port=
 
 while [ "$#" -gt 0 ]; do
@@ -76,6 +77,7 @@ while [ "$#" -gt 0 ]; do
         --dev) dev=1; shift ;;
         --stage-only) stage_only=1; shift ;;
         --diagnostics) diagnostics=1; shift ;;
+        --no-private-diag-probe) private_diag_probe=0; shift ;;
         --diagnostics-port)
             [ "$#" -ge 2 ] || { printf 'Missing value for --diagnostics-port.\n' >&2; exit 2; }
             [ -z "$diagnostics_port" ] || { printf 'Duplicate diagnostics port.\n' >&2; exit 2; }
@@ -94,7 +96,7 @@ done
 if [ "$diagnostics" -eq 1 ]; then
     if [ -n "$expose" ] || [ -n "$email" ] || [ "$no_certbot" -eq 1 ] ||
        [ "$uninstall" -eq 1 ] || [ "$dev" -eq 1 ] ||
-       [ "$stage_only" -eq 1 ] || [ "$#" -ne 0 ]; then
+       [ "$stage_only" -eq 1 ] || [ "$private_diag_probe" -eq 0 ] || [ "$#" -ne 0 ]; then
         printf 'Use --diagnostics [--diagnostics-port PORT] (private charger-only receiver).\n' >&2
         exit 2
     fi
@@ -115,6 +117,7 @@ if [ -n "$diagnostics_port" ]; then
 fi
 
 if [ "$uninstall" -eq 1 ]; then
+    [ "$private_diag_probe" -eq 1 ] || { printf "%s\\n" "--no-private-diag-probe is invalid with --uninstall." >&2; exit 2; }
     if [ -n "$expose" ] || [ -n "$email" ] || [ "$no_certbot" -eq 1 ] || [ "$dev" -eq 1 ] || [ "$stage_only" -eq 1 ] || [ "$#" -gt 0 ]; then
         printf '%s\n' '--uninstall must be used alone.' >&2
         exit 2
@@ -193,6 +196,8 @@ fi
 
 if [ "$dev" -eq 1 ]; then set -- -e ocpp_csms_dev=true "$@"; fi
 if [ "$stage_only" -eq 1 ]; then set -- -e ocpp_csms_stage_only=true "$@"; fi
+# The regular receiver still installs; only live charger probing is suppressed.
+if [ "$private_diag_probe" -eq 0 ]; then set -- -e ocpp_csms_private_diag_probe=false "$@"; fi
 
 timing_file=$(mktemp)
 trap 'rm -f "$timing_file"' EXIT HUP INT TERM
