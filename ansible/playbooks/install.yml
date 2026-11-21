@@ -8,11 +8,19 @@
         path: /sys/class/net/eth0
       register: ocpp_eth0
 
+    - name: Detect nginx installed before this field bootstrap
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, nginx]
+      register: ocpp_nginx_preinstalled
+      changed_when: false
+      failed_when: false
+      when: ocpp_eth0.stat.exists
+
     # Package work must complete before CSMS release preparation or handoff.
     - name: Preflight all appliance runtime packages before CSMS cutover
       become: true
       ansible.builtin.apt:
-        name: "{{ ['python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump'] + (['nftables'] if ocpp_eth0.stat.exists else []) }}"
+        name: "{{ ['python3', 'python3-venv', 'python3-pip', 'iproute2', 'tcpdump', 'acl'] + (['nftables', 'nginx', 'openssl'] if ocpp_eth0.stat.exists else []) }}"
         state: present
         update_cache: true
         cache_valid_time: 3600
@@ -21,6 +29,25 @@
       until: ocpp_apt_preflight is succeeded
       retries: 3
       delay: 5
+
+    # nginx's Debian package enables an unrelated wildcard port-80 site.
+    # Remove only on a newly installed field node; preserve existing sites.
+    - name: Disable stock public nginx default site only on fresh field bootstrap
+      become: true
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      register: ocpp_removed_stock_site
+      when:
+        - ocpp_eth0.stat.exists
+        - ocpp_nginx_preinstalled.rc | default(0) != 0
+
+    - name: Reload nginx if stock default HTTP site was disabled
+      become: true
+      ansible.builtin.systemd_service:
+        name: nginx
+        state: reloaded
+      when: ocpp_removed_stock_site.changed | default(false)
 
     - name: Deploy OCPP CSMS
       ansible.builtin.include_role:
@@ -32,3 +59,56 @@
       vars:
         ocpp_discover_interface: eth0
       when: ocpp_eth0.stat.exists
+
+    # A Unix socket is installed by default; no public endpoint is created.
+    - name: Provision diagnostics receiver for every normal installation
+      ansible.builtin.include_role:
+        name: ocpp_diagnostics_receiver
+        apply:
+          become: true
+      when: not (ocpp_csms_stage_only | default(false) | bool)
+
+    # Offline bootstrap must not fail or create an unverified ingress.
+    - name: Check whether a charger-reachable private endpoint is available
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../scripts/private_diagnostics_auto.py"
+          - --cli
+          - "{{ ansible_env.HOME }}/.local/share/ocpp-csms/current/venv/bin/ocpp-csms"
+      register: ocpp_private_diag_ready
+      changed_when: false
+      failed_when: false
+      when:
+        - ocpp_eth0.stat.exists
+        - not (ocpp_csms_stage_only | default(false) | bool)
+
+    - name: Configure private diagnostics automatically for connected charger
+      ansible.builtin.include_tasks:
+        file: ../tasks/private-diagnostics.yml
+        apply:
+          become: true
+      vars:
+        diag_auto: true
+        diag_auto_target: "{{ ocpp_private_diag_ready.stdout | from_json }}"
+        diag_operator: "{{ ansible_user_id }}"
+        diag_home: "{{ ansible_env.HOME }}"
+        diag_dir: /etc/ocpp-csms/diagnostics-private
+        diag_site: /etc/nginx/conf.d/ocpp-csms-private-diagnostics.conf
+        diag_cert_path: "{{ diag_dir }}/{{ diag_ip }}.cert.pem"
+        diag_key_path: "{{ diag_dir }}/{{ diag_ip }}.key.pem"
+      when:
+        - ocpp_eth0.stat.exists
+        - not (ocpp_csms_stage_only | default(false) | bool)
+        - ocpp_private_diag_ready.rc | default(1) == 0
+
+    - name: Report deferred private HTTPS when no charger is connected
+      ansible.builtin.debug:
+        msg: >-
+          Diagnostics receiver installed without exposing a network port.
+          Private HTTPS activation is deferred until the charger is
+          connected; re-run ./deploy.sh to reconcile it.
+      when:
+        - ocpp_eth0.stat.exists
+        - not (ocpp_csms_stage_only | default(false) | bool)
+        - ocpp_private_diag_ready.rc | default(1) != 0
