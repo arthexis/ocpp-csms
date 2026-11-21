@@ -19,6 +19,17 @@
       - (ocpp_expose_auth.stdout | from_json).mode == 'basic'
     fail_msg: Configure auth first with ocpp-csms auth basic --limit 3d.
 
+- name: Verify the running CSMS actively enforces Basic before public exposure
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../scripts/verify_runtime_basic.py"
+      - --port
+      - "{{ ocpp_expose_upstream_port | string }}"
+  changed_when: false
+  # A config file alone is insufficient: if the CSMS wasn't restarted,
+  # its live listener can still accept unauthenticated WebSockets.
+
 - name: Install nginx and Certbot
   become: true
   ansible.builtin.apt:
