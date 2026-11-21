@@ -83,6 +83,17 @@ serves ACME HTTP-01 challenges only. Configure DNS and external firewall rules
 for the desired reachability. Direct WS on port 9000 remains available wherever
 network policy permits it; nginx does not disable direct connections.
 
+Before changing nginx, requesting a certificate, or opening public exposure,
+`--expose` first verifies both the persisted Basic authentication mode and
+the **live CSMS listener**. It sends a single anonymous WebSocket handshake
+to nginx's loopback upstream (default `127.0.0.1:9000`) using a randomized
+non-charger path, and requires HTTP **401** with the CSMS-specific Basic
+challenge. A running process that has not yet loaded new credentials might
+otherwise answer **101 Switching Protocols**; this and any other result
+(including unreachable/timeout) fail closed with no exposure changes.
+The probe never sends credentials or OCPP messages and cannot enroll a charger.
+After `ocpp-csms auth basic`, restart CSMS as shown above before `--expose`.
+
 Use `--no-certbot` only with an already-provisioned compatible certificate.
 Verify `nginx -t`, `certbot renew --dry-run` when applicable, and a full
 authenticated WSS session before commissioning a charger. Separate clients
