@@ -53,3 +53,27 @@ def test_snapshot_rejects_malformed_configuration_rows():
             {"configuration_key": [{"key": "Bad", "readonly": "no", "value": "x"}]},
             charger="charger-a",
         )
+
+
+@pytest.mark.parametrize("vendor_key", [
+    "KEY1", "KEY2", "KEY3", "KEY24", "lPin", "enSoftKey",
+    "EncryptKey", "simuRFID", "SSID", "apSSID", "lUser", "vpnUser",
+    "vpnPsk", "apPwd", "rfidtagfreecharging",
+])
+def test_field_observed_vendor_credentials_never_exported(vendor_key):
+    assert sensitive_configuration_key(vendor_key)
+    result = configuration_snapshot({
+        "configuration_key": [
+            {"key": vendor_key, "readonly": False, "value": "private-field-data"},
+        ], "unknown_key": None,
+    }, charger="field-1")
+    assert result["configuration"][0]["value"] == REDACTED
+    assert "private-field-data" not in repr(result)
+
+
+@pytest.mark.parametrize("ordinary_key", [
+    "HeartbeatInterval", "GetConfigurationMaxKeys",
+    "WebSocketPingInterval", "CertificateStoreMaxLength",
+])
+def test_common_operational_configuration_remains_visible(ordinary_key):
+    assert not sensitive_configuration_key(ordinary_key)
