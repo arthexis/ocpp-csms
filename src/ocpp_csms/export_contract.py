@@ -16,6 +16,7 @@ from ocpp_csms.schema import DATABASE_FILENAME, source_id
 from ocpp_csms.status import appliance_status
 from ocpp_csms.status_contract import status_contract
 from ocpp_csms.charger_ratings import attach_ratings
+from ocpp_csms.config_history import snapshots_for_events
 from ocpp_csms.transactions.contracts import transaction_item
 from ocpp_csms.transactions.query import TransactionQuery
 from ocpp_csms.transactions.export_metadata import transaction_export_metadata
@@ -206,11 +207,12 @@ def export_contract(
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN")
             rows, more = _event_rows(connection, after=after, limit=limit)
+            configurations = snapshots_for_events(connection, rows)
             transactions = _transaction_snapshots(data_dir, rows, connection)
             status = status_contract(appliance_status(data_dir, connection=connection))["data"]
             _attach_status_provenance(connection, status)
     else:
-        rows, more, transactions = [], False, []
+        rows, more, transactions, configurations = [], False, [], []
         status = status_contract(appliance_status(data_dir))["data"]
     # Nominal ratings are operator metadata, not OCPP meter readings. They
     # accompany every export page, including an empty same-cursor refresh.
@@ -224,6 +226,7 @@ def export_contract(
         "events": [event_record(row) for row in rows],
         "energy": _energy_samples(rows),
         "transactions": transactions,
+        "configuration_snapshots": configurations,
         "status": status,
     }
     return json_command_result(data, schema=SCHEMA)
