@@ -64,3 +64,38 @@ def test_malformed_and_unpaired_responses_are_not_misclassified(tmp_path):
     assert [s["source_event_id"] for s in result["configuration_snapshots"]] == [1]
     assert result["configuration_snapshots"][0]["coverage"] == "unknown"
     assert result["cursor"]["next"] == 2
+
+
+def test_real_ocpp_optional_null_arrays_yield_config_and_unknown_only_snapshots(tmp_path):
+    store = EventStore(tmp_path)
+    store.record_ocpp("abb", "GetConfiguration", {}, direction="out")
+    store.record_ocpp("abb", "GetConfiguration", {
+        "configuration_key": [
+            {"key": "HeartbeatInterval", "readonly": False, "value": "300"},
+            {"key": "AuthorizationKey", "readonly": True, "value": "not-for-warehouse"},
+        ], "unknown_key": None,
+    }, direction="in")
+    store.record_ocpp("abb", "GetConfiguration", {"key": ["UnknownVendorKey"]}, direction="out")
+    store.record_ocpp("abb", "GetConfiguration", {
+        "configuration_key": None, "unknown_key": ["UnknownVendorKey"],
+    }, direction="in")
+    items = export_configuration_history(tmp_path)["data"]["configuration_snapshots"]
+    assert [item["source_event_id"] for item in items] == [2, 4]
+    assert [item["coverage"] for item in items] == ["full", "partial"]
+    assert items[0]["unknown"] == []
+    assert items[0]["configuration"][1]["value"] == "[REDACTED]"
+    assert items[1]["configuration"] == []
+    assert items[1]["unknown"] == ["UnknownVendorKey"]
+    assert len(export_contract(tmp_path)["data"]["configuration_snapshots"]) == 2
+
+
+def test_empty_and_malformed_optional_arrays_are_not_published(tmp_path):
+    store = EventStore(tmp_path)
+    for response in (
+        {"configuration_key": None, "unknown_key": None},
+        {"configuration_key": [], "unknown_key": []},
+        {"configuration_key": "invalid", "unknown_key": None},
+        {"configuration_key": None, "unknown_key": "invalid"},
+    ):
+        store.record_ocpp("abb", "GetConfiguration", response, direction="in")
+    assert export_configuration_history(tmp_path)["data"]["configuration_snapshots"] == []

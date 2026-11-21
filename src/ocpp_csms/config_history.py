@@ -52,9 +52,15 @@ def snapshots_for_events(db: sqlite3.Connection, rows: Iterable[sqlite3.Row]) ->
             payload = json.loads(raw or "{}")
         except (ValueError, TypeError):
             continue
-        if not isinstance(payload, dict) or not isinstance(payload.get("configuration_key"), list):
+        # OCPP 1.6 optional arrays may be explicitly null. The existing
+        # config_report normalizer already handles this, but reject malformed
+        # non-null values and responses with no useful configuration evidence.
+        if not isinstance(payload, dict):
             continue
-        if not isinstance(payload.get("unknown_key", []), list):
+        keys, unknown = payload.get("configuration_key"), payload.get("unknown_key")
+        if ((keys is not None and not isinstance(keys, list))
+                or (unknown is not None and not isinstance(unknown, list))
+                or not (keys or unknown)):
             continue
         charger = str(row["charger_id"])
         try:
