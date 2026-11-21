@@ -22,6 +22,10 @@ _SENSITIVE_KEY_FRAGMENTS = (
     "apikey",
     "accesskey",
     "clientsecret",
+    "credential",
+    "privatecredential",
+    "securitykey",
+    "sessionkey",
 )
 
 
