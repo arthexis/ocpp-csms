@@ -52,6 +52,13 @@
 - name: Activate and verify OCPP CSMS handoff
   when: ocpp_csms_activation_required | bool
   block:
+    - name: Withdraw existing provider before switching writer
+      become: true
+      ansible.builtin.file:
+        path: "{{ ocpp_csms_mcp_manifest_path }}"
+        state: absent
+      when: ocpp_csms_mcp_existing.stat.exists | default(false)
+
     # A running Discover process may observe the retiring database. Stop it
     # only for effective schema changes, before the old writer is stopped.
     - name: Check whether Discover is running before schema switch
@@ -289,6 +296,55 @@
         - ocpp_csms_discover_was_active | default(false) | bool
         - ocpp_csms_current_state.stat.islnk | default(false)
         - ocpp_csms_live_service_state.stat.exists | default(false)
+
+    - name: Verify restored writer before restoring provider registration
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.active_storage
+          - --service
+          - "{{ ocpp_csms_service_name }}"
+          - --storage-root
+          - "{{ ocpp_csms_data_dir }}"
+      register: ocpp_csms_mcp_restored_storage
+      changed_when: false
+      until: ocpp_csms_mcp_restored_storage.rc == 0
+      retries: 5
+      delay: 1
+      when: ocpp_csms_mcp_restore_safe | default(false) | bool
+
+    - name: Revalidate recovered writer release and prior provider
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -m
+          - ocpp_csms.mcp_manifest
+          - check-previous
+          - --current
+          - "{{ ocpp_csms_current_link }}"
+          - --data-dir
+          - "{{ ocpp_csms_active_data_dir }}"
+          - --service
+          - "{{ ocpp_csms_service_name }}"
+        stdin: "{{ ocpp_csms_mcp_previous.content | b64decode }}"
+      changed_when: false
+      when:
+        - ocpp_csms_mcp_restore_safe | default(false) | bool
+        - (ocpp_csms_mcp_restored_storage.stdout | from_json).active == ocpp_csms_active_data_dir
+
+    - name: Restore prior provider manifest atomically after safe writer recovery
+      become: true
+      ansible.builtin.copy:
+        content: "{{ ocpp_csms_mcp_previous.content | b64decode }}"
+        dest: "{{ ocpp_csms_mcp_manifest_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+        unsafe_writes: false
+      when:
+        - ocpp_csms_mcp_restore_safe | default(false) | bool
+        - (ocpp_csms_mcp_restored_storage.stdout | from_json).active == ocpp_csms_active_data_dir
 
     - name: Report unsuccessful pre-activation handoff
       ansible.builtin.fail:

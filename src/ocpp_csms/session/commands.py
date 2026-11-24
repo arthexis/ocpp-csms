@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 from ocpp.v16 import call, call_result
 
 
 _DEFAULT_TIMEOUT = object()
+LOGGER = logging.getLogger(__name__)
+
+
+class MissingOCPPResponse(RuntimeError):
+    """No usable CALLRESULT; the peer may have returned CALLERROR."""
 
 
 class SessionCommands:
@@ -32,6 +38,21 @@ class SessionCommands:
             finally:
                 self._response_timeout = previous_timeout
 
+    def _response(self, action: str, response: Any, *, transaction_id: int | None = None) -> None:
+        if response is None:
+            # A suppressed CALLERROR is not an inbound CALLRESULT. Keep runtime
+            # evidence separate from actual OCPP frames.
+            try:
+                self.events.record_runtime("ocpp_response_missing", charger_id=self.id,
+                                           details={"action": action, "transaction_id": transaction_id})
+            except Exception:
+                LOGGER.warning("Could not record missing OCPP response")
+            raise MissingOCPPResponse("no usable OCPP response")
+        if transaction_id is None:
+            self._record(action, dict(response.__dict__), direction="in")
+        else:
+            self._record(action, dict(response.__dict__), direction="in", transaction_id=transaction_id)
+
     async def remote_start(
         self,
         *,
@@ -48,7 +69,7 @@ class SessionCommands:
                 connector_id=connector_id,
             )
         )
-        self._record("RemoteStartTransaction", dict(response.__dict__), direction="in")
+        self._response("RemoteStartTransaction", response)
         return response
 
     async def remote_stop(self, transaction_id: int) -> call_result.RemoteStopTransactionPayload:
@@ -60,19 +81,14 @@ class SessionCommands:
             transaction_id=transaction_id,
         )
         response = await self._call_serialized(call.RemoteStopTransactionPayload(transaction_id=transaction_id))
-        self._record(
-            "RemoteStopTransaction",
-            dict(response.__dict__),
-            direction="in",
-            transaction_id=transaction_id,
-        )
+        self._response("RemoteStopTransaction", response, transaction_id=transaction_id)
         return response
 
     async def reset(self, reset_type: str = "Soft") -> call_result.ResetPayload:
         payload = {"type": reset_type}
         self._record("Reset", payload, direction="out")
         response = await self._call_serialized(call.ResetPayload(type=reset_type))
-        self._record("Reset", dict(response.__dict__), direction="in")
+        self._response("Reset", response)
         return response
 
     async def get_configuration(
@@ -84,7 +100,7 @@ class SessionCommands:
             payload["key"] = list(keys)
         self._record("GetConfiguration", payload, direction="out")
         response = await self._call_serialized(call.GetConfigurationPayload(key=keys))
-        self._record("GetConfiguration", dict(response.__dict__), direction="in")
+        self._response("GetConfiguration", response)
         return response
 
     async def change_configuration(
@@ -95,7 +111,7 @@ class SessionCommands:
         payload = {"key": key, "value": value}
         self._record("ChangeConfiguration", payload, direction="out")
         response = await self._call_serialized(call.ChangeConfigurationPayload(key=key, value=value))
-        self._record("ChangeConfiguration", dict(response.__dict__), direction="in")
+        self._response("ChangeConfiguration", response)
         return response
 
     async def get_local_list_version(self) -> call_result.GetLocalListVersionPayload:
@@ -211,27 +227,27 @@ class SessionCommands:
             payload["connector_id"] = connector_id
         self._record("TriggerMessage", payload, direction="out")
         response = await self._call_serialized(call.TriggerMessagePayload(requested_message=requested_message, connector_id=connector_id))
-        self._record("TriggerMessage", dict(response.__dict__), direction="in")
+        self._response("TriggerMessage", response)
         return response
 
     async def change_availability(self, connector_id: int, availability_type: str) -> call_result.ChangeAvailabilityPayload:
         payload = {"connector_id": connector_id, "type": availability_type}
         self._record("ChangeAvailability", payload, direction="out")
         response = await self._call_serialized(call.ChangeAvailabilityPayload(connector_id=connector_id, type=availability_type))
-        self._record("ChangeAvailability", dict(response.__dict__), direction="in")
+        self._response("ChangeAvailability", response)
         return response
 
     async def unlock_connector(self, connector_id: int) -> call_result.UnlockConnectorPayload:
         payload = {"connector_id": connector_id}
         self._record("UnlockConnector", payload, direction="out")
         response = await self._call_serialized(call.UnlockConnectorPayload(connector_id=connector_id))
-        self._record("UnlockConnector", dict(response.__dict__), direction="in")
+        self._response("UnlockConnector", response)
         return response
 
     async def clear_cache(self) -> call_result.ClearCachePayload:
         self._record("ClearCache", {}, direction="out")
         response = await self._call_serialized(call.ClearCachePayload())
-        self._record("ClearCache", dict(response.__dict__), direction="in")
+        self._response("ClearCache", response)
         return response
 
     async def get_diagnostics(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from .protocols import Session, SessionRegistry
+from ocpp_csms.session.commands import MissingOCPPResponse
 from ._dispatch_support import _response_payload
 from ._dispatch_validation import _configuration_keys, _INVALID, _non_negative_int, _positive_int
 
@@ -63,7 +64,12 @@ async def dispatch_operations(registry: SessionRegistry, session: Session, charg
         if not isinstance(value, str):
             return {"error": "invalid_value"}
         changed = await session.change_configuration(key, value)
-        readback = await session.get_configuration([key])
+        try:
+            readback = await session.get_configuration([key])
+        except MissingOCPPResponse:
+            # Preserve the actual change acknowledgement; never repeat it.
+            return {"ok": True, "response": {"change": _response_payload(changed),
+                                             "readback": None, "readback_error": "missing_ocpp_response"}}
         return {
             "ok": True,
             "response": {
