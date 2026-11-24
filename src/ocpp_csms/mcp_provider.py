@@ -6,7 +6,7 @@ import json
 import sqlite3
 import sys
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -17,20 +17,26 @@ from ocpp_csms.status import appliance_status
 PROTOCOL = "2025-03-26"
 MAX_MESSAGE = 131072
 MAX_ITEMS = 100
+MAX_STATUS_ROWS = 1000
+DEFAULT_PAGE = 20
 
 
 class ToolError(ValueError):
     pass
 
 
-def _tool(name: str, description: str, targeted: bool) -> dict[str, Any]:
+def _tool(name: str, description: str, targeted: bool, *, paged: bool = False) -> dict[str, Any]:
     properties = {"charge_point_id": {"type": "string", "minLength": 1, "maxLength": 256}} if targeted else {}
+    required = list(properties)
+    if paged:
+        properties.update({"limit": {"type": "integer", "minimum": 1, "maximum": MAX_ITEMS, "default": DEFAULT_PAGE},
+                           "before_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}})
     return {
         "name": name,
         "description": description,
         "inputSchema": {
             "type": "object", "properties": properties,
-            "required": list(properties), "additionalProperties": False,
+            "required": required, "additionalProperties": False,
         },
         "annotations": {"readOnlyHint": True, "destructiveHint": False},
     }
@@ -41,25 +47,90 @@ def tools() -> list[dict[str, Any]]:
         _tool("charger_list", "List recorded charge points on this CSMS; no OCPP traffic.", False),
         _tool("charger_status", "Read recorded charger and connector observations; no OCPP traffic.", True),
         _tool("connector_list", "Read recorded connector observations for a charge point; no OCPP traffic.", True),
+        _tool("transaction_list", "List recorded transaction summaries by descending transaction ID, without RFID or payloads.", True, paged=True),
+        _tool("event_list", "List recorded OCPP event metadata by descending evidence ID, without payloads or RFID.", True, paged=True),
     ]
 
 
-def read_status(data_dir: Path) -> dict[str, Any]:
+@contextmanager
+def _evidence(data_dir: Path):
     database = data_dir / DATABASE_FILENAME
     if not database.is_file():
         raise ToolError("evidence_unavailable")
     deadline = time.monotonic() + 3
-    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA query_only=ON")
-        db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
-        if db.execute("PRAGMA user_version").fetchone()[0] != CURRENT_SCHEMA_VERSION:
-            raise ToolError("schema_mismatch")
-        db.execute("BEGIN")
-        result = appliance_status(data_dir, connection=db)
+    try:
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+            # Python 3.10 lacks setlimit; gateway still bounds subprocess time.
+            if hasattr(db, "setlimit"):
+                db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 65536)
+            db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            if db.execute("PRAGMA user_version").fetchone()[0] != CURRENT_SCHEMA_VERSION:
+                raise ToolError("schema_mismatch")
+            db.execute("BEGIN")
+            yield db
+    except (OSError, sqlite3.Error):
+        raise ToolError("evidence_unavailable") from None
+
+
+def _known_ids(db, cp=None):
+    tables = ("events", "runtime_events", "connector_status", "transactions")
+    if cp is not None:
+        return (cp,) if any(db.execute(
+            f"SELECT 1 FROM {table} WHERE charger_id = ? LIMIT 1", (cp,)
+        ).fetchone() for table in tables) else ()
+    query = " UNION ".join(f"SELECT charger_id FROM {table} WHERE charger_id IS NOT NULL AND charger_id != ''" for table in tables)
+    rows = db.execute(query + " ORDER BY charger_id LIMIT ?", (MAX_ITEMS + 1,)).fetchall()
+    if len(rows) > MAX_ITEMS:
+        raise ToolError("result_limit_exceeded")
+    return tuple(row[0] for row in rows)
+
+
+def read_status(data_dir: Path, cp: str | None = None) -> dict[str, Any]:
+    with _evidence(data_dir) as db:
+        ids = _known_ids(db, cp)
+        budget = MAX_STATUS_ROWS
+        for charger_id in ids:
+            for table, condition in (("connector_status", ""), ("transactions", " AND state = 'open'")):
+                count = db.execute(
+                    f"SELECT count(*) FROM (SELECT 1 FROM {table} WHERE charger_id = ?{condition} LIMIT ?)",
+                    (charger_id, budget + 1),
+                ).fetchone()[0]
+                budget -= count
+                if budget < 0:
+                    raise ToolError("result_limit_exceeded")
+        result = appliance_status(data_dir, connection=db, charger_ids=ids, include_rfid=False)
         if result.get("database") != "ok":
             raise ToolError("evidence_unavailable")
         return result
+
+
+def read_page(data_dir: Path, name: str, cp: str, limit: int, before_id: int | None):
+    # Explicit columns only: no payload_json, details_json, id_tag or arbitrary config.
+    if name == "transaction_list":
+        table, key = "transactions", "transaction_id"
+        columns = ("transaction_id", "connector_id", "state", "started_at", "stopped_at",
+                   "start_received_at", "stop_received_at", "last_activity_at")
+    else:
+        table, key = "events", "id"
+        columns = ("id", "received_at", "action", "direction", "transaction_id", "charger_timestamp")
+    where = "charger_id = ?"
+    params = [cp]
+    if before_id is not None:
+        where += f" AND {key} < ?"
+        params.append(before_id)
+    params.append(limit + 1)
+    with _evidence(data_dir) as db:
+        if not _known_ids(db, cp):
+            raise ToolError("charge_point_not_found")
+        rows = db.execute(
+            f"SELECT {', '.join(columns)} FROM {table} WHERE {where} ORDER BY {key} DESC LIMIT ?",
+            params,
+        ).fetchall()
+    page = [dict(row) for row in rows[:limit]]
+    return {"source": "stored_evidence", "charge_point_id": cp,
+            "items": page, "next_before_id": page[-1][key] if len(rows) > limit else None}
 
 
 def _connector(item: Any) -> dict[str, Any]:
@@ -84,19 +155,26 @@ def _charger(item: Any, live: bool) -> dict[str, Any]:
 def invoke(data_dir: Path, name: str, arguments: Any) -> dict[str, Any]:
     if type(arguments) is not dict:
         raise ToolError("invalid_arguments")
+    cp = None
     if name == "charger_list":
         if arguments:
             raise ToolError("invalid_arguments")
-    elif name in {"charger_status", "connector_list"}:
+    elif name in {"charger_status", "connector_list", "transaction_list", "event_list"}:
         cp = arguments.get("charge_point_id")
-        if set(arguments) != {"charge_point_id"} or type(cp) is not str or not 1 <= len(cp) <= 256 or not cp.strip():
+        paged = name in {"transaction_list", "event_list"}
+        allowed = {"charge_point_id", "limit", "before_id"} if paged else {"charge_point_id"}
+        if set(arguments) - allowed or type(cp) is not str or not 1 <= len(cp) <= 256 or not cp.strip():
             raise ToolError("invalid_arguments")
+        if paged:
+            limit = arguments.get("limit", DEFAULT_PAGE)
+            before_id = arguments.get("before_id")
+            if (type(limit) is not int or not 1 <= limit <= MAX_ITEMS
+                    or ("before_id" in arguments and (type(before_id) is not int or not 1 <= before_id <= 9223372036854775807))):
+                raise ToolError("invalid_arguments")
+            return read_page(data_dir, name, cp, limit, before_id)
     else:
         raise ToolError("unknown_tool")
-    try:
-        snapshot = read_status(data_dir)
-    except (OSError, sqlite3.Error):
-        raise ToolError("evidence_unavailable") from None
+    snapshot = read_status(data_dir, cp)
     live = snapshot.get("server") == "running" and bool(snapshot.get("started_at"))
     items = snapshot["chargers"]
     result: dict[str, Any] = {"source": "stored_evidence", "server": snapshot.get("server")}
@@ -128,6 +206,8 @@ def dispatch(data_dir: Path, request: Any) -> dict[str, Any] | None:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request"}}
     if "id" not in request:
         return None
+    if type(request["id"]) not in (int, str) or (isinstance(request["id"], str) and len(request["id"]) > 128):
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request ID"}}
     response: dict[str, Any] = {"jsonrpc": "2.0", "id": request["id"]}
     method = request.get("method")
     params = request.get("params", {})

@@ -9,3 +9,15 @@ Future execute operations must share ocpp_csms.control.send_control and existing
 Stage 1 is not accepted until real database fixtures, stdio subprocess integration, resource limits, redaction, CLI regression and CI are verified. Stage 2 verifies federation and routing, Stage 3 adds execute tools, Stage 4 packages atomic manifest and rollback, Stage 5 validates on simulator and isolated canary. No production deployment is authorized.
 
 References: GWay Remote gway_remote/mcp_source_stdio.py, mcp_source_registry.py, mcp_tool_scope.py, mcp_node_providers.py; CSMS src/ocpp_csms/status.py and control/transport.py.
+
+## Stage 1 and 2 implementation follow-up
+
+The shared appliance_status API now accepts optional explicit charger IDs and an opt-out of RFID policy reads; defaults preserve CLI behavior. MCP selects known IDs in its read-only snapshot before constructing status, limits lists to 100 IDs and total connector/open transaction rows to 1000, limits SQLite values to 64 KiB where Python exposes setlimit, and uses the external stdio deadline as a final bound. Python 3.10 lacks setlimit; acceptance must consider that limitation. No CLI output parsing.
+
+Stage 2 adds transaction_list and event_list as bounded, metadata-only projections of stored evidence. Explicit charge_point_id required, limit 1–100 (default 20), optional exclusive before_id; descending local numeric ID order, not event-time order. next_before_id is null when exhausted. No payload, RFID or free-form diagnostic data. No cross-node transaction ID inference.
+
+### Verified federation source contract
+
+GWay Remote `gway_remote/mcp_federated_catalog.py` and `tests/test_mcp_multinode_federation.py` establish stable routes keyed by authenticated node and provider. With source ID ocpp, gway-001 advertises ocpp__charger_list, gway-002 advertises gway_002_ocpp__charger_list, gway-005 advertises gway_005_ocpp__charger_list and ocpp-abb-1 advertises ocpp_abb_1_ocpp__charger_list (same pattern for all five tools). The gateway derives the route from tool name, rejects duplicate providers and collisions, requires supports_provider_read for read-only dispatch, and never falls back to execute. No node argument, no change to GWay required for this naming/routing. Actual live node enrollment and catalog acceptance remain Stage 5, and manifest lifecycle Stage 4; no manifest is published now.
+
+Hermetic tests cover real EventStore SQLite, CLI contract parity, denial of writes, schema mismatch, bounds, paging, redaction, and stdio subprocess handshake and oversized frames. CI remains the acceptance gate.
