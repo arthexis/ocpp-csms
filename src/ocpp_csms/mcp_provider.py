@@ -1,4 +1,4 @@
-"""Read-only, independently invoked GWay MCP provider (stage 1)."""
+"""Independently invoked GWay MCP provider; execute is opt-in at startup."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,7 @@ from typing import Any
 from ocpp_csms.evidence.store import DATABASE_FILENAME
 from ocpp_csms.schema import CURRENT_SCHEMA_VERSION
 from ocpp_csms.status import appliance_status
+from ocpp_csms import mcp_commands
 
 PROTOCOL = "2025-03-26"
 MAX_MESSAGE = 131072
@@ -42,14 +43,15 @@ def _tool(name: str, description: str, targeted: bool, *, paged: bool = False) -
     }
 
 
-def tools() -> list[dict[str, Any]]:
-    return [
+def tools(*, enable_execute: bool = False) -> list[dict[str, Any]]:
+    result = [
         _tool("charger_list", "List recorded charge points on this CSMS; no OCPP traffic.", False),
         _tool("charger_status", "Read recorded charger and connector observations; no OCPP traffic.", True),
         _tool("connector_list", "Read recorded connector observations for a charge point; no OCPP traffic.", True),
         _tool("transaction_list", "List recorded transaction summaries by descending transaction ID, without RFID or payloads.", True, paged=True),
         _tool("event_list", "List recorded OCPP event metadata by descending evidence ID, without payloads or RFID.", True, paged=True),
     ]
+    return result + mcp_commands.declarations() if enable_execute else result
 
 
 @contextmanager
@@ -152,9 +154,23 @@ def _charger(item: Any, live: bool) -> dict[str, Any]:
     }
 
 
-def invoke(data_dir: Path, name: str, arguments: Any) -> dict[str, Any]:
+def invoke(data_dir: Path, name: str, arguments: Any, *, enable_execute: bool = False) -> dict[str, Any]:
     if type(arguments) is not dict:
         raise ToolError("invalid_arguments")
+    if name in mcp_commands.SPECS:
+        if not enable_execute:
+            raise ToolError("execute_disabled")
+        try:
+            request = mcp_commands.build_request(name, arguments)
+        except mcp_commands.CommandError as exc:
+            raise ToolError(str(exc)) from None
+        if name == "remote_stop":
+            with _evidence(data_dir) as db:
+                row = db.execute("SELECT 1 FROM transactions WHERE transaction_id = ? AND charger_id = ?",
+                                 (request["transaction"], request["charger"])).fetchone()
+                if row is None:
+                    raise ToolError("transaction_target_mismatch")
+        return mcp_commands.execute(data_dir, name, arguments, request)
     cp = None
     if name == "charger_list":
         if arguments:
@@ -201,7 +217,7 @@ def _content(value: dict[str, Any], *, error: bool = False) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(value, allow_nan=False)}], "isError": error}
 
 
-def dispatch(data_dir: Path, request: Any) -> dict[str, Any] | None:
+def dispatch(data_dir: Path, request: Any, *, enable_execute: bool = False) -> dict[str, Any] | None:
     if type(request) is not dict or request.get("jsonrpc") != "2.0":
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request"}}
     if "id" not in request:
@@ -217,12 +233,12 @@ def dispatch(data_dir: Path, request: Any) -> dict[str, Any] | None:
             "serverInfo": {"name": "ocpp-csms-mcp", "version": "0.1.0"},
         }
     elif method == "tools/list":
-        response["result"] = {"tools": tools()}
+        response["result"] = {"tools": tools(enable_execute=enable_execute)}
     elif method == "tools/call":
         try:
             if type(params) is not dict or type(params.get("name")) is not str:
                 raise ToolError("invalid_arguments")
-            response["result"] = _content(invoke(data_dir, params["name"], params.get("arguments", {})))
+            response["result"] = _content(invoke(data_dir, params["name"], params.get("arguments", {}), enable_execute=enable_execute))
         except ToolError as exc:
             response["result"] = _content({"error": str(exc)}, error=True)
     else:
@@ -230,12 +246,26 @@ def dispatch(data_dir: Path, request: Any) -> dict[str, Any] | None:
     return response
 
 
+def _bound_memory() -> None:
+    # Linux node subprocess only, never change the CLI or CSMS process limits.
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    cap = 256 * 1024 * 1024
+    if soft != resource.RLIM_INFINITY:
+        cap = min(cap, soft)
+    if hard != resource.RLIM_INFINITY:
+        cap = min(cap, hard)
+    resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", required=True, type=Path)
+    parser.add_argument("--enable-execute", action="store_true", help="Operator-managed opt-in; GWay still enforces execute scope")
     args = parser.parse_args()
     if not args.data_dir.is_absolute():
         parser.error("--data-dir must be absolute")
+    _bound_memory()
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line:
@@ -244,13 +274,13 @@ def main() -> int:
             return 1
         try:
             request = json.loads(line)
-            response = dispatch(args.data_dir, request)
+            response = dispatch(args.data_dir, request, enable_execute=args.enable_execute)
             if response is None:
                 continue
             encoded = json.dumps(response, allow_nan=False).encode() + b"\n"
             if len(encoded) > MAX_MESSAGE:
                 encoded = json.dumps({"jsonrpc": "2.0", "id": request.get("id"), "result": _content({"error": "result_limit_exceeded"}, error=True)}).encode() + b"\n"
-        except (ValueError, TypeError, RecursionError):
+        except (ValueError, TypeError, RecursionError, MemoryError):
             return 1
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
