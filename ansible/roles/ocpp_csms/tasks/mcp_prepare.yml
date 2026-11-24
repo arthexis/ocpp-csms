@@ -58,6 +58,8 @@
       - "{{ ocpp_csms_current_link }}"
       - --data-dir
       - "{{ ocpp_csms_active_data_dir }}"
+      - --service
+      - "{{ ocpp_csms_service_name }}"
     stdin: "{{ ocpp_csms_mcp_previous.content | b64decode }}"
   register: ocpp_csms_mcp_previous_check
   changed_when: false

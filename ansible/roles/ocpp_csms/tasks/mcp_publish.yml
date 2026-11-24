@@ -25,6 +25,10 @@
       - -m
       - ocpp_csms.mcp_manifest
       - probe
+      - --service
+      - "{{ ocpp_csms_service_name }}"
+      - --executable
+      - "{{ ocpp_csms_mcp_release_command }}"
       - --data-dir
       - "{{ ocpp_csms_service_data_dir }}"
       - --mode

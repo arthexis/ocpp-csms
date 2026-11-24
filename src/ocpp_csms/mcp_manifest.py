@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 
 
@@ -14,11 +15,13 @@ def manifest(executable: str, revision: str, data_dir: str, mode: str) -> dict:
     path = Path(executable)
     data = Path(data_dir)
     if (not path.is_absolute() or str(path) != executable or ".." in path.parts
-            or path.name != "ocpp-csms-mcp" or path.is_symlink()
+            or path.name != "ocpp-csms-mcp" or path.resolve(strict=True) != path
             or not data.is_absolute() or str(data) != data_dir or ".." in data.parts
             or not re.fullmatch(r"[0-9a-f]{40}", revision)
             or mode not in ("read", "execute")):
         raise ValueError("invalid provider registration")
+    if path.parent.parent.parent.name not in (revision[:12], revision[:12] + "-dev"):
+        raise ValueError("release revision mismatch")
     info = path.stat()
     if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or not info.st_mode & 0o111:
         raise ValueError("unsafe provider executable")
@@ -41,6 +44,22 @@ def check_previous(previous: dict, current: Path, data_dir: str) -> None:
     mode = "execute" if previous.get("argv", [])[-1:] == ["--enable-execute"] else "read"
     if previous != manifest(exe, revision, data_dir, mode):
         raise ValueError("previous provider does not match writer")
+
+
+def verify_writer(service: str, executable: Path) -> None:
+    if not re.fullmatch(r"[a-zA-Z0-9_.@-]+\.service", service):
+        raise ValueError("invalid service")
+    def show(key):
+        return subprocess.run(["systemctl", "show", service, "-p", key, "--value"],
+                              check=True, capture_output=True, text=True, timeout=3).stdout.strip()
+    unit = show("ExecStart")
+    expected = str(executable.parent / "ocpp-csms")
+    # systemctl's structured path= field must point to the immutable release.
+    if not re.search(r"(?:^|[ {])path=" + re.escape(expected) + r"(?=[ ;}]|$)", unit):
+        raise ValueError("writer release mismatch")
+    import pwd
+    if show("User") != pwd.getpwuid(os.geteuid()).pw_name:
+        raise ValueError("writer identity mismatch")
 
 
 def probe(data_dir: Path, mode: str) -> None:
@@ -66,8 +85,11 @@ def main():
     prior = subs.add_parser("check-previous")
     prior.add_argument("--current", type=Path, required=True)
     prior.add_argument("--data-dir", required=True)
+    prior.add_argument("--service", required=True)
     verify = subs.add_parser("probe")
     verify.add_argument("--data-dir", type=Path, required=True)
+    verify.add_argument("--service", required=True)
+    verify.add_argument("--executable", type=Path, required=True)
     verify.add_argument("--mode", choices=("read", "execute"), required=True)
     args = parser.parse_args()
     try:
@@ -78,9 +100,11 @@ def main():
             if len(raw) > 8192:
                 raise ValueError("oversized provider manifest")
             check_previous(json.loads(raw), args.current, args.data_dir)
+            verify_writer(args.service, args.current.resolve(strict=True) / "venv/bin/ocpp-csms-mcp")
         else:
+            verify_writer(args.service, args.executable)
             probe(args.data_dir, args.mode)
-    except (OSError, ValueError, RuntimeError, TypeError, AttributeError):
+    except (OSError, ValueError, RuntimeError, TypeError, AttributeError, subprocess.SubprocessError):
         return 1
     return 0
 

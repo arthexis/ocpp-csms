@@ -66,3 +66,22 @@ def test_probe_only_checks_local_fixture(release):
         (data / "control.sock").chmod(0o666)
         with pytest.raises(ValueError):
             probe(data, "execute")
+
+def test_writer_identity_and_release(release, monkeypatch):
+    import os
+    import pwd
+    from types import SimpleNamespace
+    from ocpp_csms import mcp_manifest as module
+    _, exe, _, _ = release
+    writer = exe.parent / "ocpp-csms"
+    user = pwd.getpwuid(os.geteuid()).pw_name
+    values = {"ExecStart": "{ path=" + str(writer) + " ; argv[]=... ; }", "User": user}
+    monkeypatch.setattr(module.subprocess, "run", lambda argv, **kw: SimpleNamespace(stdout=values[argv[-2]]))
+    module.verify_writer("ocpp-csms.service", exe)
+    values["User"] = "not-the-service-user"
+    with pytest.raises(ValueError, match="identity"):
+        module.verify_writer("ocpp-csms.service", exe)
+    values["User"] = user
+    values["ExecStart"] = "{ path=/other/ocpp-csms ; }"
+    with pytest.raises(ValueError, match="release"):
+        module.verify_writer("ocpp-csms.service", exe)
