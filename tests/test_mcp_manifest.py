@@ -33,6 +33,8 @@ def test_exact_gway_v1_contract_and_rollback(release):
     active = manifest(str(exe), revision, str(data), "execute")
     assert active["argv"][-1] == "--enable-execute"
     check_previous(active, current, str(data))
+    with pytest.raises(ValueError, match="exceeds requested policy"):
+        check_previous(active, current, str(data), max_mode="read")
     with pytest.raises(ValueError):
         check_previous(active, current, str(data.parent / "7"))
     with pytest.raises(ValueError):

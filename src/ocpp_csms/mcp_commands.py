@@ -174,6 +174,8 @@ def interpret(name, args, reply):
             result["readback"] = _configuration(payload.get("readback"), args, [args["key"]])
         except (ValueError, TypeError):
             result["readback"] = None
+            result["readback_error"] = ("missing_ocpp_response" if payload.get("readback_error") == "missing_ocpp_response"
+                                        else "readback_unavailable")
     return result
 
 

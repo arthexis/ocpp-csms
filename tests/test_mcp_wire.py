@@ -57,6 +57,7 @@ async def test_remaining_commands_and_missing_callresult(tmp_path):
                 assert result["readback"]["configuration"][0]["value"] == "30"
                 result = await exchange("change_configuration", args, "ChangeConfiguration", payload, {"status": "Accepted"}, second="error")
                 assert result["outcome"] == "acknowledged" and result["readback"] is None
+                assert result["readback_error"] == "missing_ocpp_response"
                 result = await exchange("trigger_message", {"message": "Heartbeat"}, "TriggerMessage", {"requestedMessage": "Heartbeat"}, {}, error=True)
                 assert result["outcome"] == "delivery_unknown" and result["reason"] == "missing_ocpp_response"
                 assert not result["automatic_retry"]

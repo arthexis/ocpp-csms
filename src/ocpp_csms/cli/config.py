@@ -86,10 +86,13 @@ def run_configuration(args: argparse.Namespace) -> int:
     if request["command"] == "config_set":
         change = payload.get("change")
         readback = payload.get("readback")
-        if not isinstance(change, dict) or not isinstance(readback, dict):
+        if not isinstance(change, dict):
             return 1
         status = change.get("status")
         print(status or "Unknown")
+        if not isinstance(readback, dict):
+            print("warning: configuration readback unavailable; verify before repeating the change")
+            return 1
         try:
             print(_format_configuration(readback))
         except ValueError:
