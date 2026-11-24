@@ -69,8 +69,10 @@ PY
 }
 
 if [[ "$action" == reuse ]]; then
+  manifest=/etc/gway-mcp-providers/ocpp.json
+  before_manifest="$(sha256sum "$manifest")"
   fixture prewriter
-  if (cd "$tmp/prewriter" && ./deploy.sh) >"$tmp/prewriter.log" 2>&1; then
+  if (cd "$tmp/prewriter" && ./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=true) >"$tmp/prewriter.log" 2>&1; then
     echo "::error::pre-writer failure unexpectedly passed" >&2; exit 1
   fi
   grep -F CI_PRE_WRITER_FAILURE "$tmp/prewriter.log" >/dev/null || {
@@ -108,12 +110,13 @@ if [[ "$action" == reuse ]]; then
     /usr/local/bin/ocpp-csms status >&2 || true
     exit 1
   }
-  echo "PASS: pre-writer failure restores old unit, release, SQLite and health"
+  test "$(sha256sum "$manifest")" = "$before_manifest"
+  echo "PASS: pre-writer failure restores old unit, release, SQLite, provider manifest and health"
 fi
 
 fixture postwriter
 candidate_id="$(git -C "$tmp/postwriter" rev-parse --short=12 HEAD)"
-if (cd "$tmp/postwriter" && ./deploy.sh) >"$tmp/postwriter.log" 2>&1; then
+if (cd "$tmp/postwriter" && ./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=true) >"$tmp/postwriter.log" 2>&1; then
   echo "::error::post-start injected failure unexpectedly passed" >&2; exit 1
 fi
 grep -F CI_POST_WRITER_FAILURE "$tmp/postwriter.log" >/dev/null || {
@@ -127,4 +130,5 @@ candidate_path="$owner/releases/$candidate_id/venv/bin/ocpp-csms"
 sudo systemctl show ocpp-csms.service -p ExecStart --value | grep -F "$candidate_path"
 test "$(stat -c '%d:%i' "$db")" = "$db_id"
 sudo systemctl is-active --quiet ocpp-csms.service
+test ! -e /etc/gway-mcp-providers/ocpp.json
 echo "PASS ($action): candidate may have written; automatic rollback to old unit is prohibited"

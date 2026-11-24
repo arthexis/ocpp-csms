@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from .protocols import Session, SessionRegistry
+from ocpp_csms.session.commands import MissingOCPPResponse
 from ._dispatch_validation import _INVALID, _configuration_keys, _non_negative_int, _positive_int, _rfid_entries
 from ._dispatch_support import (_response_payload, _resolve_charger, _smart_charging_unsupported, _composite_schedule_response, _list_version, RFID_CONFIGURATION_KEYS, _rfid_configuration, _send_rfid_list)
 from ._dispatch_data import dispatch_data
@@ -49,5 +50,7 @@ async def dispatch_control(registry: SessionRegistry, request: dict[str, Any]) -
         if command in _SMART_COMMANDS:
             return await dispatch_smart(registry, session, charger, command, request)
         return {"error": "unknown_command", "command": command}
+    except MissingOCPPResponse:
+        return {"error": "missing_ocpp_response"}
     except Exception as exc:
         return {"error": "command_failed", "detail": str(exc)}

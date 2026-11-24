@@ -63,12 +63,14 @@ def _connect(database: Path) -> sqlite3.Connection:
     return connection
 
 
-def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | None = None) -> dict[str, Any]:
+def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | None = None,
+                     charger_ids: tuple[str, ...] | None = None,
+                     include_rfid: bool = True) -> dict[str, Any]:
     root = Path(data_dir).expanduser()
     database = root / DATABASE_FILENAME
     transactions = root / "transactions"
     running = process_is_running(root)
-    rfid_authorization = load_rfid_authorization(root)
+    rfid_authorization = load_rfid_authorization(root) if include_rfid else None
     result: dict[str, Any] = {
         "data_dir": str(root),
         "database": "missing",
@@ -81,7 +83,7 @@ def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | N
         "active_chargers": [],
         "rfid_authorization": (
             None
-            if rfid_authorization.allow_all
+            if rfid_authorization is None or rfid_authorization.allow_all
             else {
                 "source": rfid_authorization.source.name if rfid_authorization.source else None,
                 "entries": len(rfid_authorization.entries),
@@ -116,7 +118,13 @@ def appliance_status(data_dir: str | Path, *, connection: sqlite3.Connection | N
     if transactions.exists():
         result["transactions"] = "ok" if transactions.is_dir() else "error"
     if result["database"] == "ok":
-        result["chargers"] = charger_statuses(database, live_since_id=live_since_id, connection=connection)
+        result["chargers"] = (
+            charger_statuses(database, live_since_id=live_since_id, connection=connection)
+            if charger_ids is None else [
+                item for charger_id in charger_ids
+                for item in charger_statuses(database, charger_id, live_since_id=live_since_id, connection=connection)
+            ]
+        )
         result["active_chargers"] = sorted({
             charger.charger_id for charger in result["chargers"]
             if any(

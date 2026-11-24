@@ -98,3 +98,14 @@ def test_config_download_requires_explicit_cp(parse_cli):
     assert _download_charger(parse_cli("config", "download", "--cp", "charger-a")) == "charger-a"
     with pytest.raises(ValueError, match="no positional charger"):
         _download_charger(parse_cli("config", "download", "charger-a"))
+
+
+def test_config_set_reports_acknowledgement_even_if_readback_missing(monkeypatch, parse_cli, capsys):
+    install_response(monkeypatch, {"ok": True, "response": {
+        "change": {"status": "Accepted"}, "readback": None,
+        "readback_error": "missing_ocpp_response",
+    }})
+    assert run_configuration(parse_cli("config", "set", "HeartbeatInterval", "60")) == 1
+    output = capsys.readouterr().out
+    assert "Accepted" in output
+    assert "verify before repeating" in output

@@ -212,6 +212,10 @@ jobs:
         shell: bash
         run: bash tests/deployment/apt_retry_policy.sh
 
+      - name: Verify isolated MCP provider publication and idempotence
+        shell: bash
+        run: bash tests/deployment/mcp_provider_lifecycle.sh
+
       - name: Verify recovery before writer start and forbid rollback after start
         shell: bash
         run: bash tests/deployment/writer_boundary_faults.sh reuse
