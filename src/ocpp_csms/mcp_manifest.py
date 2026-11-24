@@ -34,7 +34,7 @@ def manifest(executable: str, revision: str, data_dir: str, mode: str) -> dict:
     return result
 
 
-def check_previous(previous: dict, current: Path, data_dir: str) -> None:
+def check_previous(previous: dict, current: Path, data_dir: str, max_mode: str = "execute") -> None:
     if type(previous) is not dict or not current.is_symlink():
         raise ValueError("no previous registration")
     exe = str(current.resolve(strict=True) / "venv/bin/ocpp-csms-mcp")
@@ -42,6 +42,8 @@ def check_previous(previous: dict, current: Path, data_dir: str) -> None:
     if not isinstance(revision, str) or current.resolve().name not in (revision[:12], revision[:12] + "-dev"):
         raise ValueError("previous revision mismatch")
     mode = "execute" if previous.get("argv", [])[-1:] == ["--enable-execute"] else "read"
+    if mode == "execute" and max_mode != "execute":
+        raise ValueError("previous execution exceeds requested policy")
     if previous != manifest(exe, revision, data_dir, mode):
         raise ValueError("previous provider does not match writer")
 
@@ -86,6 +88,7 @@ def main():
     prior.add_argument("--current", type=Path, required=True)
     prior.add_argument("--data-dir", required=True)
     prior.add_argument("--service", required=True)
+    prior.add_argument("--max-mode", choices=("read", "execute"), default="execute")
     verify = subs.add_parser("probe")
     verify.add_argument("--data-dir", type=Path, required=True)
     verify.add_argument("--service", required=True)
@@ -99,7 +102,7 @@ def main():
             raw = sys.stdin.read(8193)
             if len(raw) > 8192:
                 raise ValueError("oversized provider manifest")
-            check_previous(json.loads(raw), args.current, args.data_dir)
+            check_previous(json.loads(raw), args.current, args.data_dir, args.max_mode)
             verify_writer(args.service, args.current.resolve(strict=True) / "venv/bin/ocpp-csms-mcp")
         else:
             verify_writer(args.service, args.executable)

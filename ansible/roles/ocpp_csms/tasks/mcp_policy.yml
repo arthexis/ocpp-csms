@@ -1,0 +1,59 @@
+---
+- name: Inspect durable provider policy without following links
+  become: true
+  ansible.builtin.stat:
+    path: "{{ ocpp_csms_mcp_policy_path }}"
+    follow: false
+  register: ocpp_csms_mcp_policy_stat
+
+- name: Reject untrusted provider policy
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_mcp_policy_stat.stat.isreg | default(false)
+      - not (ocpp_csms_mcp_policy_stat.stat.islnk | default(false))
+      - ocpp_csms_mcp_policy_stat.stat.uid == 0
+      - not (ocpp_csms_mcp_policy_stat.stat.wgrp | default(true))
+      - not (ocpp_csms_mcp_policy_stat.stat.woth | default(true))
+      - ocpp_csms_mcp_policy_stat.stat.size <= 1024
+  when: ocpp_csms_mcp_policy_stat.stat.exists | default(false)
+
+- name: Read trusted persisted provider policy
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ ocpp_csms_mcp_policy_path }}"
+  register: ocpp_csms_mcp_policy_bytes
+  when: ocpp_csms_mcp_policy_stat.stat.exists | default(false)
+
+- name: Decode persisted policy or secure default
+  ansible.builtin.set_fact:
+    ocpp_csms_mcp_saved: >-
+      {{ (ocpp_csms_mcp_policy_bytes.content | b64decode | from_json)
+         if ocpp_csms_mcp_policy_stat.stat.exists | default(false)
+         else {'enabled': false, 'execute': false} }}
+
+- name: Validate persisted policy and explicit requests
+  ansible.builtin.assert:
+    that:
+      - ocpp_csms_mcp_saved is mapping
+      - ocpp_csms_mcp_saved.keys() | list | sort == ['enabled', 'execute']
+      - ocpp_csms_mcp_saved.enabled is boolean
+      - ocpp_csms_mcp_saved.execute is boolean
+      - not ocpp_csms_mcp_saved.execute or ocpp_csms_mcp_saved.enabled
+      - ocpp_csms_mcp_enabled is none or ocpp_csms_mcp_enabled | string | lower in ['true', 'false']
+      - ocpp_csms_mcp_execute is none or ocpp_csms_mcp_execute | string | lower in ['true', 'false']
+
+- name: Resolve explicit or persisted registration enablement
+  ansible.builtin.set_fact:
+    ocpp_csms_mcp_effective_enabled: >-
+      {{ ocpp_csms_mcp_saved.enabled if ocpp_csms_mcp_enabled is none else ocpp_csms_mcp_enabled | bool }}
+
+- name: Resolve explicit or persisted execute enablement
+  ansible.builtin.set_fact:
+    ocpp_csms_mcp_effective_execute: >-
+      {{ (ocpp_csms_mcp_execute | bool) if ocpp_csms_mcp_execute is not none
+         else (ocpp_csms_mcp_saved.execute if ocpp_csms_mcp_enabled is none else false) }}
+
+- name: Reject execution without registration
+  ansible.builtin.assert:
+    that:
+      - not (ocpp_csms_mcp_effective_execute | bool) or (ocpp_csms_mcp_effective_enabled | bool)

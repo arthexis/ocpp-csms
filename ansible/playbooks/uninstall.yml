@@ -18,6 +18,12 @@
         path: /etc/gway-mcp-providers/ocpp.json
         state: absent
 
+    - name: Remove CSMS-owned persisted provider policy
+      become: true
+      ansible.builtin.file:
+        path: /etc/ocpp-csms-mcp-policy.json
+        state: absent
+
     - name: Stop and disable OCPP managed services if present
       become: true
       ansible.builtin.command:

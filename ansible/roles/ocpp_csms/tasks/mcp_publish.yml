@@ -32,7 +32,7 @@
       - --data-dir
       - "{{ ocpp_csms_service_data_dir }}"
       - --mode
-      - "{{ 'execute' if ocpp_csms_mcp_execute | bool else 'read' }}"
+      - "{{ 'execute' if ocpp_csms_mcp_effective_execute | bool else 'read' }}"
   changed_when: false
 
 - name: Create protected GWay provider registry if absent

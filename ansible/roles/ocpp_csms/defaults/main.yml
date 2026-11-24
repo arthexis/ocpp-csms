@@ -77,8 +77,9 @@ ocpp_csms_verify_host: "{{ '127.0.0.1' if ocpp_csms_host in ['0.0.0.0', '::'] el
 ocpp_csms_listener_timeout: 10
 
 # Registration is opt-in; the console script ships in every immutable wheel.
-ocpp_csms_mcp_enabled: false
-ocpp_csms_mcp_execute: false
+ocpp_csms_mcp_enabled: null
+ocpp_csms_mcp_execute: null
+ocpp_csms_mcp_policy_path: /etc/ocpp-csms-mcp-policy.json
 ocpp_csms_mcp_manifest_dir: /etc/gway-mcp-providers
 ocpp_csms_mcp_manifest_path: "{{ ocpp_csms_mcp_manifest_dir }}/ocpp.json"
 ocpp_csms_mcp_release_command: "{{ ocpp_csms_release_venv }}/bin/ocpp-csms-mcp"

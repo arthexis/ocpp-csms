@@ -74,13 +74,16 @@
   register: ocpp_csms_release_revision
   changed_when: false
 
+- name: Resolve durable provider policy before release preparation
+  ansible.builtin.include_tasks: mcp_policy.yml
+
 - name: Resolve full provider release revision from controller checkout
   ansible.builtin.command:
     argv: [git, -C, "{{ ocpp_csms_controller_source_dir }}", rev-parse, HEAD]
   delegate_to: localhost
   register: ocpp_csms_mcp_revision
   changed_when: false
-  when: ocpp_csms_mcp_enabled | bool
+  when: ocpp_csms_mcp_effective_enabled | bool
 
 - name: Capture immutable release identifier
   ansible.builtin.set_fact:
@@ -567,4 +570,4 @@
 
 - name: Publish federated provider after verified CSMS activation
   ansible.builtin.include_tasks: mcp_publish.yml
-  when: ocpp_csms_mcp_enabled | bool
+  when: ocpp_csms_mcp_effective_enabled | bool

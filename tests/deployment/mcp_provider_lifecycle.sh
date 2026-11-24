@@ -5,7 +5,9 @@ set -euo pipefail
 manifest=/etc/gway-mcp-providers/ocpp.json
 root="$HOME/.local/share/ocpp-csms"
 pid="$(systemctl show ocpp-csms.service -p MainPID --value)"
+policy=/etc/ocpp-csms-mcp-policy.json
 test ! -e "$manifest"
+test ! -e "$policy"
 ./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=true
 test "$(stat -c '%u:%a' "$manifest")" = '0:644'
 test "$(stat -c '%u:%a' "$(dirname "$manifest")")" = '0:755'
@@ -33,13 +35,22 @@ assert len(results[1]["tools"]) == 5
 assert all(t["annotations"]["readOnlyHint"] is True for t in results[1]["tools"])
 assert results[2]["isError"] and "execute_disabled" in str(results[2])
 PY
+test "$(stat -c '%u:%a' "$policy")" = '0:644'
+policy_hash="$(sha256sum "$policy")"
 before="$(stat -c '%i:%Y:%s' "$manifest")"
 hash="$(sha256sum "$manifest")"
-./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=true
+./deploy.sh --no-private-diag-probe
 test "$(stat -c '%i:%Y:%s' "$manifest")" = "$before"
 test "$(sha256sum "$manifest")" = "$hash"
 test "$(systemctl show ocpp-csms.service -p MainPID --value)" = "$pid"
 ./deploy.sh --stage-only -- -e ocpp_csms_mcp_enabled=false
+test "$(sha256sum "$manifest")" = "$hash"
+test "$(sha256sum "$policy")" = "$policy_hash"
+./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=false
+test ! -e "$manifest"
+./deploy.sh --no-private-diag-probe
+test ! -e "$manifest"
+./deploy.sh --no-private-diag-probe -- -e ocpp_csms_mcp_enabled=true
 test "$(sha256sum "$manifest")" = "$hash"
 echo "PASS: real installed read provider, fixed active storage, no command dispatch, idempotence, staging isolation"
 # Leave the registration for the writer-boundary fault test immediately following.

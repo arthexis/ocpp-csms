@@ -2,7 +2,7 @@
 - name: Require provider execution to imply registration
   ansible.builtin.assert:
     that:
-      - not (ocpp_csms_mcp_execute | bool) or (ocpp_csms_mcp_enabled | bool)
+      - not (ocpp_csms_mcp_effective_execute | bool) or (ocpp_csms_mcp_effective_enabled | bool)
 
 - name: Inspect provider registry directory without following links
   become: true
@@ -60,6 +60,8 @@
       - "{{ ocpp_csms_active_data_dir }}"
       - --service
       - "{{ ocpp_csms_service_name }}"
+      - --max-mode
+      - "{{ 'execute' if ocpp_csms_mcp_effective_execute | bool else 'read' }}"
     stdin: "{{ ocpp_csms_mcp_previous.content | b64decode }}"
   register: ocpp_csms_mcp_previous_check
   changed_when: false
@@ -67,7 +69,7 @@
   when:
     - ocpp_csms_mcp_existing.stat.exists | default(false)
     - ocpp_csms_live_storage_info.active is not none
-    - ocpp_csms_mcp_enabled | bool
+    - ocpp_csms_mcp_effective_enabled | bool
 
 - name: Record prior registration recovery eligibility
   ansible.builtin.set_fact:
@@ -87,16 +89,27 @@
       - --data-dir
       - "{{ ocpp_csms_service_data_dir }}"
       - --mode
-      - "{{ 'execute' if ocpp_csms_mcp_execute | bool else 'read' }}"
+      - "{{ 'execute' if ocpp_csms_mcp_effective_execute | bool else 'read' }}"
   register: ocpp_csms_mcp_candidate
   changed_when: false
-  when: ocpp_csms_mcp_enabled | bool
+  when: ocpp_csms_mcp_effective_enabled | bool
 
-- name: Withdraw provider when registration is disabled
+- name: Withdraw provider when registration is disabled or execute permission is reduced
   become: true
   ansible.builtin.file:
     path: "{{ ocpp_csms_mcp_manifest_path }}"
     state: absent
   when:
-    - not (ocpp_csms_mcp_enabled | bool)
     - ocpp_csms_mcp_existing.stat.exists | default(false)
+    - not (ocpp_csms_mcp_effective_enabled | bool) or not (ocpp_csms_mcp_restore_safe | bool)
+
+- name: Persist explicitly selected provider policy atomically
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ ocpp_csms_mcp_policy_path }}"
+    content: "{{ {'enabled': ocpp_csms_mcp_effective_enabled | bool, 'execute': ocpp_csms_mcp_effective_execute | bool} | to_json }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+    unsafe_writes: false
+  when: ocpp_csms_mcp_enabled is not none or ocpp_csms_mcp_execute is not none
