@@ -146,6 +146,8 @@ def interpret(name, args, reply):
         status = change.get("status") if isinstance(change, dict) else None
     else:
         status = payload.get("status")
+    if type(status) is not str:
+        return _result("delivery_unknown")
     accepted = {"Accepted"}
     rejected = {"Rejected"}
     if name == "unlock_connector":

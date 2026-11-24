@@ -65,6 +65,7 @@ def test_invalid_never_dispatches(tmp_path, monkeypatch, name, args):
     ({"error": "charger_not_connected"}, "not_dispatched"),
     ({"error": "command_failed", "detail": "SECRET"}, "delivery_unknown"),
     ({"ok": True, "response": {"status": "unexpected"}}, "delivery_unknown"),
+    ({"ok": True, "response": {"status": []}}, "delivery_unknown"),
 ])
 def test_single_dispatch_and_outcome(tmp_path, monkeypatch, reply, outcome):
     calls = []
@@ -131,3 +132,20 @@ async def test_real_unix_transport_without_charger(tmp_path):
         reply = await commands.send_once(tmp_path, req)
     assert received == [req]
     assert commands.interpret("reset", CP, reply)["outcome"] == "acknowledged"
+
+
+def test_process_memory_limit():
+    import subprocess
+    import sys
+    code = ("from ocpp_csms.mcp_provider import _bound_memory; "
+            "import resource; _bound_memory(); "
+            "print(resource.getrlimit(resource.RLIMIT_AS)[0])")
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, check=True, timeout=10)
+    assert 0 < int(proc.stdout.strip()) <= 256 * 1024 * 1024
+
+
+def test_missing_socket_returns_uncertainty(tmp_path):
+    result = provider.invoke(tmp_path, "reset", {**CP, "reset_type": "Soft"}, enable_execute=True)
+    assert result["outcome"] == "delivery_unknown"
+    assert result["automatic_retry"] is False
