@@ -133,6 +133,8 @@ def interpret(name, args, reply):
         return _result("delivery_unknown")
     if reply.get("error") in ("charger_not_connected", "no_charger_connected", "charger_required"):
         return _result("not_dispatched", reason="charger_not_connected")
+    if reply.get("error") == "missing_ocpp_response":
+        return _result("delivery_unknown", reason="missing_ocpp_response")
     if reply.get("error") or reply.get("ok") is not True or not isinstance(reply.get("response"), dict):
         return _result("delivery_unknown")
     payload = reply["response"]
