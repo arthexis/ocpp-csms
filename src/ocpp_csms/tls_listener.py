@@ -121,6 +121,7 @@ class TLSListener:
         async with self._lock:
             try:
                 previous = tls_config.read_config(self.config_path)
+                was_listening = self.server is not None
                 if action == "enable":
                     if previous is None:
                         raise ValueError("tls_not_configured")
@@ -141,6 +142,12 @@ class TLSListener:
                     self.error = None
                 else:
                     raise ValueError("unknown_tls_action")
+                if action in ("enable", "disable") and was_listening != (self.server is not None):
+                    try:
+                        from .activity_feed import publish
+                        publish(action)
+                    except Exception:
+                        pass
                 return {"ok": True, "response": self.status()}
             except (ValueError, OSError, ssl.SSLError) as exc:
                 self.error = f"{type(exc).__name__}: {exc}"
