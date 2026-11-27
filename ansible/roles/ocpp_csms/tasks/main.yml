@@ -380,6 +380,76 @@
   changed_when: false
   when: not ocpp_csms_release_ready.stat.exists
 
+# Reports is a separate consumer of the immutable CSMS runtime. Verify
+# the actual consumer identity before any writer handoff, including reuse of
+# an already staged release. No access to TLS, storage or build caches here.
+- name: Detect existing Reports ingestion identity
+  ansible.builtin.command:
+    argv: [getent, passwd, ocpp-reports]
+  register: ocpp_csms_reports_account
+  changed_when: false
+  failed_when: ocpp_csms_reports_account.rc not in [0, 2]
+  no_log: true
+
+- name: Ensure candidate runtime remains readable by Reports
+  when: ocpp_csms_reports_account.rc == 0
+  block:
+    - name: Check candidate runtime as the Reports identity
+      become: true
+      become_user: ocpp-reports
+      ansible.builtin.command:
+        argv:
+          - "{{ ocpp_csms_release_venv }}/bin/python"
+          - -c
+          - >-
+            import ocpp_csms, websockets, subprocess, sys;
+            subprocess.run([sys.argv[1], '--help'], check=True,
+            stdout=subprocess.DEVNULL)
+          - "{{ ocpp_csms_release_command }}"
+      environment:
+        PYTHONDONTWRITEBYTECODE: "1"
+      register: ocpp_csms_reports_runtime_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Repair only candidate runtime access when needed
+      when: ocpp_csms_reports_runtime_probe.rc | default(1) != 0
+      block:
+        # acl is already installed by the appliance package preflight.
+        # A direct role invocation without it must fail closed.
+        # The Reports role already owns home/prefix traversal. Only add
+        # traversal within this release, never change home or TLS permissions.
+        - name: Grant Reports traversal of candidate dependency directories
+          ansible.builtin.command:
+            argv: [setfacl, -m, "u:ocpp-reports:--x", "{{ item }}"]
+          loop:
+            - "{{ ocpp_csms_release_dir }}"
+            - "{{ ocpp_csms_release_dir }}/dependencies"
+            - "{{ ocpp_csms_dependency_dir }}"
+
+        - name: Grant Reports read and traversal of candidate runtime trees
+          ansible.builtin.command:
+            argv: [setfacl, -R, -P, -m, "u:ocpp-reports:rX", "{{ item }}"]
+          loop:
+            - "{{ ocpp_csms_release_venv }}"
+            - "{{ ocpp_csms_dependency_venv }}"
+
+        - name: Require candidate runtime and dependency imports as Reports
+          become: true
+          become_user: ocpp-reports
+          ansible.builtin.command:
+            argv:
+              - "{{ ocpp_csms_release_venv }}/bin/python"
+              - -c
+              - >-
+                import ocpp_csms, websockets, subprocess, sys;
+                subprocess.run([sys.argv[1], '--help'], check=True,
+                stdout=subprocess.DEVNULL)
+              - "{{ ocpp_csms_release_command }}"
+          environment:
+            PYTHONDONTWRITEBYTECODE: "1"
+          changed_when: false
+
 - name: Resolve OCPP CSMS service group
   ansible.builtin.command:
     cmd: id -gn
