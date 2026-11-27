@@ -57,7 +57,7 @@ def test_snapshot_rejects_malformed_configuration_rows():
 
 @pytest.mark.parametrize("vendor_key", [
     "KEY1", "KEY2", "KEY3", "KEY24", "lPin", "enSoftKey",
-    "EncryptKey", "simuRFID", "SSID", "apSSID", "lUser", "vpnUser",
+    "EncryptKey", "lUser", "vpnUser", "SSIDPassword", "apSSIDToken", "simuRFIDPassword", "wPwd",
     "vpnPsk", "apPwd", "rfidtagfreecharging",
 ])
 def test_field_observed_vendor_credentials_never_exported(vendor_key):
@@ -77,3 +77,14 @@ def test_field_observed_vendor_credentials_never_exported(vendor_key):
 ])
 def test_common_operational_configuration_remains_visible(ordinary_key):
     assert not sensitive_configuration_key(ordinary_key)
+
+
+@pytest.mark.parametrize("key", ["SSID", "apSSID", "simuRFID", "sSiD"])
+def test_explicit_configuration_visibility_exceptions(key):
+    assert not sensitive_configuration_key(key)
+    item = configuration_snapshot({"configuration_key": [
+        {"key": key, "readonly": False, "value": "synthetic-operational-value"},
+        {"key": "wPwd", "readonly": False, "value": "synthetic-secret"},
+    ]}, charger="test")
+    assert item["configuration"][0]["value"] == "synthetic-operational-value"
+    assert item["configuration"][1]["value"] == REDACTED
