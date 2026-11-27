@@ -9,7 +9,7 @@ _SENSITIVE_EXACT_KEYS = {
     "tykey",
     # Field-observed vendor credentials: do not export these in Reports.
     "lpin", "simpin", "simcardpin", "pincode", "luser", "vpnuser",
-    "simurfid", "key", "ssid", "apssid",
+    "key",
 }
 _SENSITIVE_KEY_FRAGMENTS = (
     "password",
@@ -41,6 +41,9 @@ def _normalized_key_name(key: str) -> str:
 
 def sensitive_configuration_key(key: str) -> bool:
     normalized = _normalized_key_name(key)
+    # Explicitly visible operational keys; retain the broad secret rules for all others.
+    if normalized in {"ssid", "apssid", "simurfid"}:
+        return False
     return (normalized in _SENSITIVE_EXACT_KEYS
             or (normalized.startswith("key") and normalized[3:].isdigit())
             or any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS))
