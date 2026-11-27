@@ -415,12 +415,8 @@
     - name: Repair only candidate runtime access when needed
       when: ocpp_csms_reports_runtime_probe.rc | default(1) != 0
       block:
-        - name: Ensure ACL utility is available
-          become: true
-          ansible.builtin.apt:
-            name: acl
-            state: present
-
+        # acl is already installed by the appliance package preflight.
+        # A direct role invocation without it must fail closed.
         # The Reports role already owns home/prefix traversal. Only add
         # traversal within this release, never change home or TLS permissions.
         - name: Grant Reports traversal of candidate dependency directories
